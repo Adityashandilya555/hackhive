@@ -112,7 +112,8 @@ class Layers:
     # since a dropped eligible room breaks coverage (slide 3 rule 1)
     unknown_keys: list[str]
     # the drawing-units → metres frame used above, for points that come with the plan (organiser
-    # nodes, #6), so they get exactly the same scale, flip and shift as the geometry
+    # nodes, #6), so they get exactly the same scale, flip and shift as the geometry. It's a
+    # closure, so Layers can't be pickled (e.g. by st.cache_data): cache the Plan instead.
     to_metres: Callable[[np.ndarray], np.ndarray]
 
 
@@ -229,11 +230,31 @@ NODE_CLEARANCE_M = 0.5  # slide 2: node clearance, 0.5 m from walls
 _GAP_EPS_M = 1e-6  # closes float-sized gaps when a folded sliver's union isn't one polygon
 
 
-def _mic(p: Polygon) -> tuple[tuple[float, float], float]:
-    """p's max-clearance point and its distance to p's outline (door gaps count, #46 Q3)."""
-    line = shapely.maximum_inscribed_circle(p)
+def _mic(g: Any) -> tuple[tuple[float, float], float]:
+    """g's max-clearance point and its distance to g's boundary (any parts: the largest circle)."""
+    line = shapely.maximum_inscribed_circle(g)
     x, y = line.coords[0]
     return (float(x), float(y)), float(line.length)
+
+
+def _node_spot(room: Polygon, obstacles: Any) -> tuple[tuple[float, float], float]:
+    """The max-clearance point of the room's free space (the room minus walls and windows) and
+    its clearance, measured to the room outline (door gaps count, #46 Q3) and to those walls.
+
+    ResPlan rooms can run under walls (1293 living_0), so the bare outline isn't enough (slide 2:
+    nodes 0.5 m from walls). A room entirely under walls keeps a node at its own max-clearance
+    point with clearance 0, so it's flagged rather than dropped.
+    """
+    free = room.difference(obstacles)
+    if free.is_empty:
+        return _mic(room)[0], 0.0
+    return _mic(free)
+
+
+def _clearance(room: Polygon, obstacles: Any, xy: tuple[float, float]) -> float:
+    """A given node's distance to its room's free-space edge; 0 if it lies under a wall."""
+    free, p = room.difference(obstacles), Point(xy)
+    return free.boundary.distance(p) if free.covers(p) else 0.0
 
 
 def _one_polygon(g: Any) -> Polygon | None:
@@ -244,16 +265,17 @@ def _one_polygon(g: Any) -> Polygon | None:
 
 
 def _fold_slivers(
-    parts: list[Polygon],
+    parts: list[Polygon], obstacles: Any
 ) -> tuple[dict[int, Polygon], list[tuple[int, int, float]]]:
-    """Fold living parts with no point NODE_CLEARANCE_M from their outline into a neighbour (C38).
+    """Fold living parts with no free-space point NODE_CLEARANCE_M clear into a neighbour (C38).
 
-    Generator only. A sliver folds into the living part it shares the longest boundary with, else
-    into the nearest one. It stays its own room (its node then gets a clearance warning) if no
-    living part has room for a node, or if the union isn't a single polygon. Returns the
-    surviving parts by input index and the folds as (sliver index, receiver index, sliver m²).
+    Generator only, judged on the same free space as the node (`_node_spot`). A sliver folds into
+    the living part it shares the longest boundary with, else into the nearest one. It stays its
+    own room (its node then gets a clearance warning) if no living part has room for a node, or
+    if the union isn't a single polygon. Returns the surviving parts by input index and the
+    folds as (sliver index, receiver index, sliver m²).
     """
-    clear = [_mic(p)[1] >= NODE_CLEARANCE_M for p in parts]
+    clear = [_node_spot(p, obstacles)[1] >= NODE_CLEARANCE_M for p in parts]
     receivers = [i for i, ok in enumerate(clear) if ok]
     kept = dict(enumerate(parts))
     folds = []
@@ -297,10 +319,17 @@ def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, float, float]]
 
 
 def _given_nodes(
-    raw_nodes: Any, rooms: list[Room], to_metres: Callable[[np.ndarray], np.ndarray], pid: Any
+    raw_nodes: Any,
+    rooms: list[Room],
+    to_metres: Callable[[np.ndarray], np.ndarray],
+    obstacles: Any,
+    pid: Any,
 ) -> tuple[list[Node], list[str]]:
     """Organiser nodes, scaled with the plan's frame and assigned to the eligible room that covers
-    them (the lowest R-id on a shared edge). Never moved, merged or dropped (slide 2, C3)."""
+    them (the lowest R-id on a shared edge). Never moved, merged or dropped (slide 2, C3).
+
+    A room with none or several gets a warning: legal (decision_conventions §3), but it likely
+    means our rooms differ from the organisers' (e.g. a repaired room split in two)."""
     pts = _given_points(raw_nodes, pid)
     xy_m = to_metres(np.array([[x, y] for _, x, y in pts], dtype=float).reshape(-1, 2))
     eligible = [r for r in rooms if r.eligible]
@@ -319,7 +348,7 @@ def _given_nodes(
             id=nid or f"N{k}",
             room_id=room.id,
             xy=xy,
-            clearance_m=room.polygon.boundary.distance(Point(xy)),
+            clearance_m=_clearance(room.polygon, obstacles, xy),
             given=True,
         )
         for k, (_, nid, xy, room) in enumerate(placed, start=1)
@@ -327,11 +356,12 @@ def _given_nodes(
     ids = [n.id for n in nodes]
     if len(set(ids)) != len(ids):
         raise ValueError(f"plan {pid}: duplicate node ids {sorted(ids)}")
-    warnings = [
-        f"{r.id} ({r.label}): {k} given nodes in one room (slide 2: one per room)"
-        for r in eligible
-        if (k := sum(n.room_id == r.id for n in nodes)) > 1
-    ]
+    warnings = []
+    for r in eligible:
+        k = sum(n.room_id == r.id for n in nodes)
+        if k != 1:
+            what = "no given node" if k == 0 else f"{k} given nodes in one room"
+            warnings.append(f"{r.id} ({r.label}): {what} (slide 2: one per room)")
     return nodes, warnings
 
 
@@ -341,10 +371,11 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
     Rooms: eligible first (living → bedroom → kitchen → storage, each in polygon order), then the
     excluded ones in `EXCLUDED` order, numbered `R01…` after any sliver folds. `label` is
     `<type>_<i>`, for debug only. Nodes: the organiser's `nodes` when the plan has them
-    (`given=True`, never moved, nothing folded); otherwise one per eligible room at its
-    max-clearance point (`N1…` in room order). Clearance is measured to the room outline, door
-    gaps included (#46 Q3). Raises ValueError naming the plan on unknown geometry keys or on a
-    given node that no eligible room covers.
+    (`given=True`, never moved, nothing folded); otherwise one per eligible room at the
+    max-clearance point of its free space (`N1…` in room order). Clearance is measured to the
+    room outline (door gaps included, #46 Q3) and to any wall or window inside the room. Raises
+    ValueError naming the plan on unknown geometry keys or on a given node that no eligible room
+    covers.
     """
     c = c or Constraints()
     raw = path_or_raw if isinstance(path_or_raw, dict) else read_json(path_or_raw)
@@ -356,10 +387,11 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
         raise ValueError(f"plan {pid}: unknown geometry keys {layers.unknown_keys}")
 
     given = raw.get("nodes") is not None
+    obstacles = shapely.union_all([*layers.wall, *layers.window])  # what nodes keep clear of
     parts = {t: dict(enumerate(layers.rooms[t])) for t in ELIGIBLE + EXCLUDED}
     folds: list[tuple[int, int, float]] = []
     if not given:
-        parts["living"], folds = _fold_slivers(layers.rooms["living"])
+        parts["living"], folds = _fold_slivers(layers.rooms["living"], obstacles)
     ordered = [(t, i, p) for t in ELIGIBLE + EXCLUDED for i, p in sorted(parts[t].items())]
     rooms = [
         Room(
@@ -376,11 +408,11 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
     room_of = {r.id: r for r in rooms}
 
     if given:
-        nodes, warnings = _given_nodes(raw["nodes"], rooms, layers.to_metres, pid)
+        nodes, warnings = _given_nodes(raw["nodes"], rooms, layers.to_metres, obstacles, pid)
     else:
         nodes, warnings = [], []
         for k, r in enumerate((r for r in rooms if r.eligible), start=1):
-            xy, clearance = _mic(r.polygon)
+            xy, clearance = _node_spot(r.polygon, obstacles)
             nodes.append(Node(id=f"N{k}", room_id=r.id, xy=xy, clearance_m=clearance, given=False))
     warnings += [
         f"{room_of[n.room_id].id} ({room_of[n.room_id].label}): node {n.id} clearance "
