@@ -4,7 +4,8 @@
 
 `test_checker_rules.py` regenerates them into a temp folder and checks the committed files
 match. Node points are written out verbatim (as `io.load_plan` places them) so the output is the
-same on every platform; `write()` checks them against `load_plan` first.
+same on every platform; `write()` checks them against `load_plan` first. Reported lengths are rounded to 1 µm and summed with `math.fsum`, so they
+don't depend on the Python version (3.12 changed `sum()` of floats; CI runs 3.11).
 """
 
 from __future__ import annotations
@@ -83,9 +84,14 @@ SYN_NODES = {
 # --------------------------------------------------------------------------- builders
 
 
+def total(lengths) -> float:
+    """A reported length sum, the same on every Python version."""
+    return round(math.fsum(lengths), 6)
+
+
 def leg(a: str, b: str, *points) -> dict:
     pts = [[float(x), float(y)] for x, y in points]
-    return {"from": a, "to": b, "length_m": segment_length(pts), "polyline": pts}
+    return {"from": a, "to": b, "length_m": round(segment_length(pts), 6), "polyline": pts}
 
 
 def hub(hub_id, room_id, loc, rooms, nodes, sequence, legs) -> dict:
@@ -97,7 +103,7 @@ def hub(hub_id, room_id, loc, rooms, nodes, sequence, legs) -> dict:
         "assigned_nodes": list(nodes),
         "closed_sequence": list(sequence),
         "route_segments": list(legs),
-        "ring_length_m": sum(s["length_m"] for s in legs),
+        "ring_length_m": total(s["length_m"] for s in legs),
     }
 
 
@@ -108,7 +114,7 @@ def submission(plan_id: str, *hubs) -> dict:
         "hubs": list(hubs),
         "reported_metrics": {
             "hub_count": len(hubs),
-            "total_length_m": sum(h["ring_length_m"] for h in hubs),
+            "total_length_m": total(h["ring_length_m"] for h in hubs),
         },
     }
 
@@ -119,7 +125,7 @@ def replace_leg(hub_dict: dict, a: str, b: str, new: dict) -> dict:
     h["route_segments"] = [
         new if (s["from"], s["to"]) == (a, b) else s for s in h["route_segments"]
     ]
-    h["ring_length_m"] = sum(s["length_m"] for s in h["route_segments"])
+    h["ring_length_m"] = total(s["length_m"] for s in h["route_segments"])
     return h
 
 
@@ -175,7 +181,7 @@ def _variant(**changes) -> dict:
     s = copy.deepcopy(VALID)
     s["hubs"][0].update(copy.deepcopy(changes))
     h = s["hubs"][0]
-    h["ring_length_m"] = sum(seg["length_m"] for seg in h["route_segments"])
+    h["ring_length_m"] = total(seg["length_m"] for seg in h["route_segments"])
     s["reported_metrics"]["total_length_m"] = h["ring_length_m"]
     return s
 
