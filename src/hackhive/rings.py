@@ -51,8 +51,9 @@ def hub_candidates(zone: Collection[str], plan: Plan, c: Constraints) -> list[Ca
     """Grid cell centres in the zone's rooms where a hub may go.
 
     First choice: >= hub clearance + 1 cm from both the room's whole outline and the wall
-    geometry, and >= 0.10 m from every node point. Only if the zone has none: the same distance from wall geometry instead
-    (open passages and door gaps don't count), tagged ``wall_clearance_only``.
+    geometry, and >= 0.10 m from every node point. Only if the zone has none: the same
+    distance from wall geometry alone (open passages and door gaps don't count), tagged
+    ``wall_clearance_only``.
     """
     clearance = c.hub_wall_clearance_m + HUB_MARGIN_M
     rooms = sorted((r for r in plan.rooms if r.id in zone and r.eligible), key=lambda r: r.id)
