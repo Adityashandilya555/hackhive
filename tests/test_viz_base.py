@@ -116,3 +116,24 @@ def test_cli_writes_the_png(tmp_path):
     out = tmp_path / "nested" / "5924-base.png"
     assert main([str(FIXTURES / "plan-5924.json"), str(out)]) == 0
     assert out.read_bytes()[:8] == PNG_SIGNATURE
+
+
+@pytest.mark.parametrize("plan_id", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_every_room_label_fits_inside_its_room(plan_id):
+    """Labels shrink (or shorten) to stay inside their room's box; ids are never dropped."""
+    plan = load_plan(FIXTURES / f"plan-{plan_id}.json")
+    fig = draw_layers(plan)
+    ax = fig.axes[0]
+    renderer = fig.canvas.get_renderer()
+    rooms = {r.id: r for r in plan.rooms}
+    labels = [t for t in ax.texts if t.get_text() != "Entrance"]
+    drawn = [r for r in plan.rooms if r.type != "land"]
+    assert len(labels) == len(drawn)
+    for text, room in zip(labels, drawn, strict=True):
+        x0, y0, x1, y1 = rooms[room.id].polygon.bounds
+        (dx0, dy0), (dx1, dy1) = ax.transData.transform([(x0, y0), (x1, y1)])
+        box = text.get_window_extent(renderer)
+        assert box.x0 >= dx0 - 1 and box.x1 <= dx1 + 1, (room.id, text.get_text())
+        assert box.y0 >= dy0 - 1 and box.y1 <= dy1 + 1, (room.id, text.get_text())
+        if room.eligible:
+            assert text.get_text().startswith(room.id)
