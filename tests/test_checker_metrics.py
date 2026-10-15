@@ -192,6 +192,12 @@ def test_nan_coordinate_rejected():
         metrics([hub])
 
 
+def test_hub_without_legs():
+    empty = ring((0, 0), [[(0, 0)]]).model_copy(update={"route_segments": []})
+    m = metrics([empty])
+    assert (m.L, m.X, m.O, m.B) == (0, 0, 0, 0)
+
+
 def test_area_gap():
     assert area_gap([70, 60, 40]) == approx(30)
     assert area_gap([70]) == 0.0

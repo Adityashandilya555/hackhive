@@ -340,7 +340,7 @@ def metrics(
         h.hub_id: HubTotals(
             L=per_L[h.hub_id],
             X=sum(h.hub_id in who for _, who in points),
-            O=per_O[h.hub_id],
+            O=per_O.get(h.hub_id, 0.0),  # a hub with no legs owns no pieces
             B=per_B[h.hub_id],
         )
         for h in hubs
