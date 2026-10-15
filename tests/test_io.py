@@ -1,16 +1,35 @@
-"""Acceptance tests for #4: read a ResPlan plan into metric layers (slide 4 scale, C2, C4, C19-C24, C27)."""
+"""Acceptance tests for #4 (read a ResPlan plan into metric layers: slide 4 scale, C2, C4,
+C19-C24, C27) and #6 (the Plan with fixed nodes: `test_nodes_*`, C1-C4, C7, C38, C46, C48)."""
 
 import json
 import math
+import re
 from pathlib import Path
 
 import numpy as np
 import pytest
 import shapely
-from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, box, mapping, shape
+from shapely.geometry import (
+    GeometryCollection,
+    MultiPolygon,
+    Point,
+    Polygon,
+    box,
+    mapping,
+    shape,
+)
 
 from hackhive.contracts import Constraints
-from hackhive.io import ELIGIBLE, EXCLUDED, get_geometries, read_json, read_layers
+from hackhive.io import (
+    ELIGIBLE,
+    EXCLUDED,
+    get_geometries,
+    load_plan,
+    read_json,
+    read_layers,
+    room_by_label,
+)
+from hackhive.io import main as io_main
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXPECTED = json.loads((FIXTURES / "expected.json").read_text(encoding="utf-8"))
@@ -221,3 +240,248 @@ def test_empty_inner_raises():
     raw["inner"] = {"type": "MultiPolygon", "coordinates": []}
     with pytest.raises(ValueError, match="SYN"):
         read_layers(raw)
+
+
+# --------------------------------------------------------------------------- #6: Plan + fixed nodes
+
+ID_RE = re.compile(r"^R\d{2,}$|^N\d+$|^H\d+$")
+# a 5 × 5 m living part plus a 0.3 m-wide part sharing its edge (synthetic: 1 unit = 0.1 m)
+SLIVER = MultiPolygon([box(0, 0, 50, 50), box(50, 0, 53, 30)])
+
+
+def fixture_plan(plan_id):
+    return load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
+
+
+def test_nodes_5924_one_per_eligible_room():
+    """C1, C4: 5 generated nodes, one inside each eligible room, ≥ 0.5 m clear, none in a bathroom."""
+    plan = fixture_plan(5924)
+    rooms = {r.id: r for r in plan.rooms}
+    baths = [r.polygon for r in plan.rooms if r.type == "bathroom"]
+    assert len(plan.nodes) == 5 and baths
+    assert sorted(n.room_id for n in plan.nodes) == sorted(r.id for r in plan.rooms if r.eligible)
+    for n in plan.nodes:
+        assert rooms[n.room_id].eligible and rooms[n.room_id].polygon.covers(Point(n.xy))
+        assert n.clearance_m >= 0.5 and n.given is False
+        assert not any(b.covers(Point(n.xy)) for b in baths)
+    assert plan.warnings == [] and plan.folded_parts == []
+
+
+def test_nodes_576_two_living_parts():
+    """C2: each living polygon is its own room with its own node (576's second part is 1.52 m)."""
+    plan = fixture_plan(576)
+    living = {r.id for r in plan.rooms if r.type == "living"}
+    assert len(plan.nodes) == 8
+    assert len(living) == 2 and sum(n.room_id in living for n in plan.nodes) == 2
+    assert plan.folded_parts == []
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_nodes_fixture_counts_and_ids(plan_id):
+    """C46, C48: n_nodes per fixture; ids are R-, N-style, unique and plan-global; labels aren't."""
+    plan = fixture_plan(plan_id)
+    rooms = {r.id: r for r in plan.rooms}
+    assert plan.plan_id == f"PLAN_{plan_id}"
+    assert len(plan.nodes) == EXPECTED[plan_id]["n_nodes"]
+    assert all(rooms[n.room_id].polygon.covers(Point(n.xy)) for n in plan.nodes)
+    ids = [r.id for r in plan.rooms] + [n.id for n in plan.nodes]
+    assert all(ID_RE.match(i) for i in ids) and len(set(ids)) == len(ids)
+    assert not any(ID_RE.match(r.label) for r in plan.rooms)
+
+
+def test_nodes_5924_ids_in_documented_order():
+    """C46, C48: eligible rooms R01… living → bedroom → kitchen → storage, then excluded; N1… in
+    room order; doors door_<i>, not yet linked to rooms (#9)."""
+    plan = fixture_plan(5924)
+    eligible = [(r.id, r.label) for r in plan.rooms if r.eligible]
+    assert eligible == [
+        ("R01", "living_0"),
+        ("R02", "bedroom_0"),
+        ("R03", "bedroom_1"),
+        ("R04", "bedroom_2"),
+        ("R05", "kitchen_0"),
+    ]
+    assert [r.id for r in plan.rooms if not r.eligible] == ["R06", "R07", "R08", "R09"]
+    assert [(n.id, n.room_id) for n in plan.nodes] == [(f"N{i}", f"R0{i}") for i in range(1, 6)]
+    assert [d.id for d in plan.doors] == [f"door_{i}" for i in range(len(plan.doors))]
+    assert plan.doors and all(d.rooms is None for d in plan.doors) and plan.openings == []
+
+
+def test_nodes_given_are_scaled_never_moved():
+    """C3: organiser nodes (drawing units) go through the same frame as the geometry."""
+    raw = synthetic(bedroom=box(0, 0, 50, 50), kitchen=box(60, 0, 100, 40))
+    raw["nodes"] = [[25, 25], {"x": 80, "y": 20, "id": "N7"}]
+    plan = load_plan(raw)
+    m = plan.m_per_unit
+    assert [n.given for n in plan.nodes] == [True, True]
+    assert plan.nodes[0].xy == (25 * m, 25 * m)  # exact: no flip, no shift
+    assert plan.nodes[1].xy == (80 * m, 20 * m)
+    assert [(n.id, n.room_id) for n in plan.nodes] == [("N1", "R01"), ("N7", "R02")]
+    assert plan.nodes[0].clearance_m == pytest.approx(2.5)
+
+    raw["nodes"] = {"type": "MultiPoint", "coordinates": [[25, 25], [80, 20]]}
+    assert [n.xy for n in load_plan(raw).nodes] == [(25 * m, 25 * m), (80 * m, 20 * m)]
+
+    shifted = load_plan(raw, Constraints(origin_shift=(1.0, 2.0)))
+    assert shifted.nodes[0].xy == pytest.approx((25 * m - 1.0, 25 * m - 2.0))
+    assert shifted.rooms[0].polygon.covers(Point(shifted.nodes[0].xy))
+
+
+def test_nodes_two_given_in_one_room_kept_with_warning():
+    raw = synthetic(bedroom=box(0, 0, 50, 50))
+    raw["nodes"] = [[20, 20], [30, 30]]
+    plan = load_plan(raw)
+    assert [n.room_id for n in plan.nodes] == ["R01", "R01"]
+    assert len(plan.warnings) == 1 and "R01" in plan.warnings[0]
+
+
+def test_nodes_narrow_room_warns():
+    """A2: a 0.6 m-wide room keeps its node at max clearance (≈ 0.3 m) and gets a warning."""
+    plan = load_plan(synthetic(bedroom=box(10, 10, 16, 40)))
+    (node,) = plan.nodes
+    assert plan.rooms[0].polygon.covers(Point(node.xy)) and node.given is False
+    assert node.clearance_m == pytest.approx(0.3, abs=0.01)
+    assert len(plan.warnings) == 1
+    assert all(s in plan.warnings[0] for s in ("R01", "bedroom_0", "N1", "< 0.5 m"))
+
+
+def test_nodes_living_sliver_folded():
+    """C38: a 0.3 m living part (no organiser nodes) folds into the part it shares an edge with."""
+    raw = synthetic(living=SLIVER)
+    plan = load_plan(raw)
+    living = [r for r in plan.rooms if r.type == "living"]
+    assert len(living) == 1 and len(plan.nodes) == 1
+    assert living[0].area_m2 == pytest.approx(25.9)
+    assert sum(r.area_m2 for r in plan.rooms if r.eligible) == pytest.approx(
+        eligible_area(read_layers(raw))
+    )
+    (fold,) = plan.folded_parts
+    assert (fold.room_id, fold.into_room_id) == ("living_1", "R01")
+    assert fold.area_m2 == pytest.approx(0.9)
+    assert plan.warnings == []
+
+
+def test_nodes_lone_sliver_keeps_its_node():
+    """C38: with no living part to fold into, the sliver keeps its node and gets a warning."""
+    plan = load_plan(synthetic(living=box(50, 0, 53, 30)))
+    (node,) = plan.nodes
+    assert plan.folded_parts == [] and node.room_id == "R01"
+    assert node.clearance_m == pytest.approx(0.15, abs=0.01)
+    assert len(plan.warnings) == 1 and "living_0" in plan.warnings[0]
+
+
+def test_nodes_sliver_kept_with_given_nodes():
+    """C38: with organiser nodes nothing is folded, and the node in the sliver is kept."""
+    raw = synthetic(living=SLIVER)
+    raw["nodes"] = [[25, 25], [51.5, 15]]
+    plan = load_plan(raw)
+    assert plan.folded_parts == []
+    assert len([r for r in plan.rooms if r.type == "living"]) == 2
+    assert [n.given for n in plan.nodes] == [True, True]
+    assert plan.nodes[1].xy == pytest.approx((5.15, 1.5))
+
+
+def test_nodes_avoid_a_wall_inside_the_room():
+    """Slide 2 (nodes 0.5 m from walls): ResPlan rooms can run under walls (1293 living_0), so the
+    node and its clearance use the room's free space, not its bare outline (#59 review)."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 60, 40), wall=box(19, 0, 21, 25)))
+    (node,) = plan.nodes
+    assert not plan.walls[0].intersects(Point(node.xy))
+    assert node.clearance_m == pytest.approx(1.95, abs=0.01)
+    assert node.xy == pytest.approx((4.05, 2.0), abs=0.03)
+    assert plan.warnings == []
+
+
+def test_nodes_wall_narrowed_room_warns():
+    """A room roomy by its outline but 0.8 m wide between walls gets the clearance warning."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 30, 40), wall=box(8, 0, 30, 40)))
+    (node,) = plan.nodes
+    assert node.clearance_m == pytest.approx(0.4, abs=0.01)
+    assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
+
+
+def test_nodes_room_under_walls_keeps_a_node():
+    """A room entirely under walls still gets its one node (coverage), flagged with clearance 0."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 30, 30), wall=box(0, 0, 30, 30)))
+    (node,) = plan.nodes
+    assert plan.rooms[0].polygon.covers(Point(node.xy))
+    assert node.clearance_m == 0.0 and len(plan.warnings) == 1
+
+
+def test_nodes_sliver_by_free_space_is_folded():
+    """C38: a living part 1.2 m wide by its outline but 0.3 m wide between walls is a sliver,
+    judged on the same free space as the node."""
+    living = MultiPolygon([box(0, 0, 50, 50), box(50, 0, 62, 30)])
+    plan = load_plan(synthetic(living=living, wall=box(53, 0, 62, 30)))
+    (fold,) = plan.folded_parts
+    assert (fold.room_id, fold.into_room_id) == ("living_1", "R01")
+    assert len(plan.nodes) == 1
+
+
+def test_nodes_given_node_inside_a_wall_is_kept_and_flagged():
+    """Organiser nodes are never moved: one under a wall keeps its point, clearance 0, warning."""
+    raw = synthetic(bedroom=box(0, 0, 60, 40), wall=box(19, 0, 21, 25))
+    raw["nodes"] = [[20, 10]]
+    plan = load_plan(raw)
+    (node,) = plan.nodes
+    assert node.given and node.xy == (20 * plan.m_per_unit, 10 * plan.m_per_unit)
+    assert node.clearance_m == 0.0
+    assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
+
+
+def test_nodes_zero_given_in_a_room_warns():
+    """Legal (decision_conventions §3), but likely a room-set mismatch with the organisers."""
+    raw = synthetic(bedroom=box(0, 0, 50, 50), kitchen=box(60, 0, 100, 40))
+    raw["nodes"] = [[25, 25]]
+    plan = load_plan(raw)
+    assert len(plan.nodes) == 1
+    assert len(plan.warnings) == 1
+    assert all(s in plan.warnings[0] for s in ("R02", "kitchen_0", "no given node"))
+
+
+@pytest.mark.parametrize(
+    "nodes",
+    [
+        [[99, 99]],  # in no eligible room
+        [[70, 10]],  # in the bathroom
+        [[1, 2, 3]],
+        {"type": "Point", "coordinates": [1, 2]},
+        "N1",
+    ],
+)
+def test_nodes_bad_given_nodes_raise(nodes):
+    raw = synthetic(bedroom=box(0, 0, 50, 50), bathroom=box(60, 0, 80, 20))
+    raw["nodes"] = nodes
+    with pytest.raises(ValueError, match="SYN"):
+        load_plan(raw)
+
+
+def test_nodes_unknown_geometry_key_raises():
+    """#4's unknown_keys fail loudly here: a dropped eligible room would break coverage."""
+    with pytest.raises(ValueError, match="SYN.*living_room"):
+        load_plan(synthetic(living_room=box(0, 0, 10, 10)))
+
+
+def test_nodes_plan_id_and_infeasible_reason():
+    raw = synthetic(area=120.0, bedroom=box(0, 0, 100, 100))
+    plan = load_plan(raw)
+    assert plan.plan_id == "PLAN_SYN"
+    assert "room > 100 m²" in plan.warnings
+    raw["plan_id"] = "PLAN_0123"  # an organiser id is used as given
+    assert load_plan(raw).plan_id == "PLAN_0123"
+
+
+def test_nodes_room_by_label_2814():
+    """C46: debug labels resolve to R-style ids; an unknown label names the plan."""
+    plan = fixture_plan(2814)
+    assert re.match(r"^R\d{2,}$", room_by_label(plan, "kitchen_0").id)
+    with pytest.raises(KeyError, match="PLAN_2814"):
+        room_by_label(plan, "nope_9")
+
+
+def test_nodes_facts_cli_5924(capsys):
+    """C7, C19: the facts line, in the issue's "See it" form."""
+    assert io_main([str(FIXTURES / "plans" / "plan-5924.json")]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("5924 · 0.0719 m/unit · ")
+    assert all(piece in out for piece in ("150.0 m²", "5 nodes", "LB 2"))
