@@ -50,7 +50,7 @@ If code and this page disagree, fix whichever is wrong, then update this page in
 | Disconnected eligible graph | zones are found per connected component | C34 | `zoning.py` · fixture 576 |
 | Coverage | every eligible room **and its node** in exactly one hub: none omitted, split or duplicated. A node always goes with its room | slide 3 rule 1; C1/C9 | checker rule 1 |
 | A room without a node in the input | still assigned to exactly one hub (room coverage); there's just no node to visit | slide 3 rule 1 | checker rule 1 |
-| More than 16 eligible rooms in one component | greedy fallback zoning, marked `proof: "greedy"` in the sidecar, instead of no submission; branch-and-bound + paging later (#40) | ADR-001 | `zoning.py` (#49) |
+| More than 16 eligible rooms in one component | greedy fallback zoning, marked `proof: "greedy"` in the sidecar, instead of no submission; branch-and-bound + paging later (#40) ⚠ #46 Q8 | ADR-001 | `zoning.py` (#49) |
 
 ## 4. Hubs
 | Edge case | Decision | Source | Enforced by · test |
