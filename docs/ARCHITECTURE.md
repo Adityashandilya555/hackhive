@@ -4,6 +4,13 @@ For every component, this doc says what it does, the data contract on each edge,
 
 Lead's research notes live in Adi's Obsidian vault (not in this repo); this document summarises them. Board: [HACKHIVE PS4](https://github.com/users/Adityashandilya555/projects/5).
 
+**Docs map:**
+- `docs/decision_conventions.md`: how every edge case is decided;
+- `docs/SPEC_COVERAGE.md`: every organiser requirement → issues → proof;
+- `docs/NOVEL_FEATURES.md`: what we add beyond the spec;
+- `docs/REFERENCES.md`: the reference repos;
+- `docs/output-format.md`: the submission + sidecar format (#34).
+
 ## 1. Overview
 For any unseen floor plan, with no manual step, hackhive:
 1. places **one fixed node per eligible room**;
@@ -51,8 +58,8 @@ For any unseen floor plan, with no manual step, hackhive:
 - **A3** Infeasible plans return reasons.
 - **A4** Crossing = two different rings crossing; overlap = shared run length.
 - **A6** C23's "crossing" means crossing room boundaries.
-- **A7** A hub is ≥ 0.5 m from every node.
-- **A8** Ranking is lexicographic: (hubs, cost rounded to 0.1, zone signature).
+- **A7** ~~A hub is ≥ 0.5 m from every node~~ → superseded by slide 3 rule 6: ≥ 0.5 m from **walls**, and it may share a node's room (C18). We keep it ≥ 0.10 m from node points as a convention.
+- **A8** ~~Ranking (hubs, cost, zone signature)~~ → superseded by slides 3/6: (H, J, area gap); the zone signature remains only as an internal, final tie-break (C16, C47).
 - **A10** Windows are obstacles by default (C37 adds the other reading).
 
 ## 2. Pipeline
@@ -171,7 +178,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - room graph over all rooms;
   - door edges keep the top 2 rooms by contact and store the door ids;
   - open-passage edges come with a region polygon, found by subtracting walls ∪ windows ∪ doors;
-  - no window edges, no fallback edges;
+  - no window edges, no fallback edges, and **the entrance never links rooms** (slide 3 rule 3);
   - `eligible_graph()` view (C34);
   - optional interior-window edges (C37).
 - **In → out:** `Plan` → `nx.Graph` + `Opening` list.
@@ -193,7 +200,8 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   1. every connected room subset within the caps;
   2. every exact cover (all arrangements), per connected component;
   3. the minimum hub count;
-  4. a guard above 16 rooms.
+  4. **hub capability:** a zone needs a room with a point ≥ 0.5 m from walls (slide 3 rule 6). Measured: this never changes the minimum, but 36 sliver plans have no valid design;
+  5. a guard above 16 rooms.
 - **In → out:** `G_elig`, areas, `Constraints` → `Zoning` list.
 - **Algorithm:** a 2ⁿ subset filter + exact-cover recursion on the lowest uncovered room. **Exact.**
   - Measured over all 17,000 ResPlan plans: ≤ 10 rooms, ≤ 92 feasible zones, ≤ 116 zonings, ≤ 16 ms in Python.
@@ -227,9 +235,10 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 
 ### 4.6 `route.py`: bend-aware search, path cache, ring routing
 - **Responsibility:**
-  - `search`: one-to-all Dijkstra over (cell, heading); a turn costs w_bend; no U-turns;
+  - `search`: one-to-all Dijkstra over (cell, heading), with costs in J weights (bend 0.5, overlap 1/m, crossing 5, crossings inside one ring included); no U-turns;
   - `PathCache`: pairwise paths between nodes and hub candidates, once per plan;
-  - `route_rings`: an occupancy penalty + 2 rip-up passes, keeping the best; per-pass snapshots.
+  - `route_rings`: an occupancy penalty + 2 rip-up passes, keeping the lowest J (from the checker mirror); per-pass snapshots;
+  - single-door rooms and one-node rings: same-line retrace vs parallel runs, whichever J prefers (ADR-005 amendment).
 - **In → out:** `LabelGrid`, sources → `PathCache`; rings → `Segment` polylines.
 - **Algorithm:** O(4·cells·log) per source; ≤ 9 rings.
   - The runtime is not measured yet; it is measured in #19. If slow, the fallback order is: ROI → a 20 cm cost grid → numba → closed-form rectangles (#37).
@@ -256,7 +265,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 
 ### 4.7 `rings.py`: hub placement and ring order
 - **Responsibility:**
-  - hub candidates: one per zone room, ≥ 0.5 m from nodes (A7);
+  - hub candidates: points in the zone's rooms ≥ 0.51 m from walls (slide 3 rule 6 + 1 cm margin) and ≥ 0.10 m from node points; a hub may share a node's room;
   - the first-cut ring (Sprint 1);
   - the exact joint choice of hub + order: every node cycle (k!/2 ≤ 60), the hub inserted into each edge, a matrix-cost lower bound, a true routed-cost rescore in LB order, stopping at LB ≥ best;
   - Held-Karp for k ≤ 10 (the ≤ 20 what-if).
@@ -375,7 +384,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 Every edge case is decided in `docs/decision_conventions.md`; the format is documented in `docs/output-format.md` (#34).
 
 ### Testing strategy
-- **The validator is the oracle.** Every issue's acceptance criteria include "validator passes".
+- **The checker mirror is the oracle** (#11 rules, #43 metrics). Slide 7's eight worked examples are unit tests, and every issue's acceptance criteria end in "the checker rules pass" or a pinned metric.
 - **Fixtures** (`tests/fixtures/`): 7 ResPlan plans chosen from a profile of all 17,000.
 
   | Plan | Role |
@@ -391,8 +400,8 @@ Every edge case is decided in `docs/decision_conventions.md`; the format is docu
   Each comes with its expected profile numbers, plus hand-made broken solutions, one per rule.
 - **Test pyramid:**
   - **unit:** synthetic rasters for the router; pure functions per module;
-  - **integration:** `solve()` on the 7 fixtures → validator green + expected hub counts;
-  - **end to end:** the CLI on a fixture file; `hackhive batch` on 20-100 test-split plans.
+  - **integration:** `solve()` on the 7 fixtures → a gated slide-8 submission that passes every checker rule + the expected hub counts;
+  - **end to end:** the CLI on a fixture file; `hackhive batch` on 20-100 test-split plans, which must show **100% valid submissions** for feasible plans.
 - **Property checks:**
   - every segment is axis-aligned;
   - every room change is inside a door/opening;
@@ -404,15 +413,15 @@ Every edge case is decided in `docs/decision_conventions.md`; the format is docu
 | ADR | Decision | Rejected alternatives |
 |---|---|---|
 | 001 | Zoning by exhaustive enumeration of contiguous capped partitions, with a guard above 16 rooms | CP-SAT; HGS / PyVRP / GerryChain local search |
-| 002 | Hub location + ring order chosen jointly and exactly (insertion + lower-bound pruning; Held-Karp at k ≤ 10) | 1-median hub then TSP; hub fixed in `living` |
+| 002 | Hub location + ring order chosen jointly and exactly (insertion + lower-bound pruning; Held-Karp at k ≤ 10). *Amended:* hub ≥ 0.5 m from walls (slide 3 rule 6); cost J | 1-median hub then TSP; hub fixed in `living` |
 | 003 | One bend-aware router on a 10 cm room-label raster; optimise only after measuring | door graph + closed-form L/Z paths (58% of rooms aren't rectangles); visibility graph (any-angle) |
-| 004 | Sequential routing + occupancy penalty + 2 rip-up passes; keep the best | full PathFinder (Backlog) |
-| 005 | Single-door double run = a centreline fold, counted as overlap, drawn as two lanes | routing two physical parallel paths |
+| 004 | Sequential routing + occupancy penalty + 2 rip-up passes; keep the best. *Amended:* penalties use the J weights (crossing 5) | full PathFinder (Backlog) |
+| 005 | Single-door double run. *Amended (slide 7):* same-line retrace (counted as O) or parallel runs (O = 0, more bends), whichever gives the lower J | always folding; always parallel |
 | 006 | ~~Our own JSON; cost with crossing weight 2.0~~ → **superseded by ADR-010** | n/a |
-| 010 | The organisers' contract: the slide-8 submission (keys only) + a sidecar; the checker mirror (six rules + H, L, X, O, B, J at 1 mm, slide-7 tests); rank (H, J, area gap); never submit invalid (gate + fallback) | our own format + exporter; one file with extra keys |
-| 007 | Strict room graph (one node per polygon; doors top 2; openings with geometry; windows never connect by default); the interior-window checkbox (C37); sliver folding in our generator only (C38) | ResPlan `plan_to_graph` semantics |
+| 007 | Strict room graph (one node per polygon; doors top 2; openings with geometry; windows never connect by default); the interior-window checkbox (C37); sliver folding in our generator only (C38). *Amended:* the entrance never links rooms (slide 3 rule 3) | ResPlan `plan_to_graph` semantics |
 | 008 | The ≤ 20 node-cap mode is a Sprint 2 setting (what-if) | Backlog |
 | 009 | Streamlit + matplotlib, no plotly | plotly; React |
+| 010 | The organisers' contract: the slide-8 submission (keys only) + a sidecar; the checker mirror (six rules + H, L, X, O, B, J at 1 mm, slide-7 tests); rank (H, J, area gap); never submit invalid (gate + fallback) | our own format + exporter; one file with extra keys |
 
 ## 6. Frontend
 | Screen | Shows | Solver call | Why it's in scope |
@@ -422,3 +431,85 @@ Every edge case is decided in `docs/decision_conventions.md`; the format is docu
 | Arrangements | gallery of every feasible zoning (H, J, checker ✓) with hub-count / node-cap filters; Pareto (hubs vs J) | `enumerate(plan, c)` → `Arrangement` list | C29, C16: all real arrangements under the PS rules, ranked by the PS ranking |
 | Cap 5 vs 20 | two overlays side by side + a metrics table | `solve(c5)`, `solve(c20)` | C6: the two sources' cap conflict, with cap 20 labelled WHAT-IF |
 | Batch | leaderboard over the test-split sample: validity rate (target 100%), % at LB, mean J and its L / X / O / B parts | reads `batch.csv` from `hackhive batch` | C22: unseen plans, no manual step |
+
+## 7. Organiser spec coverage
+Every requirement on the organisers' 8 slides is mapped to the issues whose acceptance criteria cover it, and to the test that proves it: **50 / 50 covered** (audited from the GitHub issue bodies on 2026-10-15). Full table: `docs/SPEC_COVERAGE.md`.
+
+The core of it:
+- slide 3's six hard rules → `checker.check_rules` (#11);
+- slide 6/7 metrics → `checker.metrics` (#43, the slide-7 examples as tests);
+- "invalid or missing = 0" → the submit gate + fallback (#16, #22, #23);
+- the slide-8 output → `contracts.Submission` (#2, #16);
+- the overlay deliverables → #5, #12, #17;
+- the final-presentation visual → #44.
+
+## 8. Beyond the spec: novel features
+Low-effort features that only display real solver output under the organisers' rules, or labelled what-ifs that are never submitted. Full write-up with the demo script: `docs/NOVEL_FEATURES.md`.
+
+| Feature | Issue |
+|---|---|
+| Arrangements gallery with hub-count and node-cap **filters** | #26 |
+| Optimality badge (proven minimum hubs vs the lower bound + J) | #24 |
+| Live reviewer checklist + violations in red | #12 |
+| Ring step-through | #25 |
+| Pareto view (hubs vs J) | #27 |
+| Cap 5 vs cap 20 side by side | #29 |
+| Batch leaderboard (validity %, % at the lower bound, J) | #33 |
+| Constraint sidebar: locked preset + labelled what-ifs | #7, #30 |
+| Interior-window checkbox | #31 |
+| Presentation export with the J breakdown | #44 |
+
+**Engine features behind them:**
+- the proven-minimum hub count (#13);
+- the strict checker mirror (#11, #43);
+- the never-submit-invalid gate (#16, #22);
+- J-optimal single-door handling (#21);
+- exact hub + ring (#20).
+
+## 9. Issue map
+All 42 issues, in build order. Points: S = 1, M = 2.
+
+| Issue | Title | Component | Checkpoint | Owner | Size |
+|---|---|---|---|---|---|
+| #2 | [S1-01] Land the data contracts, project scaffold and fixtures | contracts / solve / CLI | S1-A | Adityashandilya555 | S |
+| #3 | [S1-02] Write the architecture doc | contracts / solve / CLI | S1-A | Adityashandilya555 | S |
+| #4 | [S1-03] Read a ResPlan plan into metric layers | io / graph | S1-A | nexuszephyr | M |
+| #5 | [S1-04] Draw the plan base layer | viz / app | S1-A | rohit-nandagopal | S |
+| #6 | [S1-05] Build the Plan with fixed nodes and print its facts | io / graph | S1-A | nexuszephyr | S |
+| #7 | [S1-06] Add the Streamlit shell with plan picker and locked Problem-statement preset | viz / app | S1-A | rohit-nandagopal | S |
+| #8 | [S1-07] Implement bend-aware path search on a label raster | grid / route | S1-B | V1702 | M |
+| #9 | [S1-08] Build the strict room graph with open-passage regions | io / graph | S1-B | nexuszephyr | M |
+| #10 | [S1-09] Paint the 10 cm label raster from a Plan | grid / route | S1-B | V1702 | M |
+| #11 | [S1-10] Mirror the organisers' checker: the six hard rules and the reviewer checklist | checker | S1-B | nexuszephyr | M |
+| #12 | [S1-11] Show plan facts, the room graph and the reviewer checklist in the app | viz / app | S1-B | rohit-nandagopal | S |
+| #43 | [S1-07b] Mirror the organisers' metrics: L, X, O, B and J, with slide 7's eight examples as tests | checker | S1-B | V1702 | M |
+| #13 | [S1-12] Enumerate all feasible zonings and the minimum hub count | zoning | S1-C | Adityashandilya555 | M |
+| #14 | [S1-13] Place hubs and order rings (first cut) | rings | S1-C | Adityashandilya555 | S |
+| #15 | [S1-14] Route ordered rings into slide-8 route segments | grid / route | S1-C | V1702 | S |
+| #16 | [S1-15] Wire solve() and the hackhive CLI end to end | contracts / solve / CLI | S1-C | Adityashandilya555 | M |
+| #17 | [S1-16] Draw the full solution overlay and per-hub summary | viz / app | S1-C | rohit-nandagopal | M |
+| #18 | [S1-17] Verify Sprint 1 locally: pull, run, check every See-it line | process | S1-C | rohit-nandagopal | S |
+| #19 | [S2-01] Build the pairwise path cache and measure routing time | grid / route | S2-A | V1702 | M |
+| #20 | [S2-02] Choose hub location and ring order exactly, with lower-bound pruning | rings | S2-A | Adityashandilya555 | M |
+| #21 | [S2-03] Make routing overlap-aware: occupancy penalty and rip-up passes | grid / route | S2-A | V1702 | M |
+| #22 | [S2-04] Rank every arrangement and expose enumerate() | contracts / solve / CLI | S2-A | Adityashandilya555 | S |
+| #23 | [S2-05] Handle infeasible plans and reported values in the gate | checker | S2-A | nexuszephyr | S |
+| #24 | [S2-06] Show the optimality badge | viz / app | S2-A | rohit-nandagopal | S |
+| #25 | [S2-07] Add the ring step-through slider | viz / app | S2-B | rohit-nandagopal | S |
+| #26 | [S2-08] Build the arrangements gallery with hub-count and node-cap filters | viz / app | S2-B | rohit-nandagopal | M |
+| #27 | [S2-09] Add the Pareto view: hub count vs cost J | viz / app | S2-B | V1702 | S |
+| #28 | [S2-10] Add the ≤20 node-cap what-if mode | rings | S2-B | Adityashandilya555 | S |
+| #29 | [S2-11] Show cap 5 vs cap 20 side by side | viz / app | S2-B | rohit-nandagopal | S |
+| #30 | [S2-12] Make constraints editable as labelled what-ifs | viz / app | S2-B | V1702 | S |
+| #31 | [S2-13] Add the interior-window checkbox: treat windows on interior walls as doors (both cases) | io / graph | S2-B | nexuszephyr | S |
+| #32 | [S2-14] Run the batch over the test split and write a CSV report | batch | S2-C | nexuszephyr | M |
+| #33 | [S2-15] Add the batch leaderboard tab | batch | S2-C | nexuszephyr | S |
+| #34 | [S2-16] Document the output format and how to run everything | contracts / solve / CLI | S2-C | nexuszephyr | S |
+| #35 | [S2-17] Verify Sprint 2 locally: pull, run, check every See-it line | process | S2-C | Adityashandilya555 | S |
+| #44 | [S2-16b] Export the final-presentation visual per plan | viz / app | S2-C | rohit-nandagopal | S |
+| #36 | [Backlog] Negotiated-congestion (PathFinder) fallback | grid / route | Backlog | V1702 | M |
+| #37 | [Backlog] Router speed-ups if measured slow | grid / route | Backlog | V1702 | M |
+| #38 | [Backlog] Organiser input adapter, once the input format is published | contracts / solve / CLI | Backlog | Adityashandilya555 | S |
+| #39 | [Backlog] Host the demo | process | Backlog | rohit-nandagopal | S |
+| #40 | [Backlog] Plans over 16 rooms: branch-and-bound minimum and paged arrangements | zoning | Backlog | Adityashandilya555 | S |
+| #41 | [Backlog] Post-hackathon ideas (umbrella) | process | Backlog | Adityashandilya555 | – |
