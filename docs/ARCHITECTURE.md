@@ -337,7 +337,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
     4. ring;
     5. free space;
     6. hub point (an assigned eligible room, ≥ 0.5 m from walls; may share a node's room).
-  - Returns `Violation(rule, severity, hub_id, msg, where)` and never raises; `where` feeds the red overlay.
+  - Returns `Violation(rule, severity, message, ids, hub_id, where)` and never raises; `where` feeds the red overlay.
   - Builds the slide-5 checklist.
   - **The gate (C43):** submit the clean design; else the best strict-only design (`status: submitted_strict_only`); else nothing (`status: infeasible`) (#11, #16, #22, #23).
   - `hackhive check` exits 1 on any `error`, 0 on strict-only (each printed with a `STRICT` prefix), and 2 on strict-only with `--fail-on-strict` (#16).
@@ -413,7 +413,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 - `reported_metrics{hub_count, total_length_m}`.
 - Metres, origin lower-left, y up; ids plan-global.
 
-**Sidecar:** status, violations, bounds (`k_lb`, `k_found`, `proof`), the J breakdown, area gap, settings, provenance, warnings, folded slivers.
+**Sidecar:** status, violations, bounds (`k_lb`, `k_found`, `proof` ∈ exhaustive / lb_met / greedy / none), the J breakdown, per-hub metrics (`hubs[]`: area, nodes, L, X, O, B), area gap, settings, provenance, warnings, folded slivers.
 
 Every edge case is decided in `docs/decision_conventions.md`; the format is documented in `docs/output-format.md` (#34).
 
