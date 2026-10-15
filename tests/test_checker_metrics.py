@@ -130,6 +130,13 @@ def test_divergence_ends_count_strict():
     assert sorted(pts) == [approx((2, 0)), approx((4, 0))]
 
 
+def test_co_routed_corner_is_not_a_divergence():
+    # a single-door retrace that turns a corner: both cables arrive and leave (3, 0) together
+    m = metrics([ring((0, 0), [[(0, 0), (3, 0), (3, 2)], [(3, 2), (3, 0), (0, 0)]])])
+    assert (m.L, m.X, m.O, m.B) == (approx(10), 0, approx(5), 4)
+    assert m.J == approx(17)
+
+
 def test_once_per_point():
     a, b, c = [(0, 2), (4, 2)], [(2, 0), (2, 4)], [(0, 0), (4, 4)]
     assert len(crossing_points([a, b, c], ends(a, b, c))) == 1
