@@ -114,6 +114,18 @@ def _units_bounds(raw: dict):
     return shape(raw["inner"]).bounds
 
 
+def _assert_nodes_fixed_and_inside(raw: dict, plan) -> None:
+    """Slide 2: given nodes never move. A non-identity frame moves the *geometry* into the
+    nodes' frame instead, so every node sits at its given (scaled) point, inside its room."""
+    m = plan.m_per_unit
+    for given in raw["nodes"]:
+        node = next(n for n in plan.nodes if n.id == given["id"])
+        assert node.xy == pytest.approx((given["x"] * m, given["y"] * m), abs=1e-9)
+        room = next(r for r in plan.rooms if r.id == node.room_id)
+        assert room.polygon.covers(Point(node.xy))
+    assert all(plan.inner.covers(Point(n.xy)) for n in plan.nodes)
+
+
 def test_flipped_y_is_detected_and_nodes_land_in_their_rooms():
     raw = _guess()
     _, y0, _, y1 = _units_bounds(raw)
@@ -121,11 +133,10 @@ def test_flipped_y_is_detected_and_nodes_land_in_their_rooms():
         n["y"] = y0 + y1 - n["y"]
     plan = load_plan(raw)
     straight = load_plan(GUESS)
+    assert plan.frame == "flip_y" and straight.frame == "identity"
     assert any("frame: flip_y" in w for w in plan.warnings)
     assert {n.id: n.room_id for n in plan.nodes} == {n.id: n.room_id for n in straight.nodes}
-    for n in plan.nodes:
-        room = next(r for r in plan.rooms if r.id == n.room_id)
-        assert room.polygon.covers(Point(n.xy))
+    _assert_nodes_fixed_and_inside(raw, plan)
 
 
 def test_nodes_relative_to_the_lower_left_corner_are_detected():
@@ -135,10 +146,12 @@ def test_nodes_relative_to_the_lower_left_corner_are_detected():
         n["x"] -= x0
         n["y"] -= y0
     plan = load_plan(raw)
+    assert plan.frame == "origin_shift"
     assert any("frame: origin_shift" in w for w in plan.warnings)
     assert {n.id: n.room_id for n in plan.nodes} == {
         n.id: n.room_id for n in load_plan(GUESS).nodes
     }
+    _assert_nodes_fixed_and_inside(raw, plan)
 
 
 def test_nodes_outside_rooms_under_every_frame_are_an_input_error():
@@ -187,3 +200,30 @@ def test_cli_prints_the_same_facts_for_the_guess():
         return r.stdout.strip().split(" · ", 1)[1]  # drop the id column
 
     assert facts(GUESS) == facts(RESPLAN)
+
+
+def test_identity_frame_is_recorded():
+    assert load_plan(GUESS).frame == "identity"
+    assert load_plan(RESPLAN).frame == "identity"
+
+
+def test_a_node_room_id_is_authoritative():
+    """The organiser's room id for a node wins; geometry only checks it."""
+    raw = _guess()
+    plan = load_plan(raw)
+    assert {n.id: n.room_id for n in plan.nodes} == {g["id"]: g["room_id"] for g in raw["nodes"]}
+
+
+def test_a_node_room_id_that_contradicts_the_geometry_is_an_input_error():
+    raw = _guess()
+    far = next(r["id"] for r in raw["rooms"] if r["id"] != raw["nodes"][0]["room_id"])
+    raw["nodes"][0]["room_id"] = far
+    with pytest.raises(InputFormatError, match=f"{raw['nodes'][0]['id']}.*{far}"):
+        load_plan(raw)
+
+
+def test_a_node_room_id_that_names_no_eligible_room_is_an_input_error():
+    raw = _guess()
+    raw["nodes"][0]["room_id"] = "R99"
+    with pytest.raises(InputFormatError, match="R99"):
+        load_plan(raw)
