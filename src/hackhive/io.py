@@ -79,6 +79,7 @@ def get_geometries(geom_data: Any) -> list[Any]:
 
 ELIGIBLE = ("living", "bedroom", "kitchen", "storage")
 EXCLUDED = ("bathroom", "balcony", "stair", "garden", "pool", "parking", "land")
+_LAYERS = ("inner", "wall", "door", "window", "front_door")
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,9 @@ class Layers:
     m_per_unit: float
     wall_depth_m: float
     infeasible_reasons: list[str]
+    # geometry keys that weren't read (e.g. a misspelt room type); #6 / #38 fail loudly on them,
+    # since a dropped eligible room breaks coverage (slide 3 rule 1)
+    unknown_keys: list[str]
 
 
 def read_json(path: str | Path) -> dict:
@@ -187,4 +191,9 @@ def read_layers(raw: dict, c: Constraints | None = None) -> Layers:
         m_per_unit=m,
         wall_depth_m=wall_depth * m,
         infeasible_reasons=[f"room > {c.max_area_m2:g} m²"] if too_big else [],
+        unknown_keys=[
+            k
+            for k, v in plan.items()
+            if k not in _LAYERS + ELIGIBLE + EXCLUDED and isinstance(v, dict) and "type" in v
+        ],
     )
