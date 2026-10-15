@@ -222,7 +222,7 @@ def test_never_raises_on_malformed_input(label, raw):
     plan = load_plan(plan_path("5088-valid.json"))
     violations = check_rules(plan, sub)
     assert isinstance(violations, list)
-    if label == "negative length_m":
+    if label in ("negative length_m", "zero-length pieces"):  # neither breaks a rule
         assert violations == []
     else:
         assert violations and verdict(violations) == "invalid"
@@ -282,8 +282,12 @@ def _routed_legs(plan):
                 continue
             cell_b, corners_b = snapped[b.id]
             cells = path_to(result, cell_b)
-            assert cells, f"{a.id}→{b.id} unroutable"
-            yield a.id, b.id, [a.xy, corners_a[0], *map(grid.to_xy, cells), corners_b[1], b.xy]
+            if cells:  # 576's living_1 and 2814's kitchen can't be reached from the rest
+                yield a.id, b.id, [a.xy, corners_a[0], *map(grid.to_xy, cells), corners_b[1], b.xy]
+
+
+# routable ordered node pairs per fixture: 148 legs in all
+ROUTED_LEGS = {"5088": 6, "576": 42, "1293": 20, "2814": 6, "3086": 12, "5924": 20, "13344": 42}
 
 
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
@@ -291,11 +295,14 @@ def test_rule_5_accepts_every_routed_leg(plan_id):
     """The checker accepts every door crossing the router makes (door_gap, #60 review)."""
     plan = load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
     c = Constraints()
+    build_graph(plan)  # fills plan.openings, which the free space needs (check_rules does this)
     space = checker._free_space(plan, c)
+    legs = list(_routed_legs(plan))
+    assert len(legs) == ROUTED_LEGS[plan_id]
     flagged = [
         (a, b, v.message)
-        for a, b, legs in _routed_legs(plan)
-        for v in checker._rule5_leg(legs, space, c, "H1", f"{a}→{b}")
+        for a, b, pts in legs
+        for v in checker._rule5_leg(pts, space, c, "H1", f"{a}→{b}")
     ]
     assert flagged == []
 
