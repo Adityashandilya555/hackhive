@@ -179,6 +179,9 @@ def main(argv: list[str] | None = None) -> int:
     """``python -m hackhive.zoning <plan.json>`` → ``min hubs k (LB m) · N zonings``."""
     from hackhive.vault import load_vault  # bridge until #6 (loader) and #9 (graph) land
 
+    for stream in (sys.stdout, sys.stderr):  # "·" and "²" would break cp1252 on Windows
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     p = argparse.ArgumentParser(prog="python -m hackhive.zoning")
     p.add_argument("plan", type=Path)
     args = p.parse_args(argv)
