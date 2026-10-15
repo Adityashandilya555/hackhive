@@ -14,7 +14,7 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import shapely
@@ -25,8 +25,10 @@ from shapely.geometry import (
     MultiPolygon,
     Point,
     Polygon,
+    mapping,
     shape,
 )
+from shapely.geometry.base import BaseGeometry
 
 from hackhive.contracts import (
     AREA_EPS_M2,
@@ -117,8 +119,120 @@ class Layers:
 
 
 def read_json(path: str | Path) -> dict:
-    """One ResPlan plan file. The organiser adapter (#38) plugs in here."""
+    """One plan file, ResPlan- or organiser-shaped; `load_plan` normalises it (#38)."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------- organiser input (#38)
+
+
+class InputFormatError(ValueError):
+    """The input can't be read without guessing. `solve.submit` turns it into sidecar status
+    `input_error` (#16): an unreadable plan gets no submission, never a guessed one."""
+
+
+# The organisers' input format is unknown until their sample arrives (#46 Q1). Every key the
+# adapter reads is named here, so adopting the real format is a change to this table only.
+ORGANISER_KEYS = {
+    "plan_id": "plan_id",  # used verbatim in the output (slide 8)
+    "area": "area",  # m², the scale's other half (slide 4)
+    "wall_depth": "wall_depth",  # drawing units
+    "inner": "inner",  # GeoJSON (Multi)Polygon, drawing units
+    "walls": "walls",
+    "doors": "doors",
+    "windows": "windows",
+    "front_door": "front_door",
+    "rooms": "rooms",  # list of {id, type, polygon}
+    "room_id": "id",
+    "room_type": "type",
+    "room_polygon": "polygon",
+    "nodes": "nodes",  # list of {id, x, y}, drawing units
+    "node_id": "id",
+    "node_x": "x",
+    "node_y": "y",
+}
+_ORGANISER_REQUIRED = ("area", "inner", "wall_depth", "rooms")
+_RESPLAN_REQUIRED = ("area", "inner")
+
+
+def detect_format(raw: Any) -> Literal["resplan", "organiser", "unknown"]:
+    """By key presence: a `rooms` list means the organisers' shape; otherwise ResPlan's layer keys
+    (inner, wall, door, window, front_door) mean ResPlan, whose own checks then name any odd
+    key; otherwise a `nodes` list or a `plan_id` means the organisers' shape."""
+    if not isinstance(raw, dict):
+        return "unknown"
+    k = ORGANISER_KEYS
+    if isinstance(raw.get(k["rooms"]), list):
+        return "organiser"
+    if any(key in raw for key in _LAYERS):
+        return "resplan"
+    if isinstance(raw.get(k["nodes"]), list) or k["plan_id"] in raw:
+        return "organiser"
+    return "unknown"
+
+
+def normalise(raw: Any) -> tuple[dict, dict[str, str] | None]:
+    """Either input shape as a ResPlan-shaped dict, plus the organiser's room ids by label.
+
+    ResPlan input is returned as is (ids None). Organiser input becomes one ResPlan key per room
+    type (polygons in input order, so `<type>_<i>` labels map back to the organiser's ids) and
+    a `nodes` list. Raises InputFormatError on an unknown shape or a missing required key.
+    """
+    fmt = detect_format(raw)
+    if fmt == "unknown":
+        raise InputFormatError(
+            "unknown input format: expected ResPlan keys (inner, area, wall, room types) "
+            f"or an organiser {ORGANISER_KEYS['rooms']!r} / {ORGANISER_KEYS['nodes']!r} list"
+        )
+    if fmt == "resplan":
+        _require(raw, {k: k for k in _RESPLAN_REQUIRED}, raw.get("id"))
+        return raw, None
+
+    k = ORGANISER_KEYS
+    pid = raw.get(k["plan_id"])
+    _require(raw, {name: k[name] for name in _ORGANISER_REQUIRED}, pid)
+    out: dict[str, Any] = {
+        "id": pid,
+        "plan_id": pid,
+        "area": raw[k["area"]],
+        "wall_depth": raw[k["wall_depth"]],
+        "inner": raw[k["inner"]],
+        "wall": raw.get(k["walls"]),
+        "door": raw.get(k["doors"]),
+        "window": raw.get(k["windows"]),
+        "front_door": raw.get(k["front_door"]),
+    }
+    by_type: dict[str, list] = {}
+    ids: dict[str, str] = {}
+    for room in raw[k["rooms"]]:
+        kind, rid, poly = (
+            room.get(k["room_type"]),
+            room.get(k["room_id"]),
+            room.get(k["room_polygon"]),
+        )
+        if kind not in ELIGIBLE + EXCLUDED:
+            raise InputFormatError(f"plan {pid}: room {rid} has unknown type {kind!r}")
+        if rid is None or str(rid) in ids.values():
+            raise InputFormatError(f"plan {pid}: room ids must be present and unique ({rid!r})")
+        parts = _polygons(poly)
+        if len(parts) != 1:
+            raise InputFormatError(f"plan {pid}: room {rid} is not one polygon")
+        ids[f"{kind}_{len(by_type.get(kind, []))}"] = str(rid)
+        by_type.setdefault(kind, []).append(parts[0])
+    for kind, polys in by_type.items():
+        out[kind] = mapping(MultiPolygon(polys))
+    if raw.get(k["nodes"]) is not None:
+        out["nodes"] = [
+            {"id": n.get(k["node_id"]), "x": n.get(k["node_x"]), "y": n.get(k["node_y"])}
+            for n in raw[k["nodes"]]
+        ]
+    return out, ids
+
+
+def _require(raw: dict, keys: dict[str, str], pid: Any) -> None:
+    missing = [name for name, key in keys.items() if raw.get(key) is None]
+    if missing:
+        raise InputFormatError(f"plan {pid}: missing {', '.join(missing)}")
 
 
 def _repaired(g: Polygon) -> list[Polygon]:
@@ -296,22 +410,62 @@ def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, float, float]]
     return out
 
 
+NODE_SNAP_M = 0.10  # a given node this close outside an eligible room is assigned to it (#38)
+
+
+def _pick_frame(
+    xy: np.ndarray, rooms: list[Room], inner: BaseGeometry, pid: Any
+) -> tuple[str, np.ndarray]:
+    """The first of identity, flip_y, origin_shift under which every given node is in an
+    eligible room or <= NODE_SNAP_M from one (#38). Raises InputFormatError if none works."""
+    eligible = [r for r in rooms if r.eligible]
+    x0, y0, _, y1 = inner.bounds
+    flipped = xy.copy()
+    flipped[:, 1] = y0 + y1 - xy[:, 1]
+    frames = (("identity", xy), ("flip_y", flipped), ("origin_shift", xy + [x0, inner.bounds[1]]))
+
+    def misses(pts: np.ndarray) -> list[Point]:
+        out = []
+        for x, y in pts:
+            p = Point(x, y)
+            if not any(r.polygon.distance(p) <= NODE_SNAP_M for r in eligible):
+                out.append(p)
+        return out
+
+    for name, pts in frames:
+        if not misses(pts):
+            return name, pts
+    bad = misses(xy)
+    other = next((r.label for r in rooms if not r.eligible and r.polygon.covers(bad[0])), None)
+    where = f"one lies in the excluded room {other}" if other else "e.g. " + bad[0].wkt
+    raise InputFormatError(f"plan {pid}: frame: {len(bad)} nodes outside rooms ({where})")
+
+
 def _given_nodes(
-    raw_nodes: Any, rooms: list[Room], to_metres: Callable[[np.ndarray], np.ndarray], pid: Any
+    raw_nodes: Any,
+    rooms: list[Room],
+    to_metres: Callable[[np.ndarray], np.ndarray],
+    inner: BaseGeometry,
+    pid: Any,
 ) -> tuple[list[Node], list[str]]:
     """Organiser nodes, scaled with the plan's frame and assigned to the eligible room that covers
-    them (the lowest R-id on a shared edge). Never moved, merged or dropped (slide 2, C3)."""
+    them (the lowest R-id on a shared edge), or to the nearest one if they sit <= 10 cm outside.
+    Never moved, merged or dropped (slide 2, C3; #38 frame check)."""
     pts = _given_points(raw_nodes, pid)
     xy_m = to_metres(np.array([[x, y] for _, x, y in pts], dtype=float).reshape(-1, 2))
+    frame, xy_m = _pick_frame(xy_m, rooms, inner, pid)
     eligible = [r for r in rooms if r.eligible]
     placed = []
+    notes = [] if frame == "identity" else [f"frame: {frame} (given nodes fit the plan only so)"]
     for (nid, x, y), (mx, my) in zip(pts, xy_m, strict=True):
         p = Point(mx, my)
         room = next((r for r in eligible if r.polygon.covers(p)), None)
         if room is None:
-            other = next((r.label for r in rooms if r.polygon.covers(p)), None)
-            where = f"in the excluded room {other}" if other else "outside every eligible room"
-            raise ValueError(f"plan {pid}: given node ({x}, {y}) lies {where}")
+            room = min(eligible, key=lambda r: (r.polygon.distance(p), rooms.index(r)))
+            notes.append(
+                f"given node {nid or (x, y)} is {room.polygon.distance(p) * 100:.1f} cm outside "
+                f"{room.id} ({room.label}): assigned to it, not moved"
+            )
         placed.append((rooms.index(room), nid, (float(mx), float(my)), room))
     placed.sort(key=lambda t: t[0])  # room order, then input order
     nodes = [
@@ -327,7 +481,7 @@ def _given_nodes(
     ids = [n.id for n in nodes]
     if len(set(ids)) != len(ids):
         raise ValueError(f"plan {pid}: duplicate node ids {sorted(ids)}")
-    warnings = [
+    warnings = notes + [
         f"{r.id} ({r.label}): {k} given nodes in one room (slide 2: one per room)"
         for r in eligible
         if (k := sum(n.room_id == r.id for n in nodes)) > 1
@@ -348,6 +502,7 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
     """
     c = c or Constraints()
     raw = path_or_raw if isinstance(path_or_raw, dict) else read_json(path_or_raw)
+    raw, given_ids = normalise(raw)
     layers = read_layers(raw, c)
     pid = raw.get("id")
     if pid is None and raw.get("plan_id") is None:
@@ -361,9 +516,11 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
     if not given:
         parts["living"], folds = _fold_slivers(layers.rooms["living"])
     ordered = [(t, i, p) for t in ELIGIBLE + EXCLUDED for i, p in sorted(parts[t].items())]
+    if given_ids is not None and {f"{t}_{i}" for t, i, _ in ordered} != set(given_ids):
+        raise InputFormatError(f"plan {pid}: a room didn't survive repair as one polygon")
     rooms = [
         Room(
-            id=f"R{n:02d}",
+            id=given_ids[f"{t}_{i}"] if given_ids is not None else f"R{n:02d}",
             label=f"{t}_{i}",
             type=t,
             eligible=t in ELIGIBLE,
@@ -376,7 +533,7 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
     room_of = {r.id: r for r in rooms}
 
     if given:
-        nodes, warnings = _given_nodes(raw["nodes"], rooms, layers.to_metres, pid)
+        nodes, warnings = _given_nodes(raw["nodes"], rooms, layers.to_metres, layers.inner, pid)
     else:
         nodes, warnings = [], []
         for k, r in enumerate((r for r in rooms if r.eligible), start=1):
