@@ -56,11 +56,13 @@
         },
         "grid_m": {
           "default": 0.1,
+          "exclusiveMinimum": 0,
           "title": "Grid M",
           "type": "number"
         },
         "hub_wall_clearance_m": {
           "default": 0.5,
+          "minimum": 0,
           "title": "Hub Wall Clearance M",
           "type": "number"
         },
@@ -71,11 +73,13 @@
         },
         "max_area_m2": {
           "default": 100,
+          "exclusiveMinimum": 0,
           "title": "Max Area M2",
           "type": "number"
         },
         "max_nodes": {
           "default": 5,
+          "exclusiveMinimum": 0,
           "title": "Max Nodes",
           "type": "integer"
         },
@@ -99,6 +103,7 @@
         },
         "tolerance_m": {
           "default": 0.001,
+          "exclusiveMinimum": 0,
           "title": "Tolerance M",
           "type": "number"
         },

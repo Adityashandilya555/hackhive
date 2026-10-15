@@ -144,3 +144,39 @@ def test_fixtures_and_expected():
     assert expected["5924"]["elig_m2"] == pytest.approx(150.0, abs=0.1)
     assert expected["5924"]["lb5"] == 2
     assert expected["13344"]["lb5"] == 2 and expected["13344"]["lb20"] == 1
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"max_area_m2": 0},
+        {"max_area_m2": -10},
+        {"max_nodes": 0},
+        {"grid_m": 0},
+        {"tolerance_m": 0},
+        {"hub_wall_clearance_m": -0.1},
+    ],
+)
+def test_invalid_limits_rejected(bad):
+    with pytest.raises(ValidationError):
+        Constraints(**bad)
+
+
+def test_plan_keeps_obstacles():
+    from shapely.geometry import box
+
+    from hackhive.contracts import Plan
+
+    plan = Plan(
+        plan_id="PLAN_T",
+        m_per_unit=0.05,
+        wall_depth_m=0.2,
+        inner=box(0, 0, 10, 10),
+        rooms=[],
+        walls=[box(0, 0, 10, 0.2)],
+        windows=[box(2, 0, 3, 0.2)],
+        front_doors=[box(5, 0, 6, 0.2)],
+    )
+    assert plan.walls and plan.windows and plan.front_doors
+    with pytest.raises(ValidationError):
+        Plan(plan_id="P", m_per_unit=1, wall_depth_m=0.2, inner=box(0, 0, 1, 1), rooms=[])

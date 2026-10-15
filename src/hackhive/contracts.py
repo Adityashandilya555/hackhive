@@ -39,11 +39,11 @@ class Constraints(BaseModel):
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    max_area_m2: float = 100
-    max_nodes: int = 5
-    hub_wall_clearance_m: float = 0.5
-    tolerance_m: float = 0.001
-    grid_m: float = 0.10
+    max_area_m2: float = Field(100, gt=0)
+    max_nodes: int = Field(5, gt=0)
+    hub_wall_clearance_m: float = Field(0.5, ge=0)
+    tolerance_m: float = Field(0.001, gt=0)
+    grid_m: float = Field(0.10, gt=0)
     flip_y: bool = False
     origin_shift: tuple[float, float] = (0.0, 0.0)
     interior_windows_as_doors: bool = False
@@ -204,6 +204,9 @@ class Plan(_Geo):
     wall_depth_m: float
     inner: Polygon
     rooms: list[Room]
+    walls: list[Polygon]  # obstacles for the grid (#10); doors are cut out of them
+    windows: list[Polygon] = []
+    front_doors: list[Polygon] = []  # the entrance: never a room-to-room passage
     doors: list[Door] = []
     openings: list[Opening] = []
     nodes: list[Node] = []
