@@ -180,3 +180,72 @@ def test_plan_keeps_obstacles():
     assert plan.walls and plan.windows and plan.front_doors
     with pytest.raises(ValidationError):
         Plan(plan_id="P", m_per_unit=1, wall_depth_m=0.2, inner=box(0, 0, 1, 1), rooms=[])
+
+
+# --------------------------------------------------------------------------- review fixes (#53)
+
+
+def test_schema_check_does_not_depend_on_the_locale_encoding():
+    """Windows defaults to cp1252; the schemas contain non-ASCII, so every read/write is UTF-8."""
+    r = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "warn_default_encoding",
+            "-W",
+            "error::EncodingWarning",
+            "-m",
+            "hackhive.contracts",
+            "--check",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_submission_round_trips_with_the_from_key(slide8):
+    """A writer that forgets by_alias=True must still emit slide 8's "from", never "from_"."""
+    sub = Submission.model_validate(slide8)
+    assert json.loads(sub.model_dump_json()) == slide8
+    assert sub.model_dump()["hubs"][0]["route_segments"][0]["from"] == "H1"
+
+
+def test_violation_carries_hub_and_location_for_the_red_overlay():
+    from hackhive.contracts import Violation
+
+    v = Violation(
+        rule=6, severity="error", message="hub 0.3 m from a wall", hub_id="H1", where=[(1.0, 2.0)]
+    )
+    assert v.hub_id == "H1" and v.where == [(1.0, 2.0)]
+    assert Violation(rule=1, severity="strict", message="m").where == []
+
+
+def test_bounds_proof_allows_lb_met():
+    from hackhive.contracts import Bounds
+
+    assert Bounds(k_lb=2, k_found=2, proof="lb_met").proof == "lb_met"
+
+
+def test_sidecar_holds_per_hub_metrics():
+    from hackhive.contracts import HubMetrics, Sidecar
+
+    hm = HubMetrics(hub_id="H1", area_m2=71.0, n_nodes=3, L=23.8, X=0, O=0.0, B=8)
+    sc = Sidecar(plan_id="P", status="ok", hubs=[hm])
+    assert sc.hubs[0].B == 8
+    assert Sidecar(plan_id="P", status="ok").hubs == []
+
+
+@pytest.mark.parametrize(
+    ("area", "nodes", "expected"),
+    [
+        (100.0000000001, 5, 1),  # float noise from summing polygon areas must not add a hub
+        (sum([0.1] * 1000), 1, 1),
+        (100.01, 5, 2),  # a real excess still needs another hub
+        (200.0000000001, 1, 2),
+        (0, 0, 0),
+    ],
+)
+def test_lower_bound_ignores_float_noise(area, nodes, expected):
+    assert lower_bound(area, nodes, Constraints()) == expected
