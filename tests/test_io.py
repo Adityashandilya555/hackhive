@@ -120,6 +120,17 @@ def test_frame_5924():
                 assert np.allclose(g[:, 1], fy(w[:, 1]) * m, rtol=0, atol=1e-9), key
 
 
+def test_origin_shift_is_metres():
+    """origin_shift is subtracted after scaling, in metres (#38 owns the organiser frame check)."""
+    raw = load(5924)
+    base = read_layers(raw)
+    shifted = read_layers(raw, Constraints(origin_shift=(1.0, 2.0)))
+    for a, b in zip(_out_layers(base).values(), _out_layers(shifted).values(), strict=True):
+        for p, q in zip(a, b, strict=True):
+            g = shapely.get_coordinates(q)
+            assert np.allclose(g, shapely.get_coordinates(p) - (1.0, 2.0), rtol=0, atol=1e-9)
+
+
 class _NoNetArea(dict):
     """A plan that fails loudly if anything reads net_area (slide 4)."""
 
