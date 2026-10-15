@@ -312,6 +312,14 @@ def test_a_named_room_the_door_doesnt_reach_is_an_error():
         LabelGrid.from_plan(plan)
 
 
+def test_a_named_room_the_plan_lacks_is_an_error():
+    plan = _graph_plan("5924")
+    door = next(d for d in plan.doors if d.rooms)
+    door.rooms = (door.rooms[0], "no_such_room")
+    with pytest.raises(ValueError, match=f"{door.id}.*no_such_room"):
+        LabelGrid.from_plan(plan)
+
+
 def test_doors_are_painted_over_openings():
     """An opening band next to a door never takes the door's cells (576's living–storage band
     touches door_8's gap): doors are painted last."""

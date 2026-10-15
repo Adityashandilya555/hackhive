@@ -115,6 +115,9 @@ class LabelGrid:
             if not touched:
                 raise ValueError(f"{plan.plan_id}: {pid} touches no room")
             if named is not None:
+                unknown = [r for r in named if r not in index]
+                if unknown:
+                    raise ValueError(f"{plan.plan_id}: {pid} names unknown room {unknown[0]}")
                 pair = (index[named[0]], index[named[1]])
                 missing = [r for r in pair if r not in touched]
                 if not missing:
