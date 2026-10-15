@@ -160,6 +160,15 @@ def test_fixture_eligible_area_and_count(plan_id):
     assert sum(len(layers.rooms[t]) for t in ELIGIBLE) == EXPECTED[plan_id]["n_nodes"]
 
 
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_fixture_every_output_polygon_valid(plan_id):
+    """C20: valid after scaling too (rounding can make a valid input self-intersect: 1293, 13344)."""
+    layers = read_layers(load(plan_id))
+    for key, polys in _out_layers(layers).items():
+        for i, p in enumerate(polys):
+            assert p.is_valid and not p.is_empty, f"{key}[{i}]"
+
+
 def test_missing_keys_are_empty_layers():
     layers = read_layers(load(5924))
     assert set(layers.rooms) == set(ELIGIBLE + EXCLUDED)
@@ -181,6 +190,18 @@ def test_bad_area_raises(area):
         del raw["area"]
     else:
         raw["area"] = area
+    with pytest.raises(ValueError, match="SYN"):
+        read_layers(raw)
+
+
+@pytest.mark.parametrize("wall_depth", [0, -1, math.nan, None])
+def test_bad_wall_depth_raises(wall_depth):
+    """The organiser format may lack wall_depth (#46 Q1): fail loudly, naming the plan."""
+    raw = synthetic()
+    if wall_depth is None:
+        del raw["wall_depth"]
+    else:
+        raw["wall_depth"] = wall_depth
     with pytest.raises(ValueError, match="SYN"):
         read_layers(raw)
 
