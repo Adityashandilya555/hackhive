@@ -72,6 +72,12 @@ def test_order_ring_one_and_zero_nodes():
         order_ring("H1", [], lambda a, b: 1.0)
 
 
+def test_order_ring_handles_asymmetric_costs():
+    """Routed costs with node bends (#20) can differ by direction: a cycle != its reverse."""
+    d = {("H", "A"): 9, ("A", "B"): 9, ("B", "H"): 9, ("H", "B"): 1, ("B", "A"): 1, ("A", "H"): 1}
+    assert order_ring("H", ["A", "B"], lambda a, b: d[a, b]) == ["H", "B", "A", "H"]
+
+
 def test_order_ring_refuses_more_than_brute_force_handles():
     with pytest.raises(ValueError, match="#28"):
         order_ring("H1", [f"N{i}" for i in range(9)], lambda a, b: 1.0)
@@ -117,6 +123,22 @@ def test_first_ring_is_deterministic():
     a = [first_ring(z, plan, g, C) for z in zoning]
     b = [first_ring(z, plan, g, C) for z in zoning]
     assert a == b
+
+
+PLAN_IDS = ("576", "1293", "2814", "3086", "5088", "5924", "13344")
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_every_candidate_and_hub_obeys_rule_6_on_every_fixture(plan_id):
+    """Rooms can run under walls (1293 living_0), so the outline alone isn't enough."""
+    plan, g = _fixture(plan_id)
+    walls = wall_geometry(plan)
+    for i, zone in enumerate(_min_zoning(plan, g), start=1):
+        for cand in hub_candidates(zone, plan, C):
+            assert walls.distance(Point(cand.xy)) >= C.hub_wall_clearance_m, (plan_id, cand)
+        hub = first_ring(zone, plan, g, C, hub_id=f"H{i}")
+        assert walls.distance(Point(hub.location)) >= C.hub_wall_clearance_m
+        assert sorted(hub.ring[1:-1]) == sorted(n.id for n in plan.nodes if n.room_id in zone)
 
 
 # --------------------------------------------------------------------------- synthetic plans
