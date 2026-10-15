@@ -1,0 +1,47 @@
+flowchart TB
+    planjson[("plan JSON file (organiser file or one ResPlan plan)")]
+
+    subgraph pkg["hackhive package: src/hackhive, in-process library calls; every edge carries a contracts.py model"]
+        io["io.py: read · make_valid · scale to metres · nodes<br/>ref: ResPlan loader helpers (MIT copy)"]
+        roomgraph["graph.py: strict door / open-passage graph<br/>ref: ResPlan plan_to_graph (re-implemented, strict)"]
+        zoning["zoning.py: every contiguous capped zoning, exact<br/>ref: GerryChain contiguity, HGS lower-bound formula"]
+        grid["grid.py: 10 cm room-label raster<br/>ref: OrthoRoute portal snapping"]
+        cache["route.py PathCache: one-to-all bend-aware search<br/>ref: OrthoRoute seeds and ROI, Freerouting door graph (concept)"]
+        rings["rings.py: hub location + exact ring order<br/>ref: PyVRP exact-vs-estimate cost (LB pruning)"]
+        solve["solve.py: solve() · enumerate() · rank"]
+        routerings["route.py route_rings: occupancy penalty + rip-up passes<br/>ref: VTR PathFinder cost, OrthoRoute commit/clear"]
+        metrics["metrics.py: length · bends · overlap · crossings · cost<br/>ref: OptiWindNet fold and side tests"]
+        validate["validate.py: one check per C-id + reviewer checklist<br/>ref: OptiWindNet validators, GerryChain contiguity"]
+        viz["viz.py: overlay · gallery tiles · compare · Pareto<br/>ref: house-planner electric layer, OptiWindNet plotting"]
+    end
+
+    out[("solution.json + overlay.png")]
+    csv[("batch.csv")]
+    cli["hackhive CLI (one-shot process)"]
+    batch["hackhive batch (one-shot run over the test split)"]
+    app["app.py Streamlit demo (local process, started on demand)"]
+
+    planjson -->|"raw dict"| io
+    io -->|"Plan: rooms, doors, nodes in metres"| roomgraph
+    roomgraph -->|"G_elig: eligible rooms, door/opening edges"| zoning
+    roomgraph -->|"Plan + Opening regions"| grid
+    grid -->|"LabelGrid"| cache
+    zoning -->|"Zoning list (max 116 per plan)"| rings
+    cache -->|"PathCache: pairwise paths"| rings
+    rings -->|"Arrangement list: hubs, rings H to H"| solve
+    solve -->|"best Arrangement"| routerings
+    grid -->|"LabelGrid"| routerings
+    routerings -->|"Segment polylines"| metrics
+    metrics -->|"Totals, cost, rank_key"| solve
+    solve -->|"Solution"| validate
+    validate -->|"Violation list + checklist"| solve
+    solve -->|"Solution"| viz
+    solve -->|"Solution JSON"| out
+    viz -->|"PNG"| out
+
+    cli -->|"calls solve()"| solve
+    batch -->|"calls solve() per plan"| solve
+    batch -->|"one row per plan"| csv
+    app -->|"calls solve() and enumerate()"| solve
+    app -->|"calls viz"| viz
+    app -->|"reads"| csv

@@ -3,15 +3,30 @@
 Conventions for every coding agent (Claude Code, Codex, …) working in this repo.
 
 ## What we're building (PS4)
-- **Input:** one floor plan per JSON file (ResPlan-derived): rooms, doors, walls, windows.
-- **Nodes:** one per eligible room (living, bedroom, kitchen, storage), at a point guaranteed to be inside the room.
-- **Zones:** rooms grouped into contiguous hub zones. Rooms connect only through doors and open passages. Each hub serves **≤100 m²** of eligible-room area and **≤5 nodes**.
-- **Rings:** one closed, non-branching ring per hub: H → N1 → … → Nk → H.
-- **Routes:** axis-aligned only. They pass between rooms only through doors and open passages, never cross walls or windows, and never leave the building. In a **single-door room** the cable goes in and back out through the same door as two parallel runs.
-- **Ranking:** fewest hubs first, then lowest cost (cable length, bends, crossings, overlaps).
-- **Output:** a visual overlay (colored zones, hubs, numbered ring order, routes) plus JSON for validation.
+The organisers' slides win every conflict with the Honeywell text. The full map is `docs/ARCHITECTURE.md`.
 
-Pipeline stages: parsing → zoning → ring order → grid A* routing → congestion/overlap removal → validation → visualization. Use one module per stage under `src/hackhive/`.
+- **Input:** one floor plan per JSON file (ResPlan-derived): rooms, doors, walls, windows, plus the organisers' **fixed node points**.
+  - Geometry is in drawing units: convert once per plan with metres = units ÷ √(inner.area / area).
+  - Repair invalid polygons with `make_valid`; never use `net_area`.
+- **Nodes:** one per eligible room (living, bedroom, kitchen, storage), and each polygon is its own room.
+  - Organiser nodes are used as given and never moved or merged.
+  - For ResPlan dev plans we generate a point at max clearance (≥ 0.5 m from walls when possible), and fold living slivers that can't fit one.
+  - Excluded rooms (bathroom, balcony, stair, garden, pool, parking, land) get no node and no hub.
+- **Hubs:** we choose how many and where. A hub sits inside an eligible room of its own zone, ≥ 0.5 m from nodes.
+- **Zones:** eligible rooms grouped into zones, each connected **directly** through doors / open passages (excluded rooms never link two zone rooms).
+  - Each hub serves **≤ 100 m²** of eligible-room area and **≤ 5 nodes**.
+  - ≤ 20 nodes is an optional what-if setting, never the default.
+- **Rings:** one closed, non-branching ring per hub: H → N1 → … → Nk → H.
+- **Routes:** axis-aligned only.
+  - They change rooms only through doors and open passages, never cross walls or windows, and never leave `inner`.
+  - They may pass through any room, including other zones and excluded rooms. Overlaps and crossings between rings are cost, not violations.
+  - In a **single-door room** the cable goes in and back out through the same door as two parallel runs; the shared length counts as overlap.
+  - Windows drawn on interior walls are obstacles by default; a UI checkbox switches to treating them as doors (WHAT-IF).
+- **Ranking:** fewest hubs first, then lowest cost (cable length, bends, crossings, overlap; replaceable weights).
+- **Output:** our own versioned JSON (+ a generated JSON Schema) and a visual overlay (coloured zones, hubs, numbered ring order with the return to the hub, routes, per-hub summary, reviewer checklist). The organisers' format and cost formula aren't published, so both are replaceable settings.
+- **Frontend:** a Streamlit demo with a locked "Problem statement" preset, labelled what-ifs, an arrangements gallery and a batch leaderboard.
+
+Pipeline stages: parsing → room graph → zoning → hub + ring order → grid routing → overlap / crossing handling → validation → visualization. Use one module per stage under `src/hackhive/` (map in `docs/ARCHITECTURE.md`).
 
 ## Stack and versions
 Python **≥3.11**, managed with **uv**. `uv.lock` pins exact versions; commit it.
@@ -19,14 +34,14 @@ Python **≥3.11**, managed with **uv**. `uv.lock` pins exact versions; commit i
 | Layer | Tool |
 |---|---|
 | Data input | `json` + **pydantic 2** (typed rooms/doors/walls/windows) |
-| Geometry | **shapely 2** (polygons, areas, `point_on_surface`, containment checks) |
-| Grid | **numpy 2**, ~10 cm occupancy grid (add **numba** only if A* is measurably slow) |
+| Geometry | **shapely ≥ 2.1** (polygons, areas, `maximum_inscribed_circle`, containment checks) |
+| Grid | **numpy 2**, 10 cm room-label raster (add **numba** only if routing is measurably slow) |
 | Graphs | **networkx 3** (room–door graph, contiguity, components) |
-| Zoning | `itertools` exact search; **OR-Tools CP-SAT 9** as a fallback only |
-| Ring order | `itertools.permutations` (exact TSP, ≤5 nodes) |
-| Routing | custom A* with `heapq`: heading-aware bend cost, congestion penalties |
+| Zoning | exhaustive enumeration of contiguous capped zonings (no CP-SAT; ADR-001) |
+| Ring order | exact: `itertools.permutations` for ≤ 5 nodes, Held-Karp for ≤ 10 (the ≤ 20 what-if) |
+| Routing | custom bend-aware Dijkstra/A* with `heapq` on (cell, heading); occupancy penalty + rip-up passes |
 | Validation | **pytest 8** + **jsonschema 4** |
-| Visualization | **matplotlib 3**; optional **streamlit** demo |
+| Visualization | **matplotlib 3** + **streamlit** demo (no plotly) |
 | Batch | **tqdm** + **pandas 2** over 50–100 ResPlan plans |
 | Lint/format | **ruff** |
 
