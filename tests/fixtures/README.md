@@ -22,6 +22,10 @@
 CC BY-NC-SA 4.0; see `docs/ARCHITECTURE.md` § Sources). Attribution: Abouagour & Garyfallidis,
 *ResPlan: A Large-Scale Vector-Graph Dataset of Residential Floor Plans*.
 
+`plan-16552-stray-line.json` is ResPlan plan 16552 trimmed to `inner`, `area`, `wall_depth`,
+`bedroom` part 0 and the three walls it touches (coordinates verbatim). Its room minus walls leaves a
+1 mm line beside the polygon, which made node placement raise (6 of 17,000 ResPlan plans did).
+
 ## Expected numbers
 `expected.json` is keyed by plan id. Each entry keeps the vault's `.metrics` fields `n_nodes`,
 `elig_m2`, `lb5`, `lb20`, `min_hubs5`, `min_hubs20`, `n_all5`, `n_all20`, `comp_direct`,

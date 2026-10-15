@@ -429,6 +429,20 @@ def test_nodes_given_node_inside_a_wall_is_kept_and_flagged():
     assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
 
 
+@pytest.mark.parametrize("given", [False, True])
+def test_nodes_free_space_with_a_stray_line_16552(given):
+    """ResPlan 16552 (trimmed to bedroom_0 and the walls it touches): room − walls leaves a
+    1 mm line beside the polygon. The node is still placed (or a given one measured) on the
+    polygon, instead of maximum_inscribed_circle / boundary raising on the collection."""
+    raw = read_json(FIXTURES / "plan-16552-stray-line.json")
+    if given:
+        raw["nodes"] = [list(shape(raw["bedroom"]).representative_point().coords[0])]
+    plan = load_plan(raw)
+    (node,) = plan.nodes
+    assert node.given is given
+    assert plan.rooms[0].polygon.covers(Point(node.xy)) and node.clearance_m > 0
+
+
 def test_nodes_zero_given_in_a_room_warns():
     """Legal (decision_conventions §3), but likely a room-set mismatch with the organisers."""
     raw = synthetic(bedroom=box(0, 0, 50, 50), kitchen=box(60, 0, 100, 40))
