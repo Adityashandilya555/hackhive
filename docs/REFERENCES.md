@@ -6,7 +6,7 @@ These repos solve **different problems** that share our techniques. They're for 
 - **Never copy GPL code** (Freerouting).
 - Check every idea against our constraints before using it: axis-aligned only, crossings only through doors/open passages, ≤5 nodes and ≤100 m² per hub, closed non-branching rings, and the single-door in-and-out double run.
 
-Clones: `~/refs/ps4/<folder>/` (shallow; `vtr` and `freerouting` are sparse), outside this repo and never imported. Sourcegraph: http://localhost:7081, repos indexed as `github.com/<owner>/<name>`. Every path below was read on 2026-10-15 at the commit shown.
+Clones: `~/refs/ps4/<folder>/` (shallow; `vtr` and `freerouting` are sparse), outside this repo and never imported. Sourcegraph: http://localhost:7081, repos indexed as `github.com/<owner>/<name>`. Freerouting is **not indexed** (2 GB history, and its ideas are covered by VTR and OrthoRoute), so search its local sparse clone with `rg`. Every path below was read on 2026-10-15 at the commit shown.
 
 | Folder | Repo | Commit | License | Stages it informs |
 |---|---|---|---|---|
@@ -16,7 +16,7 @@ Clones: `~/refs/ps4/<folder>/` (shallow; `vtr` and `freerouting` are sparse), ou
 | hgs-cvrp | vidalt/HGS-CVRP | `1a92795` | MIT | zoning (neighbourhoods, Split bound) |
 | orthoroute | bbenchoff/OrthoRoute | `9e06f2d` | MIT | grid A* routing, congestion |
 | vtr | verilog-to-routing/vtr-verilog-to-routing (sparse `vpr/src/route`) | `5c65c86` | MIT (VTR License) | congestion / overlap removal |
-| freerouting | freerouting/freerouting (sparse `…/autoroute`) | `5aa1b24` | **GPL-3.0, never copy** | congestion (pass structure), visualization |
+| freerouting | freerouting/freerouting (sparse `…/autoroute`) | `5aa1b24` | **GPL-3.0, never copy** | optional, not in Sourcegraph: congestion (pass structure), visualization |
 | optiwindnet | DTUWindEnergy/OptiWindNet (GitHub mirror of gitlab.windenergy.dtu.dk/TOPFARM/OptiWindNet) | `44e384c` | MIT | validation, congestion, ring topology |
 | pyvisgraph | TaipanRex/pyvisgraph | `9472e0d` | MIT | routing backup, length lower bound |
 | house-planner | egmalt/house-planner | `5c91280` | MIT | visualization (UI ideas only) |
@@ -106,7 +106,7 @@ URL notes: OrthoRoute's canonical repo is `github.com/bbenchoff/OrthoRoute`; the
    - `autoroute/pipeline/AutoroutePassRunner.java:L97,L231,L506` call `fireBoardUpdatedEvent` after each pass (`events/BoardUpdatedEvent.java`). For the streamlit demo, yield a snapshot per pass and redraw.
    - `autoroute/maze/MazeRipupResolver.java:L219` `enterThroughSmallDoor`: their expansion "doors" connect free-space rooms, which is conceptually close to our door-only crossings.
 4. **Do NOT adopt:** **any code (GPL-3.0)**, Specctra DSN I/O, vias and layers, push-and-shove (`maze/MazeTraceShover.java`), fanout (`pipeline/BatchFanout.java`).
-5. **Sourcegraph:** `repo:^github\.com/freerouting/freerouting$ file:autoroute/pipeline/AutoroutePassRunner\.java fireBoardUpdatedEvent`
+5. **Search (not in Sourcegraph):** `rg -n fireBoardUpdatedEvent ~/refs/ps4/freerouting/src/main/java/app/freerouting/autoroute`
 6. **License:** **GPL-3.0**, read only, never copy.
 
 ## optiwindnet: DTUWindEnergy/OptiWindNet
