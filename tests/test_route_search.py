@@ -149,6 +149,14 @@ def test_bend_weight_is_converted_to_cells():
     assert res.cost((30, 20)) * c.grid_m == pytest.approx(5.0 + 0.5)
 
 
+def test_bend_weight_scales_with_the_length_weight():
+    """If #48 doubles the length weight, a bend is worth half as many steps."""
+    from hackhive.contracts import CostWeights
+
+    c = Constraints(cost_weights=CostWeights(2.0, 5.0, 1.0, 0.5))
+    assert bend_weight_cells(c) == pytest.approx(2.5)
+
+
 def test_room_and_door_ids_must_not_collide():
     """Rohit's repro: a door id equal to a room id would join rooms with no door."""
     labels = np.full((4, 4), 1, dtype=np.int16)

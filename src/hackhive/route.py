@@ -50,8 +50,8 @@ class SearchResult:
 
 
 def bend_weight_cells(c: Constraints) -> float:
-    """The J bend weight in step units: metres per bend ÷ metres per cell."""
-    return c.cost_weights.bend / c.grid_m
+    """The J bend weight in step units: a step costs ``length · grid_m`` in J, a bend ``bend``."""
+    return c.cost_weights.bend / (c.cost_weights.length * c.grid_m)
 
 
 def _check_ids(labels: np.ndarray, door_rooms: Mapping[int, tuple[int, int]]) -> None:
