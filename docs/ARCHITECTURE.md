@@ -43,7 +43,7 @@ For any unseen floor plan, with no manual step, hackhive:
 | C12 | horizontal and vertical runs only | C31 | visible-first delivery |
 | C13 | change rooms only through doors and open passages | C33 | cables may cross any room inside the building; overlaps and crossings between rings are cost, not violations |
 | C14 | never through walls, windows or the outside; stay inside `inner` | C35 | each sprint ends with a pull-and-run-locally verification |
-| C15 | single-door room: in and out through the same door (two parallel runs); the shared length counts as overlap | C36 | sprints carry no dates |
+| C15 | single-door room: in and out through the same door, either a same-line retrace (its length counts as overlap) or two parallel runs (no overlap) | C36 | sprints carry no dates |
 | C16 | rank: fewest hubs H first, then lowest J, then the smaller assigned-area gap | C37 | interior "windows": both readings, switched by a UI checkbox; default = obstacle |
 | C17 | **J = L + 5X + O + 0.5B** (slides 3, 6; the weights are starting values, kept as settings) | C38 | the solver serves every given node; our ResPlan node generator folds unfit living slivers and reports them |
 | C18 | hub inside an eligible room **assigned to it**, **≥ 0.5 m from walls**; a hub and a node may share a room (slide 3 rule 6) | C39 | a design must pass all six hard rules of slide 3 before it is ranked |
@@ -340,7 +340,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - Returns `Violation(rule, severity, hub_id, msg, where)` and never raises; `where` feeds the red overlay.
   - Builds the slide-5 checklist.
   - **The gate (C43):** submit the clean design; else the best strict-only design (`status: submitted_strict_only`); else nothing (`status: infeasible`) (#11, #16, #22, #23).
-  - `hackhive check` exits 1 on any `error` and 0 on strict-only (#16).
+  - `hackhive check` exits 1 on any `error`, 0 on strict-only (each printed with a `STRICT` prefix), and 2 on strict-only with `--fail-on-strict` (#16).
 
   | Severity | Meaning | Examples |
   |---|---|---|

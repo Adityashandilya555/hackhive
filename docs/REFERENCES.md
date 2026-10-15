@@ -96,7 +96,7 @@ URL notes: OrthoRoute's canonical repo is `github.com/bbenchoff/OrthoRoute`; the
    - `vpr/src/route/route_common.h:L134-150` `get_single_rr_cong_cost`: **cost = base_cost × acc_cost × pres_cost**, with `pres_cost = 1 + pres_fac × (overuse + 1)` when adding the route would exceed capacity. Use it per grid cell (or cell edge) with capacity 1 cable.
    - `route_common.cpp:L228` `pathfinder_update_acc_cost_and_overuse_info`: after each iteration, history `acc_cost += acc_fac × overuse`.
    - `route.cpp:L449-457`: the per-iteration `pres_fac` schedule (start `initial_pres_fac`, multiply by `pres_fac_mult`); L402 is only a reset after a `first_iter_pres_fac` reroute. The schedule and history are Backlog only: our capacity is soft (overlap is a cost), so we use sequential routing + rip-up (ADR-004). `route_common.cpp:L278` `pathfinder_update_cost_from_route_tree` handles rip-up / re-add occupancy.
-   - Our twist: door cells need capacity > 1 (several rings pass), and a single-door room's double run is **one ring's own fold**, not an overlap.
+   - Our twist: door cells need capacity > 1 (several rings pass), and a single-door room's double run is **one ring's own fold**: a same-line retrace counts as overlap (slide 7), two parallel runs don't.
 4. **Do NOT adopt:** timing-driven costs and budgets (`route_budgets.*`), router lookahead maps, parallel/decomposed netlist routers, RR-graph generation, FPGA segment statistics.
 5. **Sourcegraph:** `repo:^github\.com/verilog-to-routing/vtr-verilog-to-routing$ file:vpr/src/route/route_common\.h get_single_rr_cong_cost`
 6. **License:** MIT (VTR License; bundled third-party tools keep their own licenses).
