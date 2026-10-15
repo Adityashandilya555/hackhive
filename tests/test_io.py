@@ -158,6 +158,7 @@ def test_fixture_eligible_area_and_count(plan_id):
     layers = read_layers(load(plan_id))
     assert eligible_area(layers) == pytest.approx(EXPECTED[plan_id]["elig_m2"], abs=1e-6)
     assert sum(len(layers.rooms[t]) for t in ELIGIBLE) == EXPECTED[plan_id]["n_nodes"]
+    assert layers.unknown_keys == []  # every geometry key was read; "neighbor" is not geometry
 
 
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
@@ -173,6 +174,15 @@ def test_missing_keys_are_empty_layers():
     layers = read_layers(load(5924))
     assert set(layers.rooms) == set(ELIGIBLE + EXCLUDED)
     assert layers.rooms["storage"] == [] and layers.rooms["stair"] == []
+
+
+def test_unknown_geometry_keys_reported():
+    """C1 / slide 3 rule 1: a room under a key we don't know is reported, not silently dropped."""
+    raw = synthetic(living_room=box(0, 0, 10, 10))
+    raw["neighbor"] = [1, 2]  # not geometry: ignored
+    layers = read_layers(raw)
+    assert layers.unknown_keys == ["living_room"]
+    assert layers.rooms["living"] == []
 
 
 def test_caller_dict_not_mutated():
