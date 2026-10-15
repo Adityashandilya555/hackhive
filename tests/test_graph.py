@@ -190,6 +190,33 @@ def test_openings_are_bands_not_rooms(plan_id):
             assert share <= 0.25, f"{o.id} covers {share:.0%} of {rid}"
 
 
+def _open_passage(wall_units: int, gap_units: int) -> dict:
+    """Living and kitchen meeting along the wall's centre line over an open gap (like 13344's),
+    so the wall stubs flank both ends of the band; 1 unit = 0.1 m."""
+    w, y0, y1 = wall_units, 20 - gap_units / 2, 20 + gap_units / 2
+    c = 40 + w / 2
+    raw = synthetic(
+        living=box(0, 0, 40, 40).union(box(40, y0, c, y1)),
+        kitchen=box(40 + w, 0, 80 + w, 40).union(box(c, y0, 40 + w, y1)),
+        wall=MultiPolygon([box(40, -w, 40 + w, y0), box(40, y1, 40 + w, 40 + w)]),
+    )
+    raw["wall_depth"] = float(w)
+    return raw
+
+
+@pytest.mark.parametrize(("gap_units", "linked"), [(8, True), (5, False)])
+def test_open_passage_needs_two_wall_depths_of_open_edge(gap_units, linked):
+    """Spec: a passage needs ≥ 2·wd of open edge. Trimming the band away from the walls must
+    not shorten it, or an 0.8 m passage between 0.3 m walls (13344's shape) would be lost."""
+    plan = load_plan(_open_passage(3, gap_units))
+    G = build_graph(plan)
+    assert (kinds(G, plan, "living_0", "kitchen_0") == "opening") is linked
+    if linked:
+        (o,) = plan.openings
+        x0, y0, x1, y1 = o.polygon.bounds
+        assert max(x1 - x0, y1 - y0) == pytest.approx(gap_units / 10, abs=0.01)
+
+
 # --------------------------------------------------------------------------- extras
 
 

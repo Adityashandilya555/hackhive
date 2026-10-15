@@ -129,11 +129,26 @@ def _connectors(plan: Plan) -> tuple[list[Record], list[str]]:
     blocked = unary_union(
         [*plan.walls, *plan.windows, *(d.polygon for d in plan.doors), *plan.front_doors]
     )
-    grown = {r.id: r.polygon.buffer(OPENING_GROW * wd) for r in rooms}
+    grow = OPENING_GROW * wd
+    # Keep only the band along the shared open edge: ResPlan rooms overlap and wrap around each
+    # other (576's living_0 covers storage_0; 1293's living_0 rings the kitchen inside the wall
+    # band), so drop the strips that hug walls, windows and doors, and the inside of any overlap.
+    # Otherwise the raster (#10) paints the "opening" over a room or a door's side (#62 review).
+    # Trimming also shortens the real band by up to `grow` at each end, so its ends are grown
+    # back (inside the untrimmed gap); else a passage would need 3.1·wd of open edge, not 2·wd
+    # (13344's living–kitchen band: 0.81 m, trimmed 0.58 m).
+    near_blocked = blocked.buffer(grow)
+    grown = {r.id: r.polygon.buffer(grow) for r in rooms}
     for a, b in combinations(rooms, 2):
         if pair(a.id, b.id) in linked or not grown[a.id].intersects(grown[b.id]):
             continue
-        gap = grown[a.id].intersection(grown[b.id]).difference(blocked)
+        band = (
+            grown[a.id]
+            .intersection(grown[b.id])
+            .difference(blocked)
+            .difference(a.polygon.intersection(b.polygon).buffer(-grow))
+        )
+        gap = band.intersection(band.difference(near_blocked).buffer(grow))
         kept = [
             p
             for p in get_geometries(gap)
