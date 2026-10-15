@@ -59,16 +59,23 @@ class Constraints(BaseModel):
         return self == Constraints.problem_statement()
 
 
+# Summed polygon areas carry float noise (100 m² can come out as 100.00000000001). Every
+# capacity comparison (here, #11 rule 2, #13 zoning) subtracts this before ceil / after ≤.
+AREA_EPS_M2 = 1e-6
+
+
 def lower_bound(area_m2: float, n_nodes: int, c: Constraints) -> int:
     """Fewest hubs any zoning can use: max(⌈area / cap_area⌉, ⌈nodes / cap_nodes⌉) (C7)."""
-    return max(math.ceil(area_m2 / c.max_area_m2), math.ceil(n_nodes / c.max_nodes))
+    by_area = math.ceil((area_m2 - AREA_EPS_M2) / c.max_area_m2)
+    return max(by_area, math.ceil(n_nodes / c.max_nodes), 0)
 
 
 # --------------------------------------------------------------------------- submission (slide 8)
 
 
 class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # serialize_by_alias: every dump writes slide 8's "from", even without by_alias=True
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
 
 class Location(_Strict):
@@ -116,12 +123,15 @@ class Violation(_Strict):
     severity: Literal["error", "strict"]
     message: str
     ids: list[str] = []
+    hub_id: str | None = None
+    where: list[tuple[float, float]] = []  # metres; the overlay draws these points in red
 
 
 class Bounds(_Strict):
     k_lb: int
     k_found: int | None = None
-    proof: Literal["exhaustive", "greedy", "none"] = "none"
+    # lb_met: k_found == k_lb, optimal without search; exhaustive: proven by full enumeration
+    proof: Literal["exhaustive", "lb_met", "greedy", "none"] = "none"
 
 
 class CostBreakdown(_Strict):
@@ -132,6 +142,18 @@ class CostBreakdown(_Strict):
     B: int
     J: float
     area_gap: float
+
+
+class HubMetrics(_Strict):
+    """One hub's share of the metrics, for the per-hub summary (#17, #44). Slide 8 has no room."""
+
+    hub_id: str
+    area_m2: float
+    n_nodes: int
+    L: float
+    X: int
+    O: float  # noqa: E741
+    B: int
 
 
 class Provenance(_Strict):
@@ -154,6 +176,7 @@ class Sidecar(_Strict):
     violations: list[Violation] = []
     bounds: Bounds | None = None
     cost: CostBreakdown | None = None
+    hubs: list[HubMetrics] = []
     settings: Constraints = Constraints()
     provenance: Provenance = Provenance()
     warnings: list[str] = []
@@ -240,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
         stale = [
             n
             for n, text in rendered.items()
-            if not (SCHEMA_DIR / n).exists() or (SCHEMA_DIR / n).read_text() != text
+            if not (SCHEMA_DIR / n).exists() or (SCHEMA_DIR / n).read_text(encoding="utf-8") != text
         ]
         if stale:
             print(f"stale schemas: {', '.join(stale)}; run python -m hackhive.contracts")
@@ -249,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     SCHEMA_DIR.mkdir(exist_ok=True)
     for n, text in rendered.items():
-        (SCHEMA_DIR / n).write_text(text)
+        (SCHEMA_DIR / n).write_text(text, encoding="utf-8", newline="\n")
         print(f"wrote schemas/{n}")
     return 0
 

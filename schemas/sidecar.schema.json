@@ -23,6 +23,7 @@
           "default": "none",
           "enum": [
             "exhaustive",
+            "lb_met",
             "greedy",
             "none"
           ],
@@ -213,6 +214,51 @@
       "title": "FoldedPart",
       "type": "object"
     },
+    "HubMetrics": {
+      "additionalProperties": false,
+      "description": "One hub's share of the metrics, for the per-hub summary (#17, #44). Slide 8 has no room.",
+      "properties": {
+        "B": {
+          "title": "B",
+          "type": "integer"
+        },
+        "L": {
+          "title": "L",
+          "type": "number"
+        },
+        "O": {
+          "title": "O",
+          "type": "number"
+        },
+        "X": {
+          "title": "X",
+          "type": "integer"
+        },
+        "area_m2": {
+          "title": "Area M2",
+          "type": "number"
+        },
+        "hub_id": {
+          "title": "Hub Id",
+          "type": "string"
+        },
+        "n_nodes": {
+          "title": "N Nodes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "hub_id",
+        "area_m2",
+        "n_nodes",
+        "L",
+        "X",
+        "O",
+        "B"
+      ],
+      "title": "HubMetrics",
+      "type": "object"
+    },
     "Provenance": {
       "additionalProperties": false,
       "properties": {
@@ -259,6 +305,18 @@
     "Violation": {
       "additionalProperties": false,
       "properties": {
+        "hub_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hub Id"
+        },
         "ids": {
           "default": [],
           "items": {
@@ -282,6 +340,24 @@
           ],
           "title": "Severity",
           "type": "string"
+        },
+        "where": {
+          "default": [],
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Where",
+          "type": "array"
         }
       },
       "required": [
@@ -324,6 +400,14 @@
         "$ref": "#/$defs/FoldedPart"
       },
       "title": "Folded Parts",
+      "type": "array"
+    },
+    "hubs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/HubMetrics"
+      },
+      "title": "Hubs",
       "type": "array"
     },
     "plan_id": {
