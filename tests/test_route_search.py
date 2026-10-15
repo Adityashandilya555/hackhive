@@ -233,3 +233,13 @@ def test_random_rooms_change_only_through_their_doors(seed):
         if la != lb:  # a room change must be room <-> one of its own doors
             door, room = (la, lb) if la in door_rooms else (lb, la)
             assert door in door_rooms and room in door_rooms[door]
+
+
+def test_numpy_integer_cells_are_accepted():
+    """Cells straight from np.argwhere (np.int64) must work like plain ints (#10, #15)."""
+    labels = _room(5, 5)
+    src, dst = tuple(np.argwhere(labels == 1)[0]), tuple(np.argwhere(labels == 1)[-1])
+    path = path_to(search(labels, {}, [src], w_bend=1.0), dst)
+    assert path[0] == (0, 0) and path[-1] == (4, 4)
+    assert path_length(path) == 8 and bends(path) == 1
+    assert all(type(v) is int for cell in path for v in cell)

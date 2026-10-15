@@ -95,7 +95,7 @@ def search(
     dist = np.full((rows, cols, 4), math.inf)
     parent = np.full((rows, cols, 4), -1, dtype=np.int64)
     heap: list[tuple[float, int, int, int]] = []
-    for r, c in sources:
+    for r, c in ((int(r), int(c)) for r, c in sources):  # np.int64 cells from argwhere too
         if not (0 <= r < rows and 0 <= c < cols):
             raise ValueError(f"source {(r, c)} is outside the {rows}x{cols} raster")
         if grid[r][c] == BLOCKED:
@@ -128,6 +128,7 @@ def search(
 
 def path_to(result: SearchResult, target: Cell) -> list[Cell]:
     """The cheapest path to ``target`` as corner points (source, turns, target); [] if none."""
+    target = (int(target[0]), int(target[1]))  # np.int64 cells from argwhere too
     states = result.dist[target]
     h = int(np.argmin(states))
     if math.isinf(states[h]):
