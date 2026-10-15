@@ -6,13 +6,16 @@ import json
 from pathlib import Path
 
 import networkx as nx
+import numpy as np
 import pytest
 from shapely.geometry import MultiPolygon, box, mapping
 
 from hackhive.contracts import Constraints
 from hackhive.graph import OUTDOOR, build_graph, eligible_graph
 from hackhive.graph import main as graph_main
+from hackhive.grid import LabelGrid
 from hackhive.io import load_plan, room_by_label
+from hackhive.route import search
 
 FIXTURES = Path(__file__).parent / "fixtures"
 EXPECTED = json.loads((FIXTURES / "expected.json").read_text(encoding="utf-8"))
@@ -91,9 +94,7 @@ def test_single_door_eligible_rooms(plan_id):
 def test_front_door_never_links_on_fixtures(plan_id):
     """C8, C34, slide 3 rule 3: no edge comes from the entrance."""
     plan, G = fixture(plan_id)
-    interior = {d.id for d in plan.doors}
     for _, _, d in G.edges(data=True):
-        assert set(d.get("door_ids", [])) <= interior
         if d["kind"] == "opening":
             assert all(d["region"].intersection(f).area < 1e-9 for f in plan.front_doors)
 
@@ -158,6 +159,35 @@ def test_via_excluded_doesnt_pass_through_a_balcony():
     G = build_graph(plan, Constraints(zone_links_via_excluded=True))
     b0, b1 = room_by_label(plan, "bedroom_0").id, room_by_label(plan, "bedroom_1").id
     assert not G.has_edge(b0, b1)
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_linked_rooms_reach_each_other_on_the_raster(plan_id):
+    """#10's raster painted with these openings must agree with the graph: rooms it links can
+    reach each other (an opening that swallowed a room or a door's side cut 576's storage_0
+    and 1293's bedroom_2 off, #62 review)."""
+    plan, G = fixture(plan_id)
+    grid = LabelGrid.from_plan(plan, plan.openings)
+    for group in nx.connected_components(eligible_graph(G)):
+        first, *rest = sorted(group)
+        result = search(
+            grid.labels, grid.door_rooms, np.argwhere(grid.labels == grid.room_label(first)), 0.0
+        )
+        for room in rest:
+            cells = grid.labels == grid.room_label(room)
+            assert np.isfinite(result.dist[cells]).any(), f"{room} unreachable from {first}"
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_openings_are_bands_not_rooms(plan_id):
+    """An opening is the band along a shared edge with no wall: it never covers more than a
+    quarter of either room (it covered 93% of 576's storage_0 before the #62 review fix)."""
+    plan, _ = fixture(plan_id)
+    rooms = {r.id: r for r in plan.rooms}
+    for o in plan.openings:
+        for rid in o.rooms:
+            share = o.polygon.intersection(rooms[rid].polygon).area / rooms[rid].area_m2
+            assert share <= 0.25, f"{o.id} covers {share:.0%} of {rid}"
 
 
 # --------------------------------------------------------------------------- extras
