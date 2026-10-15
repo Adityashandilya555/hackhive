@@ -29,4 +29,6 @@ CC BY-NC-SA 4.0; see `docs/ARCHITECTURE.md` § Sources). Attribution: Abouagour 
 `raw/` if the vault changes.
 
 ## Slide 8
-`slide8_example.json` is the organisers' slide-8 output example (one abridged hub, two segments shown).
+`slide8_example.json` is the organisers' slide-8 output example, verbatim where the slide shows values:
+H1 with its two shown segments. The slide elides the N3→N2 and N2→H1 segments and hub H2
+("… H2 has the same structure"), so they are absent here; `reported_metrics` is as printed.
