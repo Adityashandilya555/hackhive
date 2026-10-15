@@ -43,7 +43,7 @@ def _main_text(at: AppTest) -> str:
 
 
 def _images(at: AppTest) -> list:
-    return at.get("imgs")
+    return list(at.main.image)
 
 
 def _upload(at: AppTest, name: str, content: bytes) -> AppTest:
