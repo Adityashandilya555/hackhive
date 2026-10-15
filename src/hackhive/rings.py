@@ -50,22 +50,24 @@ def manhattan(a: Point2, b: Point2) -> float:
 def hub_candidates(zone: Collection[str], plan: Plan, c: Constraints) -> list[Candidate]:
     """Grid cell centres in the zone's rooms where a hub may go.
 
-    First choice: >= hub clearance + 1 cm from the room's whole outline, and >= 0.10 m from
-    every node point. Only if the zone has none: the same distance from wall geometry instead
+    First choice: >= hub clearance + 1 cm from both the room's whole outline and the wall
+    geometry, and >= 0.10 m from every node point. Only if the zone has none: the same distance from wall geometry instead
     (open passages and door gaps don't count), tagged ``wall_clearance_only``.
     """
     clearance = c.hub_wall_clearance_m + HUB_MARGIN_M
     rooms = sorted((r for r in plan.rooms if r.id in zone and r.eligible), key=lambda r: r.id)
     nodes = np.array([n.xy for n in plan.nodes]) if plan.nodes else np.empty((0, 2))
 
+    # ResPlan rooms can run under walls (1293's living_0), so the outline alone isn't enough:
+    # every candidate must also clear the wall geometry itself (rule 6).
+    keep_out = wall_geometry(plan).buffer(clearance)
     strict = [
         Candidate(r.id, xy)
         for r in rooms
-        for xy in _centres_in(r.polygon.buffer(-clearance), nodes, c.grid_m)
+        for xy in _centres_in(r.polygon.buffer(-clearance).difference(keep_out), nodes, c.grid_m)
     ]
     if strict:
         return strict
-    keep_out = wall_geometry(plan).buffer(clearance)
     return [
         Candidate(r.id, xy, wall_clearance_only=True)
         for r in rooms
@@ -108,9 +110,10 @@ def first_ring(
 
 
 def order_ring(hub: str, nodes: Sequence[str], dist: Callable[[str, str], float]) -> list[str]:
-    """The cheapest closed ring [hub, …, hub] over ``nodes`` by brute force over k!/2 cycles.
+    """The cheapest closed ring [hub, …, hub] over ``nodes`` by brute force over all k! orders.
 
-    Ties go to the lexicographically smallest order, so the result is deterministic.
+    Both directions of each cycle are tried, so ``dist`` may be asymmetric (routed costs with
+    node bends, #20). Ties go to the lexicographically smallest order (deterministic).
     """
     if not nodes:
         raise ValueError("a ring needs at least one node")
@@ -119,8 +122,6 @@ def order_ring(hub: str, nodes: Sequence[str], dist: Callable[[str, str], float]
     best: tuple[str, ...] | None = None
     best_cost = math.inf
     for perm in itertools.permutations(sorted(nodes)):
-        if len(perm) > 1 and perm[0] > perm[-1]:
-            continue  # the same cycle reversed
         cost = dist(hub, perm[0]) + dist(perm[-1], hub)
         cost += sum(dist(a, b) for a, b in itertools.pairwise(perm))
         if cost < best_cost - 1e-9:
