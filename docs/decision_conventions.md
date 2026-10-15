@@ -31,8 +31,8 @@ If code and this page disagree, fix whichever is wrong, then update this page in
 | Edge case | Decision | Source | Enforced by · test |
 |---|---|---|---|
 | Multi-part `living` | each polygon is one room with one node | slide 2; C2 | `io.py` · fixture 576 |
-| Organiser gives node points | used exactly as given, never moved and never merged | slide 2; C3, C38 | `io.py`, checker coverage rule |
-| ResPlan dev plan, no node points | our generator puts the node at the room's max-clearance point (maximum inscribed circle) and records `clearance_m` | A2 | `io.py` · `test_io::nodes` |
+| Organiser gives node points | used exactly as given, never moved and never merged. An eligible room with no given node, or with several, gets a sidecar warning (legal, but likely a room-set mismatch); a given node under a wall gets clearance 0 and a warning | slide 2; C3, C38 | `io.py`, checker coverage rule · `test_io::nodes_zero_given_in_a_room_warns`, `nodes_given_node_inside_a_wall_is_kept_and_flagged` |
+| ResPlan dev plan, no node points | our generator puts the node at the max-clearance point (maximum inscribed circle) of the room's **free space**: the room minus walls and windows, because ResPlan rooms can run under walls (e.g. 1293 `living_0`). `clearance_m` is measured to the room outline (door gaps count, #46 Q3) and to those walls. A room entirely under walls keeps a node at its own max-clearance point, with clearance 0 and a warning | A2; slide 2 | `io.py` · `test_io::nodes_avoid_a_wall_inside_the_room` |
 | A living sliver can't fit a point 0.5 m from walls (41 parts in 38 ResPlan plans) | **generator only:** fold it into the adjacent living part (the nearest one if none touches), give it no node, and list it in the sidecar. Never applied to organiser input | C38 (Gate 2) | `io.py` · `test_io::sliver_fold` |
 | Any other room with clearance < 0.5 m | keep the node at the max-clearance point and add a warning in the sidecar | A2, A9 | `io.py` |
 | Invalid polygon | `make_valid(method="structure")`, then flatten to polygons | slide 2; C20 | `io.py` · `test_io::bowtie` |

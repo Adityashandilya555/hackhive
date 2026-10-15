@@ -381,6 +381,64 @@ def test_nodes_sliver_kept_with_given_nodes():
     assert plan.nodes[1].xy == pytest.approx((5.15, 1.5))
 
 
+def test_nodes_avoid_a_wall_inside_the_room():
+    """Slide 2 (nodes 0.5 m from walls): ResPlan rooms can run under walls (1293 living_0), so the
+    node and its clearance use the room's free space, not its bare outline (#59 review)."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 60, 40), wall=box(19, 0, 21, 25)))
+    (node,) = plan.nodes
+    assert not plan.walls[0].intersects(Point(node.xy))
+    assert node.clearance_m == pytest.approx(1.95, abs=0.01)
+    assert node.xy == pytest.approx((4.05, 2.0), abs=0.03)
+    assert plan.warnings == []
+
+
+def test_nodes_wall_narrowed_room_warns():
+    """A room roomy by its outline but 0.8 m wide between walls gets the clearance warning."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 30, 40), wall=box(8, 0, 30, 40)))
+    (node,) = plan.nodes
+    assert node.clearance_m == pytest.approx(0.4, abs=0.01)
+    assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
+
+
+def test_nodes_room_under_walls_keeps_a_node():
+    """A room entirely under walls still gets its one node (coverage), flagged with clearance 0."""
+    plan = load_plan(synthetic(bedroom=box(0, 0, 30, 30), wall=box(0, 0, 30, 30)))
+    (node,) = plan.nodes
+    assert plan.rooms[0].polygon.covers(Point(node.xy))
+    assert node.clearance_m == 0.0 and len(plan.warnings) == 1
+
+
+def test_nodes_sliver_by_free_space_is_folded():
+    """C38: a living part 1.2 m wide by its outline but 0.3 m wide between walls is a sliver,
+    judged on the same free space as the node."""
+    living = MultiPolygon([box(0, 0, 50, 50), box(50, 0, 62, 30)])
+    plan = load_plan(synthetic(living=living, wall=box(53, 0, 62, 30)))
+    (fold,) = plan.folded_parts
+    assert (fold.room_id, fold.into_room_id) == ("living_1", "R01")
+    assert len(plan.nodes) == 1
+
+
+def test_nodes_given_node_inside_a_wall_is_kept_and_flagged():
+    """Organiser nodes are never moved: one under a wall keeps its point, clearance 0, warning."""
+    raw = synthetic(bedroom=box(0, 0, 60, 40), wall=box(19, 0, 21, 25))
+    raw["nodes"] = [[20, 10]]
+    plan = load_plan(raw)
+    (node,) = plan.nodes
+    assert node.given and node.xy == (20 * plan.m_per_unit, 10 * plan.m_per_unit)
+    assert node.clearance_m == 0.0
+    assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
+
+
+def test_nodes_zero_given_in_a_room_warns():
+    """Legal (decision_conventions §3), but likely a room-set mismatch with the organisers."""
+    raw = synthetic(bedroom=box(0, 0, 50, 50), kitchen=box(60, 0, 100, 40))
+    raw["nodes"] = [[25, 25]]
+    plan = load_plan(raw)
+    assert len(plan.nodes) == 1
+    assert len(plan.warnings) == 1
+    assert all(s in plan.warnings[0] for s in ("R02", "kitchen_0", "no given node"))
+
+
 @pytest.mark.parametrize(
     "nodes",
     [
