@@ -9,17 +9,28 @@ component, recurse on the lowest uncovered room, then take the cross product.
 
 from __future__ import annotations
 
+import argparse
 import itertools
+import json
+import math
+import sys
 from collections.abc import Collection, Iterable, Mapping
+from pathlib import Path
 
 import networkx as nx
+from shapely.geometry import box
+from shapely.ops import unary_union
 
-from hackhive.contracts import AREA_EPS_M2, Constraints
+from hackhive.contracts import AREA_EPS_M2, Constraints, Plan, lower_bound
 
 Zone = frozenset[str]
 Zoning = tuple[Zone, ...]
 
 MAX_COMPONENT_ROOMS = 16  # beyond this, solve falls back to greedy zoning (#49, #40)
+# Rooms alone don't bound the work: a 16-room grid of doors has ~1M zonings, and #20/#22
+# route and rank every one. ResPlan's maximum is 116, so this only stops pathological plans.
+MAX_ZONINGS = 5_000
+HUB_MARGIN_M = 0.01  # 1 cm above the rule-6 clearance, so float noise can't break it
 
 
 class TooLarge(Exception):
@@ -40,6 +51,9 @@ def feasible_zones(
     """Every connected room subset within the area and node caps that can host a hub."""
     order = {room: i for i, room in enumerate(sorted(g.nodes))}
     n_nodes = nodes if nodes is not None else dict.fromkeys(g.nodes, 1)
+    missing = sorted(set(g.nodes) - set(n_nodes))
+    if missing:
+        raise ValueError(f"no node count for room(s) {', '.join(missing)}")
     zones: list[Zone] = []
     for root in sorted(g.nodes):
         # grow connected sets whose lowest room is ``root`` (each set found once)
@@ -71,8 +85,8 @@ def enumerate_zonings(
 ) -> list[Zoning]:
     """All feasible zonings, fewest zones first, then in a fixed order.
 
-    Raises ``Infeasible`` if no zoning exists and ``TooLarge`` for a component with more
-    than ``MAX_COMPONENT_ROOMS`` rooms.
+    Raises ``Infeasible`` if no zoning exists, and ``TooLarge`` for a component with more
+    than ``MAX_COMPONENT_ROOMS`` rooms or more than ``MAX_ZONINGS`` zonings in total.
     """
     for room in sorted(g.nodes):
         if area[room] > c.max_area_m2 + AREA_EPS_M2:
@@ -87,10 +101,13 @@ def enumerate_zonings(
         uncovered = set(comp) - {room for z in zones for room in z}
         if uncovered:
             raise Infeasible(f"no hub-capable room can serve {', '.join(sorted(uncovered))}")
-        covers = _exact_covers(comp, zones)
+        covers = _exact_covers(comp, zones, MAX_ZONINGS)
         if not covers:
             raise Infeasible(f"no zoning covers {', '.join(comp)}")
         per_component.append(covers)
+    total = math.prod(len(covers) for covers in per_component)
+    if total > MAX_ZONINGS:
+        raise TooLarge(f"{total} zonings > {MAX_ZONINGS}")
 
     zonings = [
         tuple(sorted((z for part in combo for z in part), key=lambda z: min(z)))
@@ -104,6 +121,23 @@ def min_hubs(zonings: Iterable[Zoning]) -> int:
     return min(len(z) for z in zonings)
 
 
+def hub_capable_rooms(plan: Plan, c: Constraints) -> set[str]:
+    """Eligible rooms with a point >= hub clearance + 1 cm from wall geometry (rule 6, C18).
+
+    Wall geometry is the walls minus door gaps, the windows and everything outside ``inner``.
+    A room's own outline is not a wall: a narrow room open to a passage can still host a hub.
+    """
+    doors = unary_union([d.polygon for d in plan.doors] + list(plan.front_doors))
+    walls = unary_union(plan.walls).difference(doors)
+    outside = box(*plan.inner.buffer(1.0).bounds).difference(plan.inner)
+    keep_out = unary_union([walls, *plan.windows, outside]).buffer(
+        c.hub_wall_clearance_m + HUB_MARGIN_M
+    )
+    return {
+        r.id for r in plan.rooms if r.eligible and r.polygon.difference(keep_out).area > AREA_EPS_M2
+    }
+
+
 def _fits(zone: Zone, area: Mapping[str, float], nodes: Mapping[str, int], c: Constraints) -> bool:
     return (
         sum(area[r] for r in zone) <= c.max_area_m2 + AREA_EPS_M2
@@ -111,8 +145,11 @@ def _fits(zone: Zone, area: Mapping[str, float], nodes: Mapping[str, int], c: Co
     )
 
 
-def _exact_covers(rooms: list[str], zones: list[Zone]) -> list[Zoning]:
-    """Every way to cover ``rooms`` exactly once, recursing on the lowest uncovered room."""
+def _exact_covers(rooms: list[str], zones: list[Zone], limit: int) -> list[Zoning]:
+    """Every way to cover ``rooms`` exactly once, recursing on the lowest uncovered room.
+
+    Raises ``TooLarge`` as soon as more than ``limit`` covers are found.
+    """
     order = {room: i for i, room in enumerate(rooms)}
     by_lowest: dict[str, list[Zone]] = {}
     for z in zones:
@@ -124,6 +161,8 @@ def _exact_covers(rooms: list[str], zones: list[Zone]) -> list[Zoning]:
     def recurse(uncovered: frozenset[str]) -> None:
         if not uncovered:
             out.append(tuple(chosen))
+            if len(out) > limit:
+                raise TooLarge(f"more than {limit} zonings")
             return
         lowest = min(uncovered, key=order.__getitem__)
         for z in by_lowest.get(lowest, []):
@@ -134,3 +173,34 @@ def _exact_covers(rooms: list[str], zones: list[Zone]) -> list[Zoning]:
 
     recurse(frozenset(rooms))
     return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m hackhive.zoning <plan.json>`` → ``min hubs k (LB m) · N zonings``."""
+    from hackhive.vault import load_vault  # bridge until #6 (loader) and #9 (graph) land
+
+    p = argparse.ArgumentParser(prog="python -m hackhive.zoning")
+    p.add_argument("plan", type=Path)
+    args = p.parse_args(argv)
+    if "strict_graph_edges" not in json.loads(args.plan.read_text(encoding="utf-8")):
+        print(
+            f"{args.plan}: no room graph in this file. Until #9 lands, pass a vault fixture, "
+            "e.g. tests/fixtures/raw/plan-5924-gap.json",
+            file=sys.stderr,
+        )
+        return 2
+    plan, g = load_vault(args.plan)
+    c = Constraints()
+    area = {r.id: r.area_m2 for r in plan.rooms if r.eligible}
+    lb = lower_bound(sum(area.values()), len(area), c)
+    try:
+        zonings = enumerate_zonings(g, area, c, hub_capable=hub_capable_rooms(plan, c))
+    except (Infeasible, TooLarge) as e:
+        print(f"{type(e).__name__}: {e} (LB {lb})", file=sys.stderr)
+        return 1
+    print(f"min hubs {min_hubs(zonings)} (LB {lb}) · {len(zonings)} zonings")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
