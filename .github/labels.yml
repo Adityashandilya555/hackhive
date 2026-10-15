@@ -1,4 +1,5 @@
 # Synced to GitHub with: uv run scripts/sync_labels.py
+- {name: "area:core", color: "1d76db", description: "Data contracts, solve() orchestration, CLI"}
 - {name: "area:parsing", color: "1d76db", description: "Plan JSON → pydantic models, room/door graph"}
 - {name: "area:zoning", color: "1d76db", description: "Contiguous hub zones, capacity limits"}
 - {name: "area:rings", color: "1d76db", description: "Ring order (exact TSP ≤5 nodes)"}
