@@ -1,0 +1,255 @@
+"""Data contracts: the slide-8 submission, our sidecar, the input-side plan models and settings.
+
+This module is the single source of truth for every shape that crosses a stage boundary.
+`python -m hackhive.contracts` writes the JSON schemas; `--check` fails if they are stale.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+from pydantic.dataclasses import dataclass
+from shapely.geometry import Polygon
+
+# --------------------------------------------------------------------------- settings
+
+
+@dataclass(frozen=True)
+class CostWeights:
+    """Weights of J = length·L + cross·X + overlap·O + bend·B."""
+
+    length: float
+    cross: float
+    overlap: float
+    bend: float
+
+
+# slide 6 starting values; update when the organisers publish final weights (#48, #46 Q7)
+ORGANISER_WEIGHTS = CostWeights(1.0, 5.0, 1.0, 0.5)
+
+
+class Constraints(BaseModel):
+    """Every tunable limit. The defaults are the organisers' problem statement."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_area_m2: float = 100
+    max_nodes: int = 5
+    hub_wall_clearance_m: float = 0.5
+    tolerance_m: float = 0.001
+    grid_m: float = 0.10
+    flip_y: bool = False
+    origin_shift: tuple[float, float] = (0.0, 0.0)
+    interior_windows_as_doors: bool = False
+    zone_links_via_excluded: bool = False
+    cost_weights: CostWeights = ORGANISER_WEIGHTS
+
+    @classmethod
+    def problem_statement(cls) -> Constraints:
+        return cls()
+
+    @property
+    def is_problem_statement(self) -> bool:
+        return self == Constraints.problem_statement()
+
+
+def lower_bound(area_m2: float, n_nodes: int, c: Constraints) -> int:
+    """Fewest hubs any zoning can use: max(⌈area / cap_area⌉, ⌈nodes / cap_nodes⌉) (C7)."""
+    return max(math.ceil(area_m2 / c.max_area_m2), math.ceil(n_nodes / c.max_nodes))
+
+
+# --------------------------------------------------------------------------- submission (slide 8)
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class Location(_Strict):
+    x: float
+    y: float
+
+
+class RouteSegment(_Strict):
+    from_: str = Field(alias="from")
+    to: str
+    length_m: float
+    polyline: list[tuple[float, float]]
+
+
+class HubOut(_Strict):
+    hub_id: str
+    room_id: str
+    location: Location
+    assigned_rooms: list[str]
+    assigned_nodes: list[str]
+    closed_sequence: list[str]
+    route_segments: list[RouteSegment]
+    ring_length_m: float
+
+
+class ReportedMetrics(_Strict):
+    hub_count: int
+    total_length_m: float
+
+
+class Submission(_Strict):
+    """Slide 8's output, key for key. Metres, origin lower-left, y up."""
+
+    plan_id: str
+    units: Literal["m"]
+    hubs: list[HubOut]
+    reported_metrics: ReportedMetrics
+
+
+# --------------------------------------------------------------------------- sidecar (ours)
+
+
+class Violation(_Strict):
+    rule: int
+    severity: Literal["error", "strict"]
+    message: str
+    ids: list[str] = []
+
+
+class Bounds(_Strict):
+    k_lb: int
+    k_found: int | None = None
+    proof: Literal["exhaustive", "greedy", "none"] = "none"
+
+
+class CostBreakdown(_Strict):
+    H: int
+    L: float
+    X: int
+    O: float  # noqa: E741
+    B: int
+    J: float
+    area_gap: float
+
+
+class Provenance(_Strict):
+    input_path: str | None = None
+    input_digest: str | None = None
+    version: str | None = None
+
+
+class FoldedPart(_Strict):
+    room_id: str
+    into_room_id: str
+    area_m2: float
+
+
+class Sidecar(_Strict):
+    """Everything that is not part of the submission."""
+
+    plan_id: str
+    status: Literal["ok", "submitted_strict_only", "infeasible", "input_error"]
+    violations: list[Violation] = []
+    bounds: Bounds | None = None
+    cost: CostBreakdown | None = None
+    settings: Constraints = Constraints()
+    provenance: Provenance = Provenance()
+    warnings: list[str] = []
+    folded_parts: list[FoldedPart] = []
+
+
+# --------------------------------------------------------------------------- input side (in metres)
+
+
+class _Geo(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
+
+class Room(_Geo):
+    id: str
+    label: str
+    type: str
+    eligible: bool
+    polygon: Polygon
+    area_m2: float
+
+
+class Door(_Geo):
+    id: str
+    polygon: Polygon
+    rooms: tuple[str, str] | None = None
+
+
+class Opening(_Geo):
+    """An open passage: a shared room edge with no wall."""
+
+    id: str
+    polygon: Polygon
+    rooms: tuple[str, str] | None = None
+
+
+class Node(_Geo):
+    id: str
+    room_id: str
+    xy: tuple[float, float]
+    clearance_m: float | None = None
+    given: bool = False
+
+
+class Plan(_Geo):
+    plan_id: str
+    m_per_unit: float
+    wall_depth_m: float
+    inner: Polygon
+    rooms: list[Room]
+    doors: list[Door] = []
+    openings: list[Opening] = []
+    nodes: list[Node] = []
+    warnings: list[str] = []
+    folded_parts: list[FoldedPart] = []
+
+
+# --------------------------------------------------------------------------- schema export
+
+SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"
+SCHEMAS: dict[str, type[BaseModel]] = {
+    "submission.schema.json": Submission,
+    "sidecar.schema.json": Sidecar,
+}
+
+
+def render_schemas() -> dict[str, str]:
+    out = {}
+    for name, model in SCHEMAS.items():
+        schema: dict[str, Any] = model.model_json_schema(by_alias=True)
+        out[name] = json.dumps(schema, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return out
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="python -m hackhive.contracts")
+    p.add_argument("--check", action="store_true", help="fail if the committed schemas are stale")
+    args = p.parse_args(argv)
+    rendered = render_schemas()
+    if args.check:
+        stale = [
+            n
+            for n, text in rendered.items()
+            if not (SCHEMA_DIR / n).exists() or (SCHEMA_DIR / n).read_text() != text
+        ]
+        if stale:
+            print(f"stale schemas: {', '.join(stale)}; run python -m hackhive.contracts")
+            return 1
+        print("schemas up to date")
+        return 0
+    SCHEMA_DIR.mkdir(exist_ok=True)
+    for n, text in rendered.items():
+        (SCHEMA_DIR / n).write_text(text)
+        print(f"wrote schemas/{n}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,42 @@
+[project]
+name = "hackhive"
+version = "0.1.0"
+description = "Floor-plan network planner: fewest hubs, closed rings, axis-aligned door-only cable routing"
+readme = "AGENTS.md"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4,<5",
+    "matplotlib>=3,<4",
+    "networkx>=3,<4",
+    "numpy>=2,<3",
+    "pydantic>=2,<3",
+    "shapely>=2.1,<3",
+    "streamlit>=1",
+]
+
+[project.scripts]
+hackhive = "hackhive.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8,<9",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/hackhive"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]  # the formatter owns line length

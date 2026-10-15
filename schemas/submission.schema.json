@@ -1,0 +1,175 @@
+{
+  "$defs": {
+    "HubOut": {
+      "additionalProperties": false,
+      "properties": {
+        "assigned_nodes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assigned Nodes",
+          "type": "array"
+        },
+        "assigned_rooms": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Assigned Rooms",
+          "type": "array"
+        },
+        "closed_sequence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Closed Sequence",
+          "type": "array"
+        },
+        "hub_id": {
+          "title": "Hub Id",
+          "type": "string"
+        },
+        "location": {
+          "$ref": "#/$defs/Location"
+        },
+        "ring_length_m": {
+          "title": "Ring Length M",
+          "type": "number"
+        },
+        "room_id": {
+          "title": "Room Id",
+          "type": "string"
+        },
+        "route_segments": {
+          "items": {
+            "$ref": "#/$defs/RouteSegment"
+          },
+          "title": "Route Segments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "hub_id",
+        "room_id",
+        "location",
+        "assigned_rooms",
+        "assigned_nodes",
+        "closed_sequence",
+        "route_segments",
+        "ring_length_m"
+      ],
+      "title": "HubOut",
+      "type": "object"
+    },
+    "Location": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y"
+      ],
+      "title": "Location",
+      "type": "object"
+    },
+    "ReportedMetrics": {
+      "additionalProperties": false,
+      "properties": {
+        "hub_count": {
+          "title": "Hub Count",
+          "type": "integer"
+        },
+        "total_length_m": {
+          "title": "Total Length M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "hub_count",
+        "total_length_m"
+      ],
+      "title": "ReportedMetrics",
+      "type": "object"
+    },
+    "RouteSegment": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "length_m": {
+          "title": "Length M",
+          "type": "number"
+        },
+        "polyline": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Polyline",
+          "type": "array"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to",
+        "length_m",
+        "polyline"
+      ],
+      "title": "RouteSegment",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Slide 8's output, key for key. Metres, origin lower-left, y up.",
+  "properties": {
+    "hubs": {
+      "items": {
+        "$ref": "#/$defs/HubOut"
+      },
+      "title": "Hubs",
+      "type": "array"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "reported_metrics": {
+      "$ref": "#/$defs/ReportedMetrics"
+    },
+    "units": {
+      "const": "m",
+      "title": "Units",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "units",
+    "hubs",
+    "reported_metrics"
+  ],
+  "title": "Submission",
+  "type": "object"
+}

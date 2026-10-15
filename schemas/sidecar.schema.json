@@ -1,0 +1,392 @@
+{
+  "$defs": {
+    "Bounds": {
+      "additionalProperties": false,
+      "properties": {
+        "k_found": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "K Found"
+        },
+        "k_lb": {
+          "title": "K Lb",
+          "type": "integer"
+        },
+        "proof": {
+          "default": "none",
+          "enum": [
+            "exhaustive",
+            "greedy",
+            "none"
+          ],
+          "title": "Proof",
+          "type": "string"
+        }
+      },
+      "required": [
+        "k_lb"
+      ],
+      "title": "Bounds",
+      "type": "object"
+    },
+    "Constraints": {
+      "additionalProperties": false,
+      "description": "Every tunable limit. The defaults are the organisers' problem statement.",
+      "properties": {
+        "cost_weights": {
+          "$ref": "#/$defs/CostWeights",
+          "default": {
+            "bend": 0.5,
+            "cross": 5.0,
+            "length": 1.0,
+            "overlap": 1.0
+          }
+        },
+        "flip_y": {
+          "default": false,
+          "title": "Flip Y",
+          "type": "boolean"
+        },
+        "grid_m": {
+          "default": 0.1,
+          "title": "Grid M",
+          "type": "number"
+        },
+        "hub_wall_clearance_m": {
+          "default": 0.5,
+          "title": "Hub Wall Clearance M",
+          "type": "number"
+        },
+        "interior_windows_as_doors": {
+          "default": false,
+          "title": "Interior Windows As Doors",
+          "type": "boolean"
+        },
+        "max_area_m2": {
+          "default": 100,
+          "title": "Max Area M2",
+          "type": "number"
+        },
+        "max_nodes": {
+          "default": 5,
+          "title": "Max Nodes",
+          "type": "integer"
+        },
+        "origin_shift": {
+          "default": [
+            0.0,
+            0.0
+          ],
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "title": "Origin Shift",
+          "type": "array"
+        },
+        "tolerance_m": {
+          "default": 0.001,
+          "title": "Tolerance M",
+          "type": "number"
+        },
+        "zone_links_via_excluded": {
+          "default": false,
+          "title": "Zone Links Via Excluded",
+          "type": "boolean"
+        }
+      },
+      "title": "Constraints",
+      "type": "object"
+    },
+    "CostBreakdown": {
+      "additionalProperties": false,
+      "properties": {
+        "B": {
+          "title": "B",
+          "type": "integer"
+        },
+        "H": {
+          "title": "H",
+          "type": "integer"
+        },
+        "J": {
+          "title": "J",
+          "type": "number"
+        },
+        "L": {
+          "title": "L",
+          "type": "number"
+        },
+        "O": {
+          "title": "O",
+          "type": "number"
+        },
+        "X": {
+          "title": "X",
+          "type": "integer"
+        },
+        "area_gap": {
+          "title": "Area Gap",
+          "type": "number"
+        }
+      },
+      "required": [
+        "H",
+        "L",
+        "X",
+        "O",
+        "B",
+        "J",
+        "area_gap"
+      ],
+      "title": "CostBreakdown",
+      "type": "object"
+    },
+    "CostWeights": {
+      "description": "Weights of J = length·L + cross·X + overlap·O + bend·B.",
+      "properties": {
+        "bend": {
+          "title": "Bend",
+          "type": "number"
+        },
+        "cross": {
+          "title": "Cross",
+          "type": "number"
+        },
+        "length": {
+          "title": "Length",
+          "type": "number"
+        },
+        "overlap": {
+          "title": "Overlap",
+          "type": "number"
+        }
+      },
+      "required": [
+        "length",
+        "cross",
+        "overlap",
+        "bend"
+      ],
+      "title": "CostWeights",
+      "type": "object"
+    },
+    "FoldedPart": {
+      "additionalProperties": false,
+      "properties": {
+        "area_m2": {
+          "title": "Area M2",
+          "type": "number"
+        },
+        "into_room_id": {
+          "title": "Into Room Id",
+          "type": "string"
+        },
+        "room_id": {
+          "title": "Room Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "room_id",
+        "into_room_id",
+        "area_m2"
+      ],
+      "title": "FoldedPart",
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "input_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Digest"
+        },
+        "input_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Path"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "Provenance",
+      "type": "object"
+    },
+    "Violation": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Ids",
+          "type": "array"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "rule": {
+          "title": "Rule",
+          "type": "integer"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "strict"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "severity",
+        "message"
+      ],
+      "title": "Violation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Everything that is not part of the submission.",
+  "properties": {
+    "bounds": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Bounds"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "cost": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CostBreakdown"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "folded_parts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/FoldedPart"
+      },
+      "title": "Folded Parts",
+      "type": "array"
+    },
+    "plan_id": {
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/Provenance",
+      "default": {
+        "input_digest": null,
+        "input_path": null,
+        "version": null
+      }
+    },
+    "settings": {
+      "$ref": "#/$defs/Constraints",
+      "default": {
+        "cost_weights": {
+          "bend": 0.5,
+          "cross": 5.0,
+          "length": 1.0,
+          "overlap": 1.0
+        },
+        "flip_y": false,
+        "grid_m": 0.1,
+        "hub_wall_clearance_m": 0.5,
+        "interior_windows_as_doors": false,
+        "max_area_m2": 100.0,
+        "max_nodes": 5,
+        "origin_shift": [
+          0.0,
+          0.0
+        ],
+        "tolerance_m": 0.001,
+        "zone_links_via_excluded": false
+      }
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "submitted_strict_only",
+        "infeasible",
+        "input_error"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "violations": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Violation"
+      },
+      "title": "Violations",
+      "type": "array"
+    },
+    "warnings": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Warnings",
+      "type": "array"
+    }
+  },
+  "required": [
+    "plan_id",
+    "status"
+  ],
+  "title": "Sidecar",
+  "type": "object"
+}
