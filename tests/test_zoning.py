@@ -1,24 +1,24 @@
 """Acceptance tests for #13: enumerate every feasible zoning and the minimum hub count.
 
-Until #9 lands, the eligible graph comes from each raw fixture's `strict_graph_edges`
-(vault output): rooms link only through doors and open passages (slide 3 rule 3).
+The eligible graph is #9's `build_graph` on `io.load_plan`: rooms link only through doors and
+open passages (slide 3 rule 3).
 """
 
+import importlib.util
 import json
-import math
 from pathlib import Path
 
 import networkx as nx
 import pytest
-from shapely.geometry import GeometryCollection, MultiPolygon, Polygon, shape
-from shapely.validation import make_valid
 
 from hackhive.contracts import Constraints, Plan, Room
-from hackhive.vault import load_vault
+from hackhive.graph import build_graph, eligible_graph
+from hackhive.io import load_plan, room_by_label
 from hackhive.zoning import (
     MAX_ZONINGS,
     Infeasible,
     TooLarge,
+    eligible_area_and_nodes,
     enumerate_zonings,
     feasible_zones,
     hub_capable_rooms,
@@ -27,35 +27,17 @@ from hackhive.zoning import (
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 EXPECTED = json.loads((FIXTURES / "expected.json").read_text())
-ELIGIBLE = ("living", "bedroom", "kitchen", "storage")
-ZONE_LINKS = ("via_door", "via_opening")
 
 
-def _polygons(g):
-    if isinstance(g, Polygon):
-        return [] if g.is_empty else [g]
-    if isinstance(g, MultiPolygon | GeometryCollection):
-        return [p for part in g.geoms for p in _polygons(part)]
-    return []
+def _fixture(plan_id: str) -> tuple[Plan, nx.Graph]:
+    plan = load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
+    return plan, eligible_graph(build_graph(plan))
 
 
 def _fixture_graph(plan_id: str) -> tuple[nx.Graph, dict[str, float]]:
-    """Eligible rooms (labels) with their m² and the door/opening links between them."""
-    raw_path = next((FIXTURES / "raw").glob(f"plan-{plan_id}-*.json"))
-    raw = json.loads(raw_path.read_text())
-    plan = raw["plan"]
-    inner = make_valid(shape(plan["inner"]))
-    m_per_unit = math.sqrt(plan["area"] / inner.area)
-    area = {}
-    for kind in ELIGIBLE:
-        if kind in plan:
-            for i, p in enumerate(_polygons(shape(plan[kind]))):
-                area[f"{kind}_{i}"] = make_valid(p).area * m_per_unit**2
-    g = nx.Graph()
-    g.add_nodes_from(area)
-    for e in raw["strict_graph_edges"]:
-        if e["u"] in area and e["v"] in area and e["type"] in ZONE_LINKS:
-            g.add_edge(e["u"], e["v"])
+    """Eligible rooms with their m² and the door/opening links between them."""
+    plan, g = _fixture(plan_id)
+    area, _ = eligible_area_and_nodes(plan)
     return g, area
 
 
@@ -173,17 +155,13 @@ def test_too_many_zonings_raises_too_large():
 # --------------------------------------------------------------------------- rule 6 (C18)
 
 
-def _vault(plan_id: str):
-    return load_vault(next((FIXTURES / "raw").glob(f"plan-{plan_id}-*.json")))
-
-
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
 def test_hub_capability_leaves_fixture_minimums_unchanged(plan_id):
-    plan, g = _vault(plan_id)
+    plan, g = _fixture(plan_id)
     capable = hub_capable_rooms(plan, Constraints())
     assert capable == set(g.nodes)  # every fixture room can host a hub
-    area = {r.id: r.area_m2 for r in plan.rooms if r.eligible}
-    zonings = enumerate_zonings(g, area, Constraints(), hub_capable=capable)
+    area, nodes = eligible_area_and_nodes(plan)
+    zonings = enumerate_zonings(g, area, Constraints(), nodes=nodes, hub_capable=capable)
     assert min_hubs(zonings) == EXPECTED[plan_id]["min_hubs5"]
     assert len(zonings) == EXPECTED[plan_id]["n_all5"]
 
@@ -246,12 +224,48 @@ def _cli(*args):
 
 
 def test_cli_prints_min_hubs_lb_and_count():
-    r = _cli(str(next((FIXTURES / "raw").glob("plan-5924-*.json"))))
+    """The issue's See it: a plain plan file, through load_plan + build_graph."""
+    r = _cli(str(FIXTURES / "plans" / "plan-5924.json"))
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == "min hubs 3 (LB 2) · 7 zonings"
 
 
-def test_cli_fails_loudly_without_a_room_graph():
-    r = _cli(str(FIXTURES / "plans" / "plan-5924.json"))
-    assert r.returncode == 2
-    assert "room graph" in r.stderr
+def test_cli_fails_loudly_on_a_bad_plan(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text('{"hello": 1}', encoding="utf-8")
+    r = _cli(str(bad))
+    assert r.returncode == 1
+    assert "Error" in r.stderr and not r.stdout
+
+
+# --------------------------------------------------------------------------- #9's graph
+
+
+def test_1293_needs_3_hubs_once_the_vault_corner_door_links_are_gone():
+    """The vault linked bedroom_0–bedroom_1 and living_0–bedroom_2 through corner doors that
+    join neither pair (#62); with #9's graph 1293 needs 3 hubs (6 zonings), not 2 (12)."""
+    plan, g = _fixture("1293")
+    label = {r.id: r.label for r in plan.rooms}
+    ours = {frozenset((label[u], label[v])) for u, v in g.edges}
+    raw = json.loads(next((FIXTURES / "raw").glob("plan-1293-*.json")).read_text())
+    eligible = {r.label for r in plan.rooms if r.eligible}
+    vault = {
+        frozenset((e["u"], e["v"]))
+        for e in raw["strict_graph_edges"]
+        if e["type"] in ("via_door", "via_opening") and {e["u"], e["v"]} <= eligible
+    }
+    assert vault - ours == {
+        frozenset(("bedroom_0", "bedroom_1")),
+        frozenset(("living_0", "bedroom_2")),
+    }
+    assert ours <= vault  # #9 adds no link of its own
+    area, nodes = eligible_area_and_nodes(plan)
+    zonings = enumerate_zonings(g, area, Constraints(), nodes=nodes)
+    assert (min_hubs(zonings), len(zonings)) == (3, 6)
+    k2 = room_by_label(plan, "bedroom_2").id
+    assert nx.has_path(g, k2, room_by_label(plan, "living_0").id)  # still one component
+
+
+def test_the_vault_bridge_is_gone():
+    """#13 part 2: zoning reads plain plans; the temporary vault reader is deleted."""
+    assert importlib.util.find_spec("hackhive.vault") is None

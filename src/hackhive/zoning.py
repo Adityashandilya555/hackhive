@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import itertools
-import json
 import math
 import sys
 from collections.abc import Collection, Iterable, Mapping
@@ -40,6 +39,15 @@ class TooLarge(Exception):
 
 class Infeasible(Exception):
     """No zoning satisfies the hard rules."""
+
+
+def eligible_area_and_nodes(plan: Plan) -> tuple[dict[str, float], dict[str, int]]:
+    """Each eligible room's m² and how many nodes sit in it (0 for a folded sliver)."""
+    area = {r.id: r.area_m2 for r in plan.rooms if r.eligible}
+    nodes = dict.fromkeys(area, 0)
+    for n in plan.nodes:
+        nodes[n.room_id] += 1
+    return area, nodes
 
 
 def feasible_zones(
@@ -183,7 +191,8 @@ def _exact_covers(rooms: list[str], zones: list[Zone], limit: int) -> list[Zonin
 
 def main(argv: list[str] | None = None) -> int:
     """``python -m hackhive.zoning <plan.json>`` → ``min hubs k (LB m) · N zonings``."""
-    from hackhive.vault import load_vault  # bridge until #6 (loader) and #9 (graph) land
+    from hackhive.graph import build_graph, eligible_graph
+    from hackhive.io import load_plan
 
     for stream in (sys.stdout, sys.stderr):  # "·" and "²" would break cp1252 on Windows
         if hasattr(stream, "reconfigure"):
@@ -191,19 +200,17 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="python -m hackhive.zoning")
     p.add_argument("plan", type=Path)
     args = p.parse_args(argv)
-    if "strict_graph_edges" not in json.loads(args.plan.read_text(encoding="utf-8")):
-        print(
-            f"{args.plan}: no room graph in this file. Until #9 lands, pass a vault fixture, "
-            "e.g. tests/fixtures/raw/plan-5924-gap.json",
-            file=sys.stderr,
-        )
-        return 2
-    plan, g = load_vault(args.plan)
     c = Constraints()
-    area = {r.id: r.area_m2 for r in plan.rooms if r.eligible}
-    lb = lower_bound(sum(area.values()), len(area), c)
     try:
-        zonings = enumerate_zonings(g, area, c, hub_capable=hub_capable_rooms(plan, c))
+        plan = load_plan(args.plan, c)
+        g = eligible_graph(build_graph(plan, c))
+    except (OSError, ValueError) as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    area, nodes = eligible_area_and_nodes(plan)
+    lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
+    try:
+        zonings = enumerate_zonings(g, area, c, nodes=nodes, hub_capable=hub_capable_rooms(plan, c))
     except (Infeasible, TooLarge) as e:
         print(f"{type(e).__name__}: {e} (LB {lb})", file=sys.stderr)
         return 1
