@@ -149,6 +149,7 @@ ORGANISER_KEYS = {
     "room_polygon": "polygon",
     "nodes": "nodes",  # list of {id, x, y}, drawing units
     "node_id": "id",
+    "node_room_id": "room_id",  # when present, authoritative (checked against the geometry)
     "node_x": "x",
     "node_y": "y",
 }
@@ -224,7 +225,12 @@ def normalise(raw: Any) -> tuple[dict, dict[str, str] | None]:
         out[kind] = mapping(MultiPolygon(polys))
     if raw.get(k["nodes"]) is not None:
         out["nodes"] = [
-            {"id": n.get(k["node_id"]), "x": n.get(k["node_x"]), "y": n.get(k["node_y"])}
+            {
+                "id": n.get(k["node_id"]),
+                "room_id": n.get(k["node_room_id"]),
+                "x": n.get(k["node_x"]),
+                "y": n.get(k["node_y"]),
+            }
             for n in raw[k["nodes"]]
         ]
     return out, ids
@@ -408,11 +414,11 @@ def _fold_slivers(
     return kept, folds
 
 
-def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, float, float]]:
-    """Organiser node points as (id or None, x, y) in drawing units.
+def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, str | None, float, float]]:
+    """Organiser node points as (id or None, room id or None, x, y) in drawing units.
 
-    Accepts `[x, y]` or `{"x", "y", "id"?}` items, or a GeoJSON MultiPoint. The format and the
-    drawing units are assumptions until #46 Q1 is answered; #38 owns the organiser format.
+    Accepts `[x, y]` or `{"x", "y", "id"?, "room_id"?}` items, or a GeoJSON MultiPoint. The format
+    and the drawing units are assumptions until #46 Q1 is answered; #38 owns the organiser format.
     """
     multipoint = isinstance(nodes, dict) and nodes.get("type") == "MultiPoint"
     items = nodes.get("coordinates") if multipoint else nodes
@@ -421,25 +427,36 @@ def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, float, float]]
     out = []
     for it in items:
         if isinstance(it, dict):
-            nid, xy = it.get("id"), (it.get("x"), it.get("y"))
+            nid, rid, xy = it.get("id"), it.get("room_id"), (it.get("x"), it.get("y"))
         elif isinstance(it, list | tuple) and len(it) == 2:
-            nid, xy = None, tuple(it)
+            nid, rid, xy = None, None, tuple(it)
         else:
             raise ValueError(f"plan {pid}: node {it!r} is not [x, y] or {{x, y}}")
         if not all(_is_number(v) for v in xy):
             raise ValueError(f"plan {pid}: node {it!r} needs finite x and y")
-        out.append((None if nid is None else str(nid), float(xy[0]), float(xy[1])))
+        out.append(
+            (
+                None if nid is None else str(nid),
+                None if rid is None else str(rid),
+                float(xy[0]),
+                float(xy[1]),
+            )
+        )
     return out
 
 
 NODE_SNAP_M = 0.10  # a given node this close outside an eligible room is assigned to it (#38)
 
 
-def _pick_frame(
-    xy: np.ndarray, rooms: list[Room], inner: BaseGeometry, pid: Any
-) -> tuple[str, np.ndarray]:
+Frame = Literal["identity", "flip_y", "origin_shift"]
+
+
+def _pick_frame(xy: np.ndarray, rooms: list[Room], inner: BaseGeometry, pid: Any) -> Frame:
     """The first of identity, flip_y, origin_shift under which every given node is in an
-    eligible room or <= NODE_SNAP_M from one (#38). Raises InputFormatError if none works."""
+    eligible room or <= NODE_SNAP_M from one (#38). Raises InputFormatError if none works.
+
+    The test maps the nodes back into the geometry's frame; the caller then moves the
+    *geometry* into the nodes' frame (`_to_node_frame`), so given nodes never move (slide 2)."""
     eligible = [r for r in rooms if r.eligible]
     x0, y0, _, y1 = inner.bounds
     flipped = xy.copy()
@@ -456,38 +473,70 @@ def _pick_frame(
 
     for name, pts in frames:
         if not misses(pts):
-            return name, pts
+            return name
     bad = misses(xy)
     other = next((r.label for r in rooms if not r.eligible and r.polygon.covers(bad[0])), None)
     where = f"one lies in the excluded room {other}" if other else "e.g. " + bad[0].wkt
     raise InputFormatError(f"plan {pid}: frame: {len(bad)} nodes outside rooms ({where})")
 
 
+def _to_node_frame(frame: Frame, inner: BaseGeometry) -> Callable[[BaseGeometry], BaseGeometry]:
+    """Moves geometry into the given nodes' frame: the inverse of what `_pick_frame` applied to
+    the nodes to test them (flip_y is its own inverse; origin_shift subtracts the corner)."""
+    x0, y0, _, y1 = inner.bounds
+
+    def move(xy: np.ndarray) -> np.ndarray:
+        out = xy.copy()
+        if frame == "flip_y":
+            out[:, 1] = y0 + y1 - xy[:, 1]
+        elif frame == "origin_shift":
+            out -= [x0, y0]
+        return out
+
+    def apply(g: BaseGeometry) -> BaseGeometry:
+        if frame == "identity":
+            return g
+        moved = shapely.transform(g, move)
+        return moved if moved.is_valid else shapely.make_valid(moved)
+
+    return apply
+
+
 def _given_nodes(
-    raw_nodes: Any,
+    pts: list[tuple[str | None, str | None, float, float]],
+    xy_m: np.ndarray,
     rooms: list[Room],
-    to_metres: Callable[[np.ndarray], np.ndarray],
     obstacles: Any,
-    inner: BaseGeometry,
     pid: Any,
 ) -> tuple[list[Node], list[str]]:
-    """Organiser nodes, scaled with the plan's frame and assigned to the eligible room that covers
-    them (the lowest R-id on a shared edge), or to the nearest one if they sit <= 10 cm outside.
-    Never moved, merged or dropped (slide 2, C3; #38 frame check).
+    """Organiser nodes, at their given (scaled) points, never moved, merged or dropped (slide 2,
+    C3). A node's own `room_id`, when given, is authoritative: the node must be inside that
+    eligible room or <= NODE_SNAP_M from it, else InputFormatError. Otherwise it goes to the
+    eligible room that covers it (the lowest R-id on a shared edge), or to the nearest one if it
+    sits <= 10 cm outside.
 
     A room with none or several gets a warning: legal (decision_conventions §3), but it likely
     means our rooms differ from the organisers' (e.g. a repaired room split in two)."""
-    pts = _given_points(raw_nodes, pid)
-    xy_m = to_metres(np.array([[x, y] for _, x, y in pts], dtype=float).reshape(-1, 2))
-    frame, xy_m = _pick_frame(xy_m, rooms, inner, pid)
     eligible = [r for r in rooms if r.eligible]
+    by_id = {r.id: r for r in eligible}
     placed = []
-    notes = [] if frame == "identity" else [f"frame: {frame} (given nodes fit the plan only so)"]
-    for (nid, x, y), (mx, my) in zip(pts, xy_m, strict=True):
+    notes: list[str] = []
+    for (nid, rid, x, y), (mx, my) in zip(pts, xy_m, strict=True):
         p = Point(mx, my)
-        room = next((r for r in eligible if r.polygon.covers(p)), None)
-        if room is None:
-            room = min(eligible, key=lambda r: (r.polygon.distance(p), rooms.index(r)))
+        if rid is not None:
+            room = by_id.get(rid)
+            if room is None:
+                raise InputFormatError(f"plan {pid}: node {nid} names room {rid}, no eligible room")
+            if room.polygon.distance(p) > NODE_SNAP_M:
+                raise InputFormatError(
+                    f"plan {pid}: node {nid} is said to be in {rid} but lies "
+                    f"{room.polygon.distance(p):.2f} m outside it"
+                )
+        else:
+            room = next((r for r in eligible if r.polygon.covers(p)), None)
+        if room is None or not room.polygon.covers(p):
+            if room is None:
+                room = min(eligible, key=lambda r: (r.polygon.distance(p), rooms.index(r)))
             notes.append(
                 f"given node {nid or (x, y)} is {room.polygon.distance(p) * 100:.1f} cm outside "
                 f"{room.id} ({room.label}): assigned to it, not moved"
@@ -559,17 +608,29 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
         for n, (t, i, p) in enumerate(ordered, start=1)
     ]
     room_id = {r.label: r.id for r in rooms}
-    room_of = {r.id: r for r in rooms}
 
+    inner, walls, windows, front_doors = layers.inner, layers.wall, layers.window, layers.front_door
+    door_polys = layers.door
+    frame: Frame = "identity"
     if given:
-        nodes, warnings = _given_nodes(
-            raw["nodes"], rooms, layers.to_metres, obstacles, layers.inner, pid
-        )
+        pts = _given_points(raw["nodes"], pid)
+        xy_m = layers.to_metres(np.array([[x, y] for *_, x, y in pts], dtype=float).reshape(-1, 2))
+        frame = _pick_frame(xy_m, rooms, inner, pid)
+        if frame != "identity":  # move the geometry into the nodes' frame; nodes never move
+            move = _to_node_frame(frame, inner)
+            rooms = [r.model_copy(update={"polygon": move(r.polygon)}) for r in rooms]
+            inner, obstacles = move(inner), move(obstacles)
+            walls, windows = [move(p) for p in walls], [move(p) for p in windows]
+            front_doors, door_polys = [move(p) for p in front_doors], [move(p) for p in door_polys]
+        nodes, warnings = _given_nodes(pts, xy_m, rooms, obstacles, pid)
+        if frame != "identity":
+            warnings.insert(0, f"frame: {frame} (geometry moved into the given nodes' frame)")
     else:
         nodes, warnings = [], []
         for k, r in enumerate((r for r in rooms if r.eligible), start=1):
             xy, clearance = _node_spot(r.polygon, obstacles)
             nodes.append(Node(id=f"N{k}", room_id=r.id, xy=xy, clearance_m=clearance, given=False))
+    room_of = {r.id: r for r in rooms}
     warnings += [
         f"{room_of[n.room_id].id} ({room_of[n.room_id].label}): node {n.id} clearance "
         f"{n.clearance_m:.2f} m < {NODE_CLEARANCE_M} m"
@@ -580,12 +641,12 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
         plan_id=str(raw["plan_id"]) if raw.get("plan_id") is not None else f"PLAN_{pid}",
         m_per_unit=layers.m_per_unit,
         wall_depth_m=layers.wall_depth_m,
-        inner=layers.inner,
+        inner=inner,
         rooms=rooms,
-        walls=layers.wall,
-        windows=layers.window,
-        front_doors=layers.front_door,
-        doors=[Door(id=f"door_{i}", polygon=p) for i, p in enumerate(layers.door)],
+        walls=walls,
+        windows=windows,
+        front_doors=front_doors,
+        doors=[Door(id=f"door_{i}", polygon=p) for i, p in enumerate(door_polys)],
         openings=[],
         nodes=nodes,
         warnings=[*layers.infeasible_reasons, *warnings],
@@ -593,6 +654,7 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
             FoldedPart(room_id=f"living_{s}", into_room_id=room_id[f"living_{into}"], area_m2=a)
             for s, into, a in folds
         ],
+        frame=frame,
     )
 
 
