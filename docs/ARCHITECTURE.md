@@ -10,6 +10,7 @@ Lead's research notes live in Adi's Obsidian vault (not in this repo); this docu
 - `docs/NOVEL_FEATURES.md`: what we add beyond the spec;
 - `docs/REFERENCES.md`: the reference repos;
 - `docs/output-format.md`: the submission + sidecar format (#34).
+- `docs/EXECUTION_PLAN.md`: who works on what, in parallel and in sequence (lane maps, waves, slots, critical path).
 
 ## 1. Overview
 For any unseen floor plan, with no manual step, hackhive:
@@ -63,57 +64,81 @@ For any unseen floor plan, with no manual step, hackhive:
 - **A10** Windows are obstacles by default (C37 adds the other reading).
 
 ## 2. Pipeline
-Arrows show **data flow**; each edge is labelled with the `contracts.py` model it carries. Every box is a Python module or a one-shot process; nothing is a long-running service. The source is `docs/architecture.mmd`, verified with `npx -y @mermaid-js/mermaid-cli@11.16.0` → `docs/architecture.svg`.
+Arrows show **data flow**; each edge names the `contracts.py` model it carries. Every box is a Python module or a one-shot process; nothing is a long-running service.
+
+- **Source:** `docs/architecture.mmd`.
+- **Verified with** mermaid-cli 11.16.0 (pinned), and also renders without errors under mermaid 10.9, 9.4 and 8.13. The syntax is kept GitHub-safe: no HTML line breaks, no semicolons, no quoted edge labels.
+- **Static copies:** `docs/architecture.svg` and `docs/architecture.png`.
 
 ```mermaid
 flowchart TB
-    planjson[("plan JSON file (organiser file or one ResPlan plan)")]
+    planjson[(Plan JSON file - organiser or ResPlan)]
 
-    subgraph pkg["hackhive package: src/hackhive, in-process library calls; every edge carries a contracts.py model"]
-        io["io.py: read · make_valid · scale to metres · nodes<br/>ref: ResPlan loader helpers (MIT copy)"]
-        roomgraph["graph.py: strict door / open-passage graph<br/>ref: ResPlan plan_to_graph (re-implemented, strict)"]
-        zoning["zoning.py: every contiguous capped zoning, exact<br/>ref: GerryChain contiguity, HGS lower-bound formula"]
-        grid["grid.py: 10 cm room-label raster<br/>ref: OrthoRoute portal snapping"]
-        cache["route.py PathCache: one-to-all bend-aware search<br/>ref: OrthoRoute seeds and ROI, Freerouting door graph (concept)"]
-        rings["rings.py: hub location + exact ring order<br/>ref: PyVRP exact-vs-estimate cost (LB pruning)"]
-        solve["solve.py: solve() · enumerate() · rank"]
-        routerings["route.py route_rings: occupancy penalty + rip-up passes<br/>ref: VTR PathFinder cost, OrthoRoute commit/clear"]
-        metrics["checker.py metrics: H · L · X · O · B · J at 1 mm (slide 7)<br/>ref: OptiWindNet fold and side tests"]
-        validate["checker.py rules: slide 3 hard rules 1-6 + submit gate<br/>ref: OptiWindNet validators, GerryChain contiguity"]
-        viz["viz.py: overlay · gallery tiles · compare · Pareto<br/>ref: house-planner electric layer, OptiWindNet plotting"]
+    subgraph pkg [hackhive package - src/hackhive - in-process library calls]
+        io[io.py - read, repair, scale to metres, nodes]
+        roomgraph[graph.py - strict door and open-passage graph]
+        zoning[zoning.py - every contiguous capped zoning]
+        grid[grid.py - 10 cm room-label raster]
+        cache[route.py - path cache, bend-aware search]
+        rings[rings.py - hub location and exact ring order]
+        solve[solve.py - solve, enumerate, rank by H then J then area gap]
+        routerings[route.py - route rings, occupancy penalty, rip-up]
+        metrics[checker.py - metrics H, L, X, O, B, J at 1 mm]
+        rules[checker.py - hard rules 1 to 6 and submit gate]
+        viz[viz.py - overlay, gallery, compare, Pareto, presentation]
     end
 
-    out[("PLAN_id.json (slide 8, only if valid) + sidecar.json + overlay / presentation PNG")]
-    csv[("batch.csv")]
-    cli["hackhive CLI (one-shot process)"]
-    batch["hackhive batch (one-shot run over the test split)"]
-    app["app.py Streamlit demo (local process, started on demand)"]
+    out[(Submission JSON if valid, sidecar JSON, PNG and SVG)]
+    csv[(batch.csv)]
+    cli[hackhive CLI - one-shot process]
+    batch[hackhive batch - one-shot run over the test split]
+    app[Streamlit app - local process, started on demand]
 
-    planjson -->|"raw dict"| io
-    io -->|"Plan: rooms, doors, nodes in metres"| roomgraph
-    roomgraph -->|"G_elig: eligible rooms, door/opening edges"| zoning
-    roomgraph -->|"Plan + Opening regions"| grid
-    grid -->|"LabelGrid"| cache
-    zoning -->|"Zoning list (max 116 per plan)"| rings
-    cache -->|"PathCache: pairwise paths"| rings
-    rings -->|"Arrangement list: hubs, rings H to H, ranked by H, J, gap"| solve
-    solve -->|"best Arrangement"| routerings
-    grid -->|"LabelGrid"| routerings
-    routerings -->|"Segment polylines"| metrics
-    metrics -->|"Metrics: H, L, X, O, B, J, area gap"| solve
-    solve -->|"Submission"| validate
-    validate -->|"Violation list, gate verdict"| solve
-    solve -->|"Submission + Sidecar"| viz
-    solve -->|"Submission JSON (gated) + Sidecar"| out
-    viz -->|"PNG / SVG"| out
+    planjson -->|raw dict| io
+    io -->|Plan| roomgraph
+    roomgraph -->|eligible graph| zoning
+    roomgraph -->|Plan and opening regions| grid
+    grid -->|LabelGrid| cache
+    zoning -->|zonings| rings
+    cache -->|pairwise paths| rings
+    rings -->|ranked arrangements| solve
+    solve -->|best arrangement| routerings
+    grid -->|LabelGrid| routerings
+    routerings -->|polylines| metrics
+    metrics -->|H, L, X, O, B, J, area gap| solve
+    solve -->|Submission| rules
+    rules -->|violations and verdict| solve
+    solve -->|Submission and Sidecar| viz
+    solve -->|gated Submission and Sidecar| out
+    viz -->|PNG and SVG| out
 
-    cli -->|"calls solve()"| solve
-    batch -->|"calls solve() per plan"| solve
-    batch -->|"one row per plan"| csv
-    app -->|"calls solve() and enumerate()"| solve
-    app -->|"calls viz"| viz
-    app -->|"reads"| csv
+    cli -->|calls solve| solve
+    batch -->|calls solve per plan| solve
+    batch -->|one row per plan| csv
+    app -->|calls solve and enumerate| solve
+    app -->|calls viz| viz
+    app -->|reads| csv
 ```
+
+If GitHub can't render the interactive diagram, the same picture is here:
+
+![hackhive pipeline](architecture.png)
+
+**Which reference repo each box came from** (details in §3-4):
+
+| Box | Reference ideas (verdict) |
+|---|---|
+| `io.py` | ResPlan loader helpers `normalize_keys` / `get_geometries` (Adopt, MIT copy) |
+| `graph.py` | ResPlan `plan_to_graph` door attribution + open passages (Adapt, re-implemented strictly) |
+| `zoning.py` | GerryChain contiguity (Adapt); HGS-CVRP lower-bound formula (Adapt) |
+| `grid.py` | OrthoRoute portal snapping (Adapt) |
+| `route.py` (path cache) | OrthoRoute multi-source seeds + ROI (Adapt); Freerouting door graph (concept only, GPL) |
+| `rings.py` | PyVRP exact-vs-estimate cost evaluation → lower-bound pruning (Adapt) |
+| `route.py` (route rings) | VTR PathFinder present-cost term + rip-up (Adapt / Adopt); OrthoRoute commit/clear (Adapt) |
+| `checker.py` (metrics) | OptiWindNet fold detection and side test (Adapt); organiser slides 6-7 |
+| `checker.py` (rules + gate) | OptiWindNet validator pattern (Adapt); GerryChain contiguity (Adapt); organiser slide 3 |
+| `viz.py` | house-planner electric layer + summary panel (Adapt / Adopt); OptiWindNet `compare` / info box (Adapt / Adopt); ResPlan base layer (Adapt) |
+| `solve.py`, CLI, batch, app | built from scratch; ResPlan `split.json` for batch (Adopt); pyvisgraph only in tests |
 
 ## 3. What we took from each reference repo
 These are design ideas only. **No code is copied** except ResPlan's two loader helpers (MIT, notice kept). **Freerouting is GPL-3.0: concepts only, never code.** The full matrix (69 rows) is summarised here. Evidence is `path:Lstart-Lend @ sha`, read on 2026-10-15.
