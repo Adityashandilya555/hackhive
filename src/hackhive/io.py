@@ -225,7 +225,7 @@ def read_layers(raw: dict, c: Constraints | None = None) -> Layers:
 
 # --------------------------------------------------------------------------- the Plan (#6)
 
-NODE_CLEARANCE_M = 0.5  # slide 2: node points sit 0.5 m from walls
+NODE_CLEARANCE_M = 0.5  # slide 2: node clearance, 0.5 m from walls
 _GAP_EPS_M = 1e-6  # closes float-sized gaps when a folded sliver's union isn't one polygon
 
 
@@ -246,7 +246,7 @@ def _one_polygon(g: Any) -> Polygon | None:
 def _fold_slivers(
     parts: list[Polygon],
 ) -> tuple[dict[int, Polygon], list[tuple[int, int, float]]]:
-    """Fold living parts with no point 0.5 m from their outline into a neighbour (C38).
+    """Fold living parts with no point NODE_CLEARANCE_M from their outline into a neighbour (C38).
 
     Generator only. A sliver folds into the living part it shares the longest boundary with, else
     into the nearest one. It stays its own room (its node then gets a clearance warning) if no
