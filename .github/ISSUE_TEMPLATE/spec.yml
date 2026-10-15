@@ -1,0 +1,63 @@
+name: Spec
+description: A spec an agent can implement end to end in one PR.
+body:
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why this exists. Link the plan/ADR and the problem constraint it serves.
+    validations:
+      required: true
+  - type: textarea
+    id: spec
+    attributes:
+      label: Spec
+      description: What changes. Modules, functions, data contracts (pydantic models / output JSON fields).
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How
+      description: Numbered steps. Prefix manual steps with `HUMAN:` and give the exact click path or command.
+      placeholder: |
+        1. …
+        2. HUMAN: GitHub → Settings → … → …
+    validations:
+      required: true
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: Verified `path:Lstart-Lend @ sha` (ours or ~/refs/ps4). Mark anything unread as UNVERIFIED.
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Given/When/Then, each one testable by pytest.
+      placeholder: |
+        - [ ] Given …, when …, then …
+    validations:
+      required: true
+  - type: textarea
+    id: test-plan
+    attributes:
+      label: Test plan
+      description: Test files, fixtures (which plan JSONs), and the commands to run.
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Out of scope
+  - type: input
+    id: depends-on
+    attributes:
+      label: Depends on
+      placeholder: "#12, #15 (or: none)"
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment variables
+      description: Name, purpose, and the platform that holds it, or "none".
+      value: none

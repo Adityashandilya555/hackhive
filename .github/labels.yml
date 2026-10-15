@@ -1,0 +1,23 @@
+# Synced to GitHub with: uv run scripts/sync_labels.py
+- {name: "area:parsing", color: "1d76db", description: "Plan JSON → pydantic models, room/door graph"}
+- {name: "area:zoning", color: "1d76db", description: "Contiguous hub zones, capacity limits"}
+- {name: "area:rings", color: "1d76db", description: "Ring order (exact TSP ≤5 nodes)"}
+- {name: "area:routing", color: "1d76db", description: "Occupancy grid, A*, bends, congestion/overlaps"}
+- {name: "area:validation", color: "1d76db", description: "Output JSON schema and rule checks"}
+- {name: "area:viz", color: "1d76db", description: "matplotlib overlay, streamlit demo"}
+- {name: "area:batch", color: "1d76db", description: "ResPlan batch runs and reports"}
+- {name: "area:tooling", color: "1d76db", description: "uv, ruff, CI, repo hygiene"}
+- {name: "type:feature", color: "0e8a16", description: "New capability"}
+- {name: "type:chore", color: "c5def5", description: "Maintenance, no behaviour change"}
+- {name: "type:spike", color: "fbca04", description: "Time-boxed investigation; output is a note or ADR"}
+- {name: "type:test", color: "bfd4f2", description: "Tests only"}
+- {name: "type:docs", color: "d4c5f9", description: "Documentation only"}
+- {name: "priority:P0", color: "b60205", description: "Blocks the submission"}
+- {name: "priority:P1", color: "d93f0b", description: "Needed for a strong ranking"}
+- {name: "priority:P2", color: "fef2c0", description: "Nice to have"}
+- {name: "size:S", color: "ededed", description: "≤ ½ day"}
+- {name: "size:M", color: "cccccc", description: "1–2 days"}
+- {name: "size:L", color: "999999", description: "~3 days; split anything bigger"}
+- {name: "needs:human", color: "e99695", description: "Has HUMAN: steps"}
+- {name: "blocked", color: "000000", description: "Waiting on a dependency"}
+- {name: "good-first-agent-task", color: "7057ff", description: "Small, well-specified, safe for an agent"}
