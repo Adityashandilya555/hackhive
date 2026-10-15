@@ -4,6 +4,9 @@ Labels: −1 is blocked (walls, windows, the front door, outside ``inner``); ``0
 plan's rooms in ``plan.rooms`` order; ``R + k`` are doors, then openings. Every door id is
 above every room id, which ``route.search`` enforces.
 
+Which two rooms a passage joins is #9's call (``build_graph`` fills ``Door.rooms`` and
+``plan.openings``); the raster paints the passages and checks they touch those rooms.
+
 Lattice (shared with #14's hub candidates): cell column k spans ``[k, k + 1) · cell_m`` in x
 and row j spans ``[j, j + 1) · cell_m`` in y, anchored at the plan origin, y up. Row 0 of
 ``labels`` is the lowest row that covers the plan.
@@ -48,9 +51,17 @@ class LabelGrid:
 
     @classmethod
     def from_plan(
-        cls, plan: Plan, openings: Sequence[Opening] = (), cell_m: float | None = None
+        cls, plan: Plan, openings: Sequence[Opening] | None = None, cell_m: float | None = None
     ) -> LabelGrid:
-        """Paint, in order: rooms, walls/windows/front door, doors + openings, outside."""
+        """Paint, in order: rooms, walls/windows/front door, openings, doors, outside.
+
+        ``openings`` defaults to ``plan.openings`` (#9's ``build_graph`` fills them). Doors are
+        painted after openings, so an opening band never takes a door's cells. A passage joins
+        the rooms its ``Door.rooms`` / ``Opening.rooms`` name (set by ``build_graph``); the
+        raster only checks that it touches them. Without names, the two rooms its cells touch
+        most are used.
+        """
+        openings = plan.openings if openings is None else openings
         g = cell_m if cell_m is not None else Constraints().grid_m
         x0, y0, x1, y1 = plan.inner.buffer(2 * g).bounds
         col0, row0 = math.floor(x0 / g), math.floor(y0 / g)
@@ -74,46 +85,67 @@ class LabelGrid:
             labels[inside(geom)] = BLOCKED
         labels[never_passable] = BLOCKED
         outside = ~inside(plan.inner)
-        before_doors = labels.copy()
 
         n_rooms = len(plan.rooms)
-        passages: list[tuple[str, np.ndarray]] = []
-        for d in plan.doors:
-            passages.append((d.id, inside(door_gap(d.polygon, plan.wall_depth_m, g))))
-        for o in openings:
-            passages.append((o.id, inside(o.polygon)))
-        for k, (pid, mask) in enumerate(passages):
-            mask &= ~never_passable & ~outside
-            if not mask.any():
-                raise ValueError(f"{plan.plan_id}: {pid} covers no cell centre")
-            labels[mask] = n_rooms + k
+        # (id, cells, named rooms); labels R + k follow this order: doors, then openings
+        passages: list[tuple[str, np.ndarray, tuple[str, str] | None]] = [
+            (d.id, inside(door_gap(d.polygon, plan.wall_depth_m, g)), d.rooms) for d in plan.doors
+        ]
+        passages += [(o.id, inside(o.polygon), o.rooms) for o in openings]
+        n_doors = len(plan.doors)
+        under: dict[int, np.ndarray] = {}  # what each passage was painted over
+        for group in (range(n_doors, len(passages)), range(n_doors)):  # openings, then doors
+            snapshot = labels.copy()
+            for k in group:
+                pid, mask, _ = passages[k]
+                mask &= ~never_passable & ~outside
+                if not mask.any():
+                    raise ValueError(f"{plan.plan_id}: {pid} covers no cell centre")
+                under[k] = snapshot
+                labels[mask] = n_rooms + k
         labels[outside] = BLOCKED
 
+        index = {r.id: i for i, r in enumerate(plan.rooms)}
         door_rooms: dict[int, tuple[int, int]] = {}
         exterior: list[str] = []
-        for k, (pid, _) in enumerate(passages):
+        for k, (pid, _, named) in enumerate(passages):
             label = n_rooms + k
             here = labels == label
             touched = _contacts(labels, here, n_rooms)
             if not touched:
                 raise ValueError(f"{plan.plan_id}: {pid} touches no room")
-            if len(touched) == 1:  # the other side is outside `inner` (a balcony)
-                labels[here] = before_doors[here]
-                labels[outside] = BLOCKED
-                exterior.append(pid)
+            if named is not None:
+                pair = (index[named[0]], index[named[1]])
+                missing = [r for r in pair if r not in touched]
+                if not missing:
+                    door_rooms[label] = pair
+                    continue
+                if any((labels == r).any() for r in missing):
+                    names = ", ".join(plan.rooms[r].id for r in missing)
+                    raise ValueError(
+                        f"{plan.plan_id}: {pid} joins {named[0]} and {named[1]}, "
+                        f"but its cells don't touch {names}"
+                    )
+                # the other room lies outside `inner` (a balcony): fall through to exterior
+            elif len(touched) > 1:
+                ranked = sorted(touched, key=lambda r: (-touched[r], r))
+                third = touched[ranked[2]] if len(ranked) > 2 else 0
+                if third >= AMBIGUOUS_THIRD_ROOM * touched[ranked[1]]:
+                    names = ", ".join(plan.rooms[r].id for r in ranked)
+                    raise ValueError(f"{plan.plan_id}: {pid} touches 3+ rooms ({names})")
+                door_rooms[label] = (ranked[0], ranked[1])
                 continue
-            ranked = sorted(touched, key=lambda r: (-touched[r], r))
-            if len(ranked) > 2 and touched[ranked[2]] >= AMBIGUOUS_THIRD_ROOM * touched[ranked[1]]:
-                names = ", ".join(plan.rooms[r].id for r in ranked)
-                raise ValueError(f"{plan.plan_id}: {pid} touches 3+ rooms ({names})")
-            door_rooms[label] = (ranked[0], ranked[1])
+            # one side is outside `inner` (a balcony): blocked, never a passage
+            labels[here] = under[k][here]
+            labels[outside] = BLOCKED
+            exterior.append(pid)
 
         return cls(
             labels=labels,
             cell_m=g,
             origin=(col0, row0),
             room_ids=[r.id for r in plan.rooms],
-            passage_ids=[pid for pid, _ in passages],
+            passage_ids=[pid for pid, _, _ in passages],
             door_rooms=door_rooms,
             exterior_doors=exterior,
         )
@@ -230,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
+    from hackhive.graph import build_graph
     from hackhive.io import load_plan
 
     p = argparse.ArgumentParser(prog="python -m hackhive.grid")
@@ -237,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("out", type=Path)
     args = p.parse_args(argv)
     plan = load_plan(args.plan)
+    build_graph(plan)  # fills Door.rooms and plan.openings (#9)
     grid = LabelGrid.from_plan(plan)
     n_rooms = len(grid.room_ids)
     image = np.zeros((*grid.labels.shape, 3))
@@ -249,7 +283,11 @@ def main(argv: list[str] | None = None) -> int:
     ax.set_axis_off()
     args.out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=100, bbox_inches="tight")
-    print(f"wrote {args.out}")
+    n_open = len(plan.openings)
+    print(
+        f"{plan.plan_id}: {len(plan.doors)} doors, {n_open} opening{'' if n_open == 1 else 's'}, "
+        f"{len(grid.exterior_doors)} exterior; wrote {args.out}"
+    )
     return 0
 
 
