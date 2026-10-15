@@ -361,6 +361,15 @@ def test_nodes_living_sliver_folded():
     assert plan.warnings == []
 
 
+def test_nodes_lone_sliver_keeps_its_node():
+    """C38: with no living part to fold into, the sliver keeps its node and gets a warning."""
+    plan = load_plan(synthetic(living=box(50, 0, 53, 30)))
+    (node,) = plan.nodes
+    assert plan.folded_parts == [] and node.room_id == "R01"
+    assert node.clearance_m == pytest.approx(0.15, abs=0.01)
+    assert len(plan.warnings) == 1 and "living_0" in plan.warnings[0]
+
+
 def test_nodes_sliver_kept_with_given_nodes():
     """C38: with organiser nodes nothing is folded, and the node in the sliver is kept."""
     raw = synthetic(living=SLIVER)
