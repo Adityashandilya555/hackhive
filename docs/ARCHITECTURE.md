@@ -24,8 +24,8 @@ For any unseen floor plan, with no manual step, hackhive:
 | C1 | one fixed node per eligible room (living, bedroom, kitchen, storage) | C20 | invalid polygons are repaired |
 | C2 | each eligible polygon is one room with one node | C21 | input: one JSON file per plan |
 | C3 | node points are given by the organisers; immovable | C22 | processes an unseen plan with no manual step |
-| C4 | excluded rooms (bathroom, balcony, stair, garden, pool, parking, land): no node, no hub | C23 | overlay: zone colours, hubs, nodes, numbered order (the last number = the return), full routes, crossing room boundaries only at doors/passages |
-| C5 | ≤ 100 m² of eligible area per hub | C24 | JSON output for validation and scoring (our own format + Schema) |
+| C4 | excluded rooms (bathroom, balcony, stair, garden, pool, parking, land): no node, no hub | C23 | overlay: zones, **hub and node ids**, numbered order (the last = the return), full rings, **violations in red** |
+| C5 | ≤ 100 m² of eligible area per hub | C24 | the output JSON is **slide 8 exactly** (metres, origin lower-left, y up) |
 | C6 | ≤ 5 nodes per hub (≤ 20 is an optional what-if) | C25 | per-hub summary: rooms, m², nodes, length, bends |
 | C7 | hubs ≥ max(⌈area/100⌉, ⌈nodes/cap⌉) | C26 | "What a reviewer confirms" checklist (slide 5) |
 | C8 / C34 | a zone's rooms connect directly through door/opening links; excluded rooms never link | C27 | a room > 100 m² → an infeasible result, not a crash |
@@ -36,10 +36,14 @@ For any unseen floor plan, with no manual step, hackhive:
 | C13 | change rooms only through doors and open passages | C33 | cables may cross any room inside the building; overlaps and crossings between rings are cost, not violations |
 | C14 | never through walls, windows or the outside; stay inside `inner` | C35 | each sprint ends with a pull-and-run-locally verification |
 | C15 | single-door room: in and out through the same door (two parallel runs); the shared length counts as overlap | C36 | sprints carry no dates |
-| C16 | rank: fewest hubs first, then lowest cost | C37 | interior "windows": both readings, switched by a UI checkbox; default = obstacle |
-| C17 | cost = length + bends + crossings + overlap (weights are ours, replaceable) | C38 | the solver serves every given node; our ResPlan node generator folds unfit living slivers and reports them |
-| C18 | we choose the hub count and location: inside an eligible room of the hub's own zone | | |
-| C19 | metres = units ÷ √(inner.area / area), converted once per plan | | |
+| C16 | rank: fewest hubs H first, then lowest J, then the smaller assigned-area gap | C37 | interior "windows": both readings, switched by a UI checkbox; default = obstacle |
+| C17 | **J = L + 5X + O + 0.5B** (slides 3, 6; the weights are starting values, kept as settings) | C38 | the solver serves every given node; our ResPlan node generator folds unfit living slivers and reports them |
+| C18 | hub inside an eligible room **assigned to it**, **≥ 0.5 m from walls**; a hub and a node may share a room (slide 3 rule 6) | C39 | a design must pass all six hard rules of slide 3 before it is ranked |
+| C19 | metres = units ÷ √(inner.area / area), converted once per plan | C40 | metric semantics (slide 7): X counts inside one ring too; O = (k − 1) × length on the same line; B at vertices, nodes and the hub |
+| C41 | tolerance 1 mm | C42 | the checker recomputes from polylines; reported values are ignored |
+| C43 | **an invalid or missing plan scores zero** | C45 | a final-presentation visual |
+| C46 | the input format is unknown; ids look like `R05`, `N1` | C47 | tie-break: the smaller assigned-area gap (max − min) |
+| C48 | slide-8 format details (`location` object, `[x, y]` points, ordering, plan-global ids) | | |
 
 ### Assumptions
 - **A1** The organiser JSON format is unknown, so the loader is an adapter: ResPlan-shaped geometry + an optional `nodes` field.
@@ -67,12 +71,12 @@ flowchart TB
         rings["rings.py: hub location + exact ring order<br/>ref: PyVRP exact-vs-estimate cost (LB pruning)"]
         solve["solve.py: solve() · enumerate() · rank"]
         routerings["route.py route_rings: occupancy penalty + rip-up passes<br/>ref: VTR PathFinder cost, OrthoRoute commit/clear"]
-        metrics["metrics.py: length · bends · overlap · crossings · cost<br/>ref: OptiWindNet fold and side tests"]
-        validate["validate.py: one check per C-id + reviewer checklist<br/>ref: OptiWindNet validators, GerryChain contiguity"]
+        metrics["checker.py metrics: H · L · X · O · B · J at 1 mm (slide 7)<br/>ref: OptiWindNet fold and side tests"]
+        validate["checker.py rules: slide 3 hard rules 1-6 + submit gate<br/>ref: OptiWindNet validators, GerryChain contiguity"]
         viz["viz.py: overlay · gallery tiles · compare · Pareto<br/>ref: house-planner electric layer, OptiWindNet plotting"]
     end
 
-    out[("solution.json + overlay.png")]
+    out[("PLAN_id.json (slide 8, only if valid) + sidecar.json + overlay / presentation PNG")]
     csv[("batch.csv")]
     cli["hackhive CLI (one-shot process)"]
     batch["hackhive batch (one-shot run over the test split)"]
@@ -85,16 +89,16 @@ flowchart TB
     grid -->|"LabelGrid"| cache
     zoning -->|"Zoning list (max 116 per plan)"| rings
     cache -->|"PathCache: pairwise paths"| rings
-    rings -->|"Arrangement list: hubs, rings H to H"| solve
+    rings -->|"Arrangement list: hubs, rings H to H, ranked by H, J, gap"| solve
     solve -->|"best Arrangement"| routerings
     grid -->|"LabelGrid"| routerings
     routerings -->|"Segment polylines"| metrics
-    metrics -->|"Totals, cost, rank_key"| solve
-    solve -->|"Solution"| validate
-    validate -->|"Violation list + checklist"| solve
-    solve -->|"Solution"| viz
-    solve -->|"Solution JSON"| out
-    viz -->|"PNG"| out
+    metrics -->|"Metrics: H, L, X, O, B, J, area gap"| solve
+    solve -->|"Submission"| validate
+    validate -->|"Violation list, gate verdict"| solve
+    solve -->|"Submission + Sidecar"| viz
+    solve -->|"Submission JSON (gated) + Sidecar"| out
+    viz -->|"PNG / SVG"| out
 
     cli -->|"calls solve()"| solve
     batch -->|"calls solve() per plan"| solve
@@ -124,16 +128,20 @@ These are design ideas only. **No code is copied** except ResPlan's two loader h
 Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. Every evidence line was read at the commit shown.
 
 ### 4.1 `contracts.py`: data contracts
-- **Responsibility:** pydantic models shared by every stage; `Constraints.problem_statement()`; `lower_bound()`; JSON Schema export to `schemas/solution.schema.json`.
-- **In → out:** n/a → models + schema.
+- **Responsibility:**
+  - `Submission`: slide 8 key for key (`extra="forbid"`; Adi: slide-8 keys only);
+  - `Sidecar`: our diagnostics;
+  - input models; `Constraints.problem_statement()` (J weights 1 / 5 / 1 / 0.5, hub clearance 0.5 m from walls, tolerance 1 mm, frame settings); `lower_bound()`;
+  - JSON Schemas generated to `schemas/submission.schema.json` and `schemas/sidecar.schema.json`.
+- **In → out:** n/a → models + schemas.
 - **Algorithm:** n/a.
-- **Enforces:** C7, C24, C28; C37 setting (`interior_windows_as_doors`).
+- **Enforces:** C7, C17, C24, C28, C41, C48; the C37 setting.
 - **Issues:** #2 (Adityashandilya555), #34 (nexuszephyr, the format doc).
 - **Derived from:**
-  - OptiWindNet versioned dict + input digest → **Adapt** as `schema_version` + `plan.input_sha256` (`optiwindnet/terse.py:L266-282 @ 44e384c`, MIT);
+  - slide 8 (the organisers' format), with ADR-010 superseding ADR-006;
   - HGS-CVRP lower-bound line → **Adapt** with two capacities (`Program/Split.cpp:L3-6 @ 1a92795`, MIT).
-- **Not taken:** OptiWindNet's terse link encoding, and rebuilding rings from adjacency (we store ordered rings).
-- **Risks:** schema churn → `schema_version` and a stale-schema check in CI.
+- **Not taken:** our own output format (ADR-006, superseded); OptiWindNet's versioned/terse encoding.
+- **Risks:** the organisers' checker may be strict about keys → the submission carries only slide-8 keys.
 
 ### 4.2 `io.py`: read, repair, scale, nodes
 - **Responsibility:**
@@ -265,64 +273,68 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - depot-given models (`pyvrp/Model.py:L358-372`): our hub location is a decision.
 - **Risks:** one cached path per pair fixes its headings → per-heading variants if the batch shows bend losses.
 
-### 4.8 `metrics.py`: length, bends, overlap, crossings, cost
-- **Responsibility:**
-  - length (m) and bends, including junction bends;
-  - `own_fold_m` (the single-door retrace, C15) and `inter_ring_m`;
-  - crossings, by an exact integer side test on the runs two rings share;
-  - `cost()` and `rank_key()`.
-- **In → out:** `Segment` polylines → `Totals`.
-- **Algorithm:** O(L) per ring; folds O(L²) worst case.
-- **Enforces:** C15, C16, C17, C25, C33.
-- **Issues:** #15 (V1702).
+### 4.8 `checker.py` (metrics half): the organisers' metrics, mirrored
+- **Responsibility:** H, L, X, O, B, J and the assigned-area gap, computed **only from the submitted polylines** (C42) at 1 mm tolerance (C41), exactly as slide 7 defines them (C40):
+  - **L:** every leg incl. return legs; a retrace counts each time.
+  - **X:** points where two cables meet away from a node or hub, inside one ring or between rings, once per point.
+  - **O:** (k − 1) × length on the same line; parallel lines don't count.
+  - **B:** at vertices, nodes and the hub; a reversal counts once.
+  - Where the slides are ambiguous (T-touch, the divergence end of a shared stretch), it counts strictly (`docs/decision_conventions.md` §6).
+  - Used by the solver, the ranking, the batch and the UI, so our J is the organisers' J.
+- **In → out:** slide-8 `hubs[]` → `Metrics(H, L, X, O, B, J, area_gap)`.
+- **Algorithm:** O(S²) segment pairs for X; a line sweep for O.
+- **Enforces:** C15, C16, C17, C40-C42, C47.
+- **Issues:** #43 (V1702), with slide 7's eight examples as unit tests.
 - **Derived from:**
-  - OptiWindNet `_retraced_runs` → **Adapt** (cell ids, cyclic for closed rings; OptiWindNet skips closed routes) (`optiwindnet/crossings.py:L1013-1067 @ 44e384c`, MIT);
+  - OptiWindNet `_retraced_runs` → **Adapt** (`optiwindnet/crossings.py:L1013-1067 @ 44e384c`, MIT);
   - `_shared_run_swaps_sides` → **Adapt** (`L766-822`);
   - crossing kind names → **Adopt** (`L1168-1240`).
-- **Not taken:**
-  - `find_routeset_crossings` (`L555-600`): it compares straight segments;
-  - `repair_routeset_path` (`optiwindnet/repair.py:L307-345`): it moves nodes between paths, which would change zones.
+- **Not taken:** `find_routeset_crossings` (`L555-600`: straight segments); `repair_routeset_path` (`optiwindnet/repair.py:L307-345`).
 
-### 4.9 `validate.py`: the oracle
+### 4.9 `checker.py` (rules half) and the submit gate
 - **Responsibility:**
-  - one check per C-id, recomputed from the output JSON + the plan only, never from solver state;
-  - returns `Violation(cid, severity, hub_id, msg, where_wkt)` items and never raises;
-  - the slide-5 checklist;
-  - recomputes metrics and flags mismatches;
-  - the C15 fold rule, the infeasible path, and C38 fold reports.
-- **In → out:** `Plan`, `Solution` → `Violation` list + `checklist`.
-- **Algorithm:** O(segments × geometry).
-- **Enforces:** C1-C15, C18, C25, C26, C34, C37, C38.
-- **Issues:** #11, #23 (nexuszephyr).
+  - **Slide 3's six hard rules** on the submission + the input plan:
+    1. coverage (none omitted, split or duplicated);
+    2. capacity;
+    3. zone (doors / open passages only; not windows, wall-only adjacency or the entrance);
+    4. ring;
+    5. free space;
+    6. hub point (an assigned eligible room, ≥ 0.5 m from walls; may share a node's room).
+  - Returns `Violation(rule, severity, hub_id, msg, where)` and never raises; `where` feeds the red overlay.
+  - Builds the slide-5 checklist.
+  - **The gate (C43):** a submission is written only if every rule passes. Otherwise fall back to the next-ranked arrangement, then the walking skeleton, then write only the sidecar with the reasons.
+- **In → out:** `Plan`, `Submission` → `Violation` list + checklist.
+- **Enforces:** C1-C15, C18, C26, C34, C37, C39, C43.
+- **Issues:** #11, #23 (nexuszephyr); #16, #22 (Adityashandilya555, gate + fallback).
 - **Derived from:**
-  - OptiWindNet validators → **Adapt** (a list of violations, keyed by C-id) (`optiwindnet/validating.py:L96-205 @ 44e384c`, MIT);
+  - OptiWindNet validators → **Adapt** (a list of violations) (`optiwindnet/validating.py:L96-205 @ 44e384c`, MIT);
   - gated ring checks → **Adopt** (`L172-181`);
-  - `_load_mismatches` → **Adapt** (`L208-234`);
   - `_walk_ring` → **Adapt** (`optiwindnet/terse.py:L91-107`);
   - GerryChain `contiguous` / `contiguous_components` → **Adapt** (`gerrychain/constraints/contiguity.py:L133-150, L174-190 @ 0edc278`, BSD-3).
-- **Not taken:** GerryChain `_are_reachable` (incremental MCMC); OptiWindNet's cable-cost tables.
-- **Risks:** sharing geometry code with the solver could hide bugs → the validator recomputes independently.
+- **Not taken:** `_load_mismatches` as an error (reported values are ignored by the organisers; at most a sidecar warning); GerryChain `_are_reachable`.
+- **Risks:** a mirror that is wrong in the lenient direction would submit invalid plans → ambiguous cases count strictly, and the slide-7 tests pin the definitions.
 
 ### 4.10 `solve.py` and `cli.py`: orchestration
 - **Responsibility:**
-  - `solve(plan, c)`: the best arrangement, fully routed and validated;
-  - `enumerate(plan, c, k)`: every arrangement with cached metrics, ranked;
-  - `bounds{k_lb, k_found, proof}`;
-  - the CLI commands `hackhive solve`, `hackhive validate`, `hackhive batch`.
-- **In → out:** `Plan`, `Constraints` → `Solution` / `Arrangement` list; files → files.
-- **Enforces:** C16, C21, C22, C24, C27, C29.
+  - `solve(plan, c)`: the best arrangement by (H, J, area gap), routed and checked;
+  - `enumerate(plan, c, k)`: every arrangement with mirror metrics, ranked;
+  - `submit()`: the gate + writers (slide-8 submission + sidecar);
+  - the CLI commands `hackhive solve`, `check`, `batch`, `present`.
+- **In → out:** `Plan`, `Constraints` → `Result` (`Submission` + `Sidecar`) / `Arrangement` list; files → files.
+- **Enforces:** C16, C21, C22, C24, C27, C29, C43, C47, C48.
 - **Issues:** #16, #22 (Adityashandilya555).
 - **Derived from:** built from scratch.
 
 ### 4.11 `viz.py` and `app.py`: overlay and demo
 - **Responsibility:**
   - the base layer;
-  - the slide-5 overlay: zone colours, hub squares, nodes, a numbered ring with the last number as the return, two-lane folds;
+  - the slide-5 overlay: zone colours, hub squares and node dots **with their ids**, a numbered ring with the last number as the return, two-lane folds, **violations in red**;
+  - the final-presentation export (`export_presentation`: overlay + summary + J breakdown, PNG/SVG);
   - gallery tiles, a cap 5 vs 20 comparison, the Pareto view, the step-through;
   - the Streamlit app with a locked "Problem statement" preset and what-if settings.
 - **In → out:** models → matplotlib figures / PNG bytes.
-- **Enforces:** C15, C23, C25, C26, C29, C30.
-- **Issues:** #5, #7, #12, #17, #24, #25, #26, #29, #30 (rohit-nandagopal); #27 (V1702, Pareto).
+- **Enforces:** C15, C23, C25, C26, C29, C30, C45.
+- **Issues:** #5, #7, #12, #17, #24, #25, #26, #29 and #44 (rohit-nandagopal); #27 (Pareto) and #30 (what-if sidebar) (V1702).
 - **Derived from:**
   - house-planner group palette + grey for unassigned → **Adapt** (`src/networks/electric/model.ts:L69-70, L83 @ 5c91280`, MIT);
   - circuit polylines → **Adapt** (`src/networks/electric/ElectricLayer.tsx:L402-417`);
@@ -341,7 +353,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 ### 4.12 `batch.py`: scale check
 - **Responsibility:**
   - solve N plans from the `test` split (keyed by plan `id`; `augmented` excluded);
-  - write a CSV (k, LB, proof, length, bends, crossings, overlap, valid, ms, status) and a summary;
+  - write a CSV (H, LB, L, X, O, B, J, area gap, submitted, rules failed, fallback used, ms, status, reason) and a summary whose headline is the **validity rate (target 100% of feasible plans)**;
   - the app's leaderboard tab reads the CSV.
 - **Enforces:** C16, C22, C27.
 - **Issues:** #32, #33 (nexuszephyr).
@@ -350,21 +362,17 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 
 ## 5. Data contracts, testing, decisions
 ### Data contracts
-`contracts.py` (pydantic 2) is the single source of truth. The JSON Schema is **generated** to `schemas/solution.schema.json`, and CI fails if it's stale.
+`contracts.py` (pydantic 2) is the single source of truth; the schemas are **generated** (`schemas/submission.schema.json`, `schemas/sidecar.schema.json`), and CI fails if they're stale.
 
-`Solution` top-level keys:
-- `schema_version`
-- `plan{id, input_sha256, m_per_unit}`
-- `settings`: constraints, cost weights, `is_problem_statement`
-- `status ∈ {ok, infeasible}`
-- `bounds{k_lb, k_found, proof}`
-- `hubs[]`, each with `rooms`, `xy`, `ring[H…H]`, `segments[polyline, door_ids, length_m, bends]`, `metrics`
-- `unserved[]`
-- `totals`
-- `validation{valid, violations[], checklist}`
-- `provenance`
+**Submission** (slide 8, keys only):
+- `plan_id`, `units:"m"`;
+- `hubs[]`, each with `hub_id`, `room_id`, `location{x,y}`, `assigned_rooms` (hub room first), `assigned_nodes` (sorted), `closed_sequence` (ring order, H … H), `route_segments[]{from, to, length_m, polyline:[[x,y],…]}` (in sequence order, chained), `ring_length_m`;
+- `reported_metrics{hub_count, total_length_m}`.
+- Metres, origin lower-left, y up; ids plan-global.
 
-The format is documented in `docs/output-format.md` (#34).
+**Sidecar:** status, violations, bounds (`k_lb`, `k_found`, `proof`), the J breakdown, area gap, settings, provenance, warnings, folded slivers.
+
+Every edge case is decided in `docs/decision_conventions.md`; the format is documented in `docs/output-format.md` (#34).
 
 ### Testing strategy
 - **The validator is the oracle.** Every issue's acceptance criteria include "validator passes".
@@ -392,7 +400,7 @@ The format is documented in `docs/output-format.md` (#34).
   - routed length ≥ the Manhattan LB (and ≥ the pyvisgraph L1 LB in tests).
 - **Each sprint ends** with a pull-and-run-locally verification issue (#18, #35).
 
-### Decisions (ADRs, accepted 2026-10-15)
+### Decisions (ADRs; 001-009 accepted 2026-10-15; 010 from organiser slides 3/6/7/8; 002/004/005/007 amended)
 | ADR | Decision | Rejected alternatives |
 |---|---|---|
 | 001 | Zoning by exhaustive enumeration of contiguous capped partitions, with a guard above 16 rooms | CP-SAT; HGS / PyVRP / GerryChain local search |
@@ -400,7 +408,8 @@ The format is documented in `docs/output-format.md` (#34).
 | 003 | One bend-aware router on a 10 cm room-label raster; optimise only after measuring | door graph + closed-form L/Z paths (58% of rooms aren't rectangles); visibility graph (any-angle) |
 | 004 | Sequential routing + occupancy penalty + 2 rip-up passes; keep the best | full PathFinder (Backlog) |
 | 005 | Single-door double run = a centreline fold, counted as overlap, drawn as two lanes | routing two physical parallel paths |
-| 006 | Our own JSON + generated Schema; cost = length + 0.5·bends + 2·crossings + 1·overlap (replaceable); rank (hubs, cost, signature) | a hand-written schema; waiting for the organisers' format |
+| 006 | ~~Our own JSON; cost with crossing weight 2.0~~ → **superseded by ADR-010** | n/a |
+| 010 | The organisers' contract: the slide-8 submission (keys only) + a sidecar; the checker mirror (six rules + H, L, X, O, B, J at 1 mm, slide-7 tests); rank (H, J, area gap); never submit invalid (gate + fallback) | our own format + exporter; one file with extra keys |
 | 007 | Strict room graph (one node per polygon; doors top 2; openings with geometry; windows never connect by default); the interior-window checkbox (C37); sliver folding in our generator only (C38) | ResPlan `plan_to_graph` semantics |
 | 008 | The ≤ 20 node-cap mode is a Sprint 2 setting (what-if) | Backlog |
 | 009 | Streamlit + matplotlib, no plotly | plotly; React |
@@ -409,7 +418,7 @@ The format is documented in `docs/output-format.md` (#34).
 | Screen | Shows | Solver call | Why it's in scope |
 |---|---|---|---|
 | Sidebar | plan picker (fixtures, ResPlan id, upload); a locked **Problem statement** preset; a what-if expander (caps, weights, interior-window checkbox) with a WHAT-IF banner | `Constraints.problem_statement()`, `Constraints(...)` | C29, C37: configurable constraints, clearly separated from the problem statement |
-| Best | overlay (C23), per-hub summary (C25), reviewer checklist (C26), optimality badge, ring step-through slider, JSON download | `solve(plan, c)` → `Solution`; `viz.draw_solution(step=i)` | exactly slide 5's "expected solution" plus the reviewer list; the badge and step-through only display solver output |
-| Arrangements | gallery of every feasible zoning with hub-count / node-cap filters; Pareto (hubs vs length / bends) | `enumerate(plan, c)` → `Arrangement` list | C29, C16: all real arrangements under the PS rules, ranked by the PS ranking |
+| Best | overlay with ids and red violations (C23), per-hub summary (C25), reviewer checklist from the checker (C26), badge (H vs LB) + J breakdown, ring step-through slider, submission/sidecar download, presentation-image download (C45) | `solve(plan, c)` → `Solution`; `viz.draw_solution(step=i)` | exactly slide 5's "expected solution" plus the reviewer list; the badge and step-through only display solver output |
+| Arrangements | gallery of every feasible zoning (H, J, checker ✓) with hub-count / node-cap filters; Pareto (hubs vs J) | `enumerate(plan, c)` → `Arrangement` list | C29, C16: all real arrangements under the PS rules, ranked by the PS ranking |
 | Cap 5 vs 20 | two overlays side by side + a metrics table | `solve(c5)`, `solve(c20)` | C6: the two sources' cap conflict, with cap 20 labelled WHAT-IF |
-| Batch | leaderboard over the test-split sample: % valid, % at LB, % optimal, length, bends | reads `batch.csv` from `hackhive batch` | C22: unseen plans, no manual step |
+| Batch | leaderboard over the test-split sample: validity rate (target 100%), % at LB, mean J and its L / X / O / B parts | reads `batch.csv` from `hackhive batch` | C22: unseen plans, no manual step |

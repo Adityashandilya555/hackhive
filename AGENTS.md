@@ -3,7 +3,7 @@
 Conventions for every coding agent (Claude Code, Codex, …) working in this repo.
 
 ## What we're building (PS4)
-The organisers' slides win every conflict with the Honeywell text. The full map is `docs/ARCHITECTURE.md`.
+The organisers' slides (all 8) win every conflict with the Honeywell text. The full map is `docs/ARCHITECTURE.md`; every edge case is decided in `docs/decision_conventions.md`.
 
 - **Input:** one floor plan per JSON file (ResPlan-derived): rooms, doors, walls, windows, plus the organisers' **fixed node points**.
   - Geometry is in drawing units: convert once per plan with metres = units ÷ √(inner.area / area).
@@ -12,21 +12,23 @@ The organisers' slides win every conflict with the Honeywell text. The full map 
   - Organiser nodes are used as given and never moved or merged.
   - For ResPlan dev plans we generate a point at max clearance (≥ 0.5 m from walls when possible), and fold living slivers that can't fit one.
   - Excluded rooms (bathroom, balcony, stair, garden, pool, parking, land) get no node and no hub.
-- **Hubs:** we choose how many and where. A hub sits inside an eligible room of its own zone, ≥ 0.5 m from nodes.
-- **Zones:** eligible rooms grouped into zones, each connected **directly** through doors / open passages (excluded rooms never link two zone rooms).
+- **Hubs:** we choose how many and where. A hub sits inside an eligible room **assigned to it**, **≥ 0.5 m from walls**; a hub and a node may share a room (slide 3 rule 6). We still keep it off the node points.
+- **Zones:** eligible rooms grouped into zones, each connected **directly** through doors / open passages. Windows, wall-only adjacency and the entrance don't count, and excluded rooms never link two zone rooms (slide 3 rule 3).
   - Each hub serves **≤ 100 m²** of eligible-room area and **≤ 5 nodes**.
-  - ≤ 20 nodes is an optional what-if setting, never the default.
+  - ≤ 20 nodes is an optional what-if setting, never the default and never submitted.
 - **Rings:** one closed, non-branching ring per hub: H → N1 → … → Nk → H.
 - **Routes:** axis-aligned only.
   - They change rooms only through doors and open passages, never cross walls or windows, and never leave `inner`.
-  - They may pass through any room, including other zones and excluded rooms. Overlaps and crossings between rings are cost, not violations.
-  - In a **single-door room** the cable goes in and back out through the same door as two parallel runs; the shared length counts as overlap.
-  - Windows drawn on interior walls are obstacles by default; a UI checkbox switches to treating them as doors (WHAT-IF).
-- **Ranking:** fewest hubs first, then lowest cost (cable length, bends, crossings, overlap; replaceable weights).
-- **Output:** our own versioned JSON (+ a generated JSON Schema) and a visual overlay (coloured zones, hubs, numbered ring order with the return to the hub, routes, per-hub summary, reviewer checklist). The organisers' format and cost formula aren't published, so both are replaceable settings.
+  - They may pass through any room, including other zones and excluded rooms. Overlaps and crossings (between rings or inside one ring) are cost, not violations.
+  - In a **single-door room** the cable goes in and back out through the same door, either retracing the same line (that length counts as overlap) or as two parallel runs on different lines (no overlap, more bends). The router picks the lower J.
+  - Windows drawn on interior walls are obstacles; a UI checkbox can show them as doors (WHAT-IF, never submitted).
+- **Ranking (slides 3, 6, 7):** fewest hubs H first, then the lowest **J = L + 5X + O + 0.5B** (metres; weights are the organisers' starting values, kept as settings), then the smaller assigned-area gap (max − min). The organisers' checker recomputes every metric from our polylines at 1 mm tolerance; our `checker.py` mirrors it.
+- **Output (slide 8):** exactly the organisers' submission JSON (`plan_id`, `units:"m"`, `hubs[]`, `reported_metrics`; metres, origin lower-left, y up), plus our `<plan_id>.sidecar.json` for everything else.
+  - **An invalid or missing plan scores zero**, so a submission is written only after it passes our checker mirror; otherwise fall back, or write only the sidecar.
+  - Also: an overlay with zones, hub and node ids, numbered ring order, full rings with the return leg, and violations in red; and a final-presentation image per plan.
 - **Frontend:** a Streamlit demo with a locked "Problem statement" preset, labelled what-ifs, an arrangements gallery and a batch leaderboard.
 
-Pipeline stages: parsing → room graph → zoning → hub + ring order → grid routing → overlap / crossing handling → validation → visualization. Use one module per stage under `src/hackhive/` (map in `docs/ARCHITECTURE.md`).
+Pipeline stages: parsing → room graph → zoning → hub + ring order → grid routing → overlap / crossing handling → checker mirror + submit gate → visualization. Use one module per stage under `src/hackhive/` (map in `docs/ARCHITECTURE.md`).
 
 ## Stack and versions
 Python **≥3.11**, managed with **uv**. `uv.lock` pins exact versions; commit it.
@@ -40,7 +42,7 @@ Python **≥3.11**, managed with **uv**. `uv.lock` pins exact versions; commit i
 | Zoning | exhaustive enumeration of contiguous capped zonings (no CP-SAT; ADR-001) |
 | Ring order | exact: `itertools.permutations` for ≤ 5 nodes, Held-Karp for ≤ 10 (the ≤ 20 what-if) |
 | Routing | custom bend-aware Dijkstra/A* with `heapq` on (cell, heading); occupancy penalty + rip-up passes |
-| Validation | **pytest 8** + **jsonschema 4** |
+| Validation | **pytest 8** + **jsonschema 4**; `checker.py` mirrors the organisers' checker (slide 7's examples are unit tests) |
 | Visualization | **matplotlib 3** + **streamlit** demo (no plotly) |
 | Batch | **tqdm** + **pandas 2** over 50–100 ResPlan plans |
 | Lint/format | **ruff** |

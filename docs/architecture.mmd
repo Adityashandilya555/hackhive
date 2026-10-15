@@ -10,12 +10,12 @@ flowchart TB
         rings["rings.py: hub location + exact ring order<br/>ref: PyVRP exact-vs-estimate cost (LB pruning)"]
         solve["solve.py: solve() · enumerate() · rank"]
         routerings["route.py route_rings: occupancy penalty + rip-up passes<br/>ref: VTR PathFinder cost, OrthoRoute commit/clear"]
-        metrics["metrics.py: length · bends · overlap · crossings · cost<br/>ref: OptiWindNet fold and side tests"]
-        validate["validate.py: one check per C-id + reviewer checklist<br/>ref: OptiWindNet validators, GerryChain contiguity"]
+        metrics["checker.py metrics: H · L · X · O · B · J at 1 mm (slide 7)<br/>ref: OptiWindNet fold and side tests"]
+        validate["checker.py rules: slide 3 hard rules 1-6 + submit gate<br/>ref: OptiWindNet validators, GerryChain contiguity"]
         viz["viz.py: overlay · gallery tiles · compare · Pareto<br/>ref: house-planner electric layer, OptiWindNet plotting"]
     end
 
-    out[("solution.json + overlay.png")]
+    out[("PLAN_id.json (slide 8, only if valid) + sidecar.json + overlay / presentation PNG")]
     csv[("batch.csv")]
     cli["hackhive CLI (one-shot process)"]
     batch["hackhive batch (one-shot run over the test split)"]
@@ -28,16 +28,16 @@ flowchart TB
     grid -->|"LabelGrid"| cache
     zoning -->|"Zoning list (max 116 per plan)"| rings
     cache -->|"PathCache: pairwise paths"| rings
-    rings -->|"Arrangement list: hubs, rings H to H"| solve
+    rings -->|"Arrangement list: hubs, rings H to H, ranked by H, J, gap"| solve
     solve -->|"best Arrangement"| routerings
     grid -->|"LabelGrid"| routerings
     routerings -->|"Segment polylines"| metrics
-    metrics -->|"Totals, cost, rank_key"| solve
-    solve -->|"Solution"| validate
-    validate -->|"Violation list + checklist"| solve
-    solve -->|"Solution"| viz
-    solve -->|"Solution JSON"| out
-    viz -->|"PNG"| out
+    metrics -->|"Metrics: H, L, X, O, B, J, area gap"| solve
+    solve -->|"Submission"| validate
+    validate -->|"Violation list, gate verdict"| solve
+    solve -->|"Submission + Sidecar"| viz
+    solve -->|"Submission JSON (gated) + Sidecar"| out
+    viz -->|"PNG / SVG"| out
 
     cli -->|"calls solve()"| solve
     batch -->|"calls solve() per plan"| solve
