@@ -1,11 +1,11 @@
 # Execution plan: who works on what, in parallel and in sequence
 
-How the team works through the 42 issues so that four people stay busy and hand-offs are explicit:
+How the team works through the 45 open issues so that four people stay busy and hand-offs are explicit:
 - **Parallel:** one **lane per member** (their area), and the lanes run at the same time.
 - **Sequential:** inside a lane, issues are done in the order shown.
 - **Cross-lane arrows** are the only places where one member waits for another.
 
-Sprints carry no dates (C36), so time is counted in **half-day slots** from the start of the sprint. The data comes from each issue's "Depends on" field, owner and size label on GitHub (2026-10-15).
+Sprints carry no dates (C36), so time is counted in **half-day slots** from the start of the sprint. The data comes from each issue's "Depends on" field, owner and size label on GitHub (2026-10-16).
 
 **The one rule that makes this fast: contract-first.**
 - #2 (the data contracts) lands in **slot 1**.
@@ -19,14 +19,14 @@ Solid arrows = this member's order; dashed arrows = waits for another member's m
 flowchart LR
     subgraph AdiS1 [Adi]
         i2["#35;2 contracts and scaffold"]
-        i3["#35;3 architecture doc"]
         i13["#35;13 exact zoning"]
         i14["#35;14 first-cut hub and ring"]
+        i38["#35;38 organiser input adapter"]
         i16["#35;16 solve and CLI and gate"]
-        i2 --> i3
-        i3 --> i13
+        i2 --> i13
         i13 --> i14
-        i14 --> i16
+        i14 --> i38
+        i38 --> i16
     end
     subgraph nexuszephyrS1 [nexuszephyr]
         i4["#35;4 read plan to metres"]
@@ -47,11 +47,13 @@ flowchart LR
         i10 --> i15
     end
     subgraph RohitS1 [Rohit]
+        i46["#35;46 send organiser questions"]
         i5["#35;5 draw base layer"]
         i7["#35;7 app shell and preset"]
         i12["#35;12 app: graph and checklist"]
         i17["#35;17 full overlay"]
         i18["#35;18 Sprint 1 verify"]
+        i46 --> i5
         i5 --> i7
         i7 --> i12
         i12 --> i17
@@ -69,6 +71,8 @@ flowchart LR
 
 ![Sprint 1 lanes](execution-s1.png)
 
+#3 (architecture doc) is done. #47 (these docs) is not a lane item: it is closed by its own docs PR.
+
 ## 2. Sprint 2 map
 Sprint 1 must be finished and verified (#18) first.
 
@@ -81,7 +85,9 @@ flowchart LR
         i35["#35;35 Sprint 2 verify"]
         i28 --> i20
         i20 --> i22
-        i22 --> i35
+        i49["#35;49 greedy zoning over 16 rooms"]
+        i22 --> i49
+        i49 --> i35
     end
     subgraph nexuszephyrS2 [nexuszephyr]
         i23["#35;23 infeasible and reported"]
@@ -124,15 +130,17 @@ flowchart LR
 
 ![Sprint 2 lanes](execution-s2.png)
 
+#48 (final J weights) is event-triggered: it runs when the organisers publish the final weights (#46 Q7); not slotted.
+
 ## 3. Waves: what can run at the same time
 A wave can start as soon as the waves before it are merged (hard dependencies only; soft ones use #2 + stubs). Every issue except #2 itself also needs **#2 merged** (slot 1), because the contracts are what the stubs are written against.
 
 ### Sprint 1
 | Wave | Issues (owner) |
 |---|---|
-| 0 | #2 contracts + scaffold (Adi), #3 architecture doc (Adi), #4 read plan to metres (nexuszephyr), #5 draw base layer (Rohit), #8 bend-aware search (V1702), #10 label raster (V1702), #13 exact zoning (Adi), #14 first-cut hub + ring (Adi), #43 checker metrics + slide 7 (V1702) |
+| 0 | #2 contracts + scaffold (Adi), #46 organiser questions (Rohit), #4 read plan to metres (nexuszephyr), #5 draw base layer (Rohit), #8 bend-aware search (V1702), #10 label raster (V1702), #13 exact zoning (Adi), #14 first-cut hub + ring (Adi), #43 checker metrics + slide 7 (V1702) |
 | 1 | #6 Plan + fixed nodes (nexuszephyr), #7 app shell + preset (Rohit), #11 checker hard rules (nexuszephyr), #15 route rings (V1702) |
-| 2 | #9 strict room graph (nexuszephyr), #12 app: graph + checklist (Rohit), #16 solve + CLI + gate (Adi) |
+| 2 | #9 strict room graph (nexuszephyr), #12 app: graph + checklist (Rohit), #16 solve + CLI + gate (Adi), #38 organiser input adapter (Adi) |
 | 3 | #17 full overlay (Rohit) |
 | 4 | #18 Sprint 1 verify (Rohit) |
 
@@ -142,7 +150,10 @@ A wave can start as soon as the waves before it are merged (hard dependencies on
 | 0 | #19 path cache (V1702), #21 J-aware routing (V1702), #23 infeasible + reported (nexuszephyr), #24 optimality badge (Rohit), #25 step-through (Rohit), #26 gallery + filters (Rohit), #27 Pareto H vs J (V1702), #28 cap-20 what-if (Adi), #30 what-if sidebar (V1702), #32 batch runner (nexuszephyr), #34 output-format doc (nexuszephyr), #44 presentation export (Rohit) |
 | 1 | #20 exact hub + ring (Adi), #29 cap 5 vs 20 (Rohit), #31 interior-window box (nexuszephyr), #33 leaderboard (nexuszephyr) |
 | 2 | #22 rank + enumerate + fallback (Adi) |
-| 3 | #35 Sprint 2 verify (Adi) |
+| 3 | #49 greedy zoning over 16 rooms (Adi) |
+| 4 | #35 Sprint 2 verify (Adi) |
+
+#48 (final J weights) has no wave: it runs when the organisers publish the weights (#46 Q7).
 
 ## 4. Lane timeline (contract-first)
 Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is the earliest the issue can run, given its lane order and its hard dependencies.
@@ -151,9 +162,9 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
 | Member | Issue | Size | Slots | Waits for (other lanes) | Soft deps (work against stubs) |
 |---|---|---|---|---|---|
 | Adi | #2 contracts + scaffold | S | 1–1 | – | – |
-| Adi | #3 architecture doc | S | 2–2 | – | – |
-| Adi | #13 exact zoning | M | 3–4 | – | #9 |
-| Adi | #14 first-cut hub + ring | S | 5–5 | – | #13 |
+| Adi | #13 exact zoning | M | 2–3 | – | #9 |
+| Adi | #14 first-cut hub + ring | S | 4–4 | – | #13 |
+| Adi | #38 organiser input adapter | S | 5–5 | – | #4, #6 |
 | Adi | #16 solve + CLI + gate | M | 8–9 | #11, #15 | #43 |
 | nexuszephyr | #4 read plan to metres | M | 1–2 | – | – |
 | nexuszephyr | #6 Plan + fixed nodes | S | 3–3 | #2 | – |
@@ -163,11 +174,14 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
 | V1702 | #43 checker metrics + slide 7 | M | 3–4 | – | – |
 | V1702 | #10 label raster | M | 5–6 | – | #6 |
 | V1702 | #15 route rings | S | 7–7 | – | – |
-| Rohit | #5 draw base layer | S | 1–1 | – | – |
-| Rohit | #7 app shell + preset | S | 2–2 | #2 | – |
-| Rohit | #12 app: graph + checklist | S | 3–3 | – | #9, #11 |
-| Rohit | #17 full overlay | M | 4–5 | – | #16 |
+| Rohit | #46 organiser questions (HUMAN: send) | S | 1–1 | – | – |
+| Rohit | #5 draw base layer | S | 2–2 | – | – |
+| Rohit | #7 app shell + preset | S | 3–3 | #2 | – |
+| Rohit | #12 app: graph + checklist | S | 4–4 | – | #9, #11 |
+| Rohit | #17 full overlay | M | 5–6 | – | #16 |
 | Rohit | #18 Sprint 1 verify | S | 10–10 | – | – |
+
+**Sprint 1 load** (S = 1, M = 2): Adi 7 · nexuszephyr 7 · V1702 7 · Rohit 7 slots.
 
 ### Sprint 2: continues to slot **17** (counted from the start of Sprint 1)
 | Member | Issue | Size | Slots | Waits for (other lanes) | Soft deps (work against stubs) |
@@ -175,6 +189,7 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
 | Adi | #28 cap-20 what-if | S | 10–10 | – | – |
 | Adi | #20 exact hub + ring | M | 11–12 | #19 | – |
 | Adi | #22 rank + enumerate + fallback | S | 13–13 | – | – |
+| Adi | #49 greedy zoning over 16 rooms | S | 14–14 | – | – |
 | Adi | #35 Sprint 2 verify | S | 17–17 | – | – |
 | nexuszephyr | #23 infeasible + reported | S | 10–10 | #16 | – |
 | nexuszephyr | #32 batch runner | M | 11–12 | #16 | – |
@@ -197,7 +212,7 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
   2. then **#16** (solve + CLI + gate, Adi, 2 slots) integrates them;
   3. then **#18** (verify).
 
-  Anything that delays #11 or #15 delays the sprint, so reviews for those two come first.
+  Anything that delays #11 or #15 delays the sprint, so reviews for those two come first. Still 10 slots: #38 runs in Adi's slack before #16 (slot 5) and doesn't lengthen it.
 - **Sprint 2 critical path:** #19 (path cache) → #20 (exact hub + ring) → #22 (rank + enumerate + fallback). The gallery, badge, Pareto and presentation export run in parallel against the stubbed arrangement list and switch to #22's real `enumerate()` when it lands.
 - **Honest capacity note.** At these estimates, Sprint 1 needs about 10 half-day slots (≈ 5.0 working days), even with contract-first. If it has to be shorter:
   - (a) pair on the two 7-slot lanes (the second person takes #11's broken fixtures, or #43's slide-7 tests);
@@ -227,10 +242,10 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
 | Gate | Must pass before the next wave starts | Proof |
 |---|---|---|
 | Slot 1 | **#2 merged**: contracts, scaffold, fixtures, CI | `uv run pytest -q tests/test_contracts.py` |
-| S1-A | #4, #5, #6, #7 | app shows plan 5924 with the preset; `python -m hackhive.io` prints the facts |
+| S1-A | #4, #5, #6, #7, #38, #46 (sent) | app shows plan 5924 with the preset; `python -m hackhive.io` prints the facts |
 | S1-B | #8, #9, #10, #11, #12, #43 | `pytest -k slide7` → 8 passed; the checker validates the 5088 fixture; the app shows the graph + checklist |
 | S1-C | #13, #14, #15, #16, #17 → **#18** | `hackhive solve` writes gated slide-8 submissions for all 7 fixtures; full overlay |
-| S2-A | #19-#24 | badge, J-optimal rings, fallback, infeasible plans explained |
+| S2-A | #19-#24, #49 | badge, J-optimal rings, fallback, infeasible plans explained |
 | S2-B | #25-#31 | gallery with filters, step-through, Pareto, cap 5 vs 20, what-ifs |
 | S2-C | #32, #33, #34, #44 → **#35** | batch 100% valid on feasible plans; leaderboard; presentation export |
 
@@ -240,4 +255,4 @@ Estimates: S = 1 slot (½ day), M = 2 slots (1 day). Each slot range below is th
 - **Stubs live in tests or fixtures, never in `src/`.** When the real dependency lands, delete the stub in the same PR that switches over.
 - **Review buddy:** Adi ↔ nexuszephyr, V1702 ↔ Rohit; Adi reviews anything touching `contracts.py`.
 - **When blocked by another lane:** take the next soft-dependency item in your lane, or write the broken fixtures / tests for the blocker.
-- **Backlog** (#36-#41) is picked up only after Sprint 2's gate, or by anyone idle, never ahead of a critical-path issue.
+- **Backlog** (#36, #37, #39, #40, #41) is picked up only after Sprint 2's gate, or by anyone idle, never ahead of a critical-path issue.

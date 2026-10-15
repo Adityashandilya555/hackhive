@@ -8,23 +8,25 @@ The organisers' slides (all 8) win every conflict with the Honeywell text. The f
 - **Input:** one floor plan per JSON file (ResPlan-derived): rooms, doors, walls, windows, plus the organisers' **fixed node points**.
   - Geometry is in drawing units: convert once per plan with metres = units ÷ √(inner.area / area).
   - Repair invalid polygons with `make_valid`; never use `net_area`.
+  - The organisers' JSON goes through the #38 adapter: detect format, frame check, fail loudly with `input_error`, never guess.
 - **Nodes:** one per eligible room (living, bedroom, kitchen, storage), and each polygon is its own room.
   - Organiser nodes are used as given and never moved or merged.
   - For ResPlan dev plans we generate a point at max clearance (≥ 0.5 m from walls when possible), and fold living slivers that can't fit one.
   - Excluded rooms (bathroom, balcony, stair, garden, pool, parking, land) get no node and no hub.
-- **Hubs:** we choose how many and where. A hub sits inside an eligible room **assigned to it**, **≥ 0.5 m from walls**; a hub and a node may share a room (slide 3 rule 6). We still keep it off the node points.
+- **Hubs:** we choose how many and where. A hub sits inside an eligible room **assigned to it**; a hub and a node may share a room (slide 3 rule 6). **≥ 0.5 m from walls** is the rule (`error` if broken); we prefer ≥ 0.5 m from the whole room edge (`strict` if only that fails). We still keep it off the node points.
 - **Zones:** eligible rooms grouped into zones, each connected **directly** through doors / open passages. Windows, wall-only adjacency and the entrance don't count, and excluded rooms never link two zone rooms (slide 3 rule 3).
   - Each hub serves **≤ 100 m²** of eligible-room area and **≤ 5 nodes**.
   - ≤ 20 nodes is an optional what-if setting, never the default and never submitted.
 - **Rings:** one closed, non-branching ring per hub: H → N1 → … → Nk → H.
 - **Routes:** axis-aligned only.
   - They change rooms only through doors and open passages, never cross walls or windows, and never leave `inner`.
+  - Each leg joins the exact node or hub point to the grid with an axis-aligned L-stub; incoming and outgoing stubs at a node use different corners.
   - They may pass through any room, including other zones and excluded rooms. Overlaps and crossings (between rings or inside one ring) are cost, not violations.
   - In a **single-door room** the cable goes in and back out through the same door, either retracing the same line (that length counts as overlap) or as two parallel runs on different lines (no overlap, more bends). The router picks the lower J.
   - Windows drawn on interior walls are obstacles; a UI checkbox can show them as doors (WHAT-IF, never submitted).
 - **Ranking (slides 3, 6, 7):** fewest hubs H first, then the lowest **J = L + 5X + O + 0.5B** (metres; weights are the organisers' starting values, kept as settings), then the smaller assigned-area gap (max − min). The organisers' checker recomputes every metric from our polylines at 1 mm tolerance; our `checker.py` mirrors it.
 - **Output (slide 8):** exactly the organisers' submission JSON (`plan_id`, `units:"m"`, `hubs[]`, `reported_metrics`; metres, origin lower-left, y up), plus our `<plan_id>.sidecar.json` for everything else.
-  - **An invalid or missing plan scores zero**, so a submission is written only after it passes our checker mirror; otherwise fall back, or write only the sidecar.
+  - **An invalid or missing plan scores zero**, so a submission is written when it has no `error` violation; strict-only designs are written and flagged `submitted_strict_only`; otherwise only the sidecar is written.
   - Also: an overlay with zones, hub and node ids, numbered ring order, full rings with the return leg, and violations in red; and a final-presentation image per plan.
 - **Frontend:** a Streamlit demo with a locked "Problem statement" preset, labelled what-ifs, an arrangements gallery and a batch leaderboard.
 

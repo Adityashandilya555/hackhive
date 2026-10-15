@@ -120,7 +120,7 @@ A what-if expander lets them change the caps, the J weights (the organisers call
 Slide 8 requires the visual itself; how we present it is our choice.
 
 **What judges see:** a 16:9 PNG/SVG per plan:
-- the overlay (zones, hub and node ids, numbered rings, two-lane folds);
+- the overlay (zones, hub and node ids, numbered rings, the submitted polylines (×k on same-line stretches));
 - the per-hub summary;
 - the badge;
 - **L, X, O, B and J** spelled out.
