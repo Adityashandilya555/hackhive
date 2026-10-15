@@ -258,7 +258,7 @@ def test_1293_needs_3_hubs_once_the_vault_corner_door_links_are_gone():
         frozenset(("bedroom_0", "bedroom_1")),
         frozenset(("living_0", "bedroom_2")),
     }
-    assert ours - vault == {frozenset(("kitchen_0", "bedroom_2"))}  # door_9's real pair
+    assert ours <= vault  # #9 adds no link of its own
     area, nodes = eligible_area_and_nodes(plan)
     zonings = enumerate_zonings(g, area, Constraints(), nodes=nodes)
     assert (min_hubs(zonings), len(zonings)) == (3, 6)
