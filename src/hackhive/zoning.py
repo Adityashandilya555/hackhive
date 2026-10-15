@@ -19,6 +19,7 @@ from pathlib import Path
 
 import networkx as nx
 from shapely.geometry import box
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import unary_union
 
 from hackhive.contracts import AREA_EPS_M2, Constraints, Plan, lower_bound
@@ -121,18 +122,23 @@ def min_hubs(zonings: Iterable[Zoning]) -> int:
     return min(len(z) for z in zonings)
 
 
-def hub_capable_rooms(plan: Plan, c: Constraints) -> set[str]:
-    """Eligible rooms with a point >= hub clearance + 1 cm from wall geometry (rule 6, C18).
+def wall_geometry(plan: Plan) -> BaseGeometry:
+    """What rule 6 measures from: walls minus door gaps, windows, and everything outside ``inner``.
 
-    Wall geometry is the walls minus door gaps, the windows and everything outside ``inner``.
-    A room's own outline is not a wall: a narrow room open to a passage can still host a hub.
+    A room's own outline is not part of it, so open passages and door gaps never count as walls.
     """
     doors = unary_union([d.polygon for d in plan.doors] + list(plan.front_doors))
     walls = unary_union(plan.walls).difference(doors)
     outside = box(*plan.inner.buffer(1.0).bounds).difference(plan.inner)
-    keep_out = unary_union([walls, *plan.windows, outside]).buffer(
-        c.hub_wall_clearance_m + HUB_MARGIN_M
-    )
+    return unary_union([walls, *plan.windows, outside])
+
+
+def hub_capable_rooms(plan: Plan, c: Constraints) -> set[str]:
+    """Eligible rooms with a point >= hub clearance + 1 cm from ``wall_geometry`` (rule 6, C18).
+
+    A narrow room open to a passage can still host a hub.
+    """
+    keep_out = wall_geometry(plan).buffer(c.hub_wall_clearance_m + HUB_MARGIN_M)
     return {
         r.id for r in plan.rooms if r.eligible and r.polygon.difference(keep_out).area > AREA_EPS_M2
     }

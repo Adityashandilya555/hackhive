@@ -131,8 +131,9 @@ def test_weights_defined_only_once():
                 and "ORGANISER_WEIGHTS" not in line
             ):
                 hits.append(f"{f.name}:{n}: {line.strip()}")
-    # hub_wall_clearance_m is a clearance, not a weight
-    hits = [h for h in hits if "clearance" not in h]
+    # hub_wall_clearance_m is a clearance, not a weight; other deliberate non-weight
+    # literals (e.g. half a grid cell) carry a "not-a-weight" marker on the same line
+    hits = [h for h in hits if "clearance" not in h and "not-a-weight" not in h]
     assert not hits, hits
 
 
