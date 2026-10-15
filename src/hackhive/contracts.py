@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.dataclasses import dataclass
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPolygon, Polygon
 
 # --------------------------------------------------------------------------- settings
 
@@ -225,7 +225,7 @@ class Plan(_Geo):
     plan_id: str
     m_per_unit: float
     wall_depth_m: float
-    inner: Polygon
+    inner: Polygon | MultiPolygon  # ResPlan inners can be multi-part (e.g. plan 1293)
     rooms: list[Room]
     walls: list[Polygon]  # obstacles for the grid (#10); doors are cut out of them
     windows: list[Polygon] = []
