@@ -19,6 +19,7 @@ from typing import Any
 from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
 from matplotlib.patches import PathPatch
 from matplotlib.path import Path as MplPath
 from shapely.geometry import Point, Polygon
@@ -40,6 +41,11 @@ DOOR_FILL = "#f2c14e"  # a coloured gap in the wall
 WINDOW_FILL = "#cde2fb"
 WINDOW_EDGE = "#256abf"
 FRONT_DOOR_FILL = "#8a5a2b"  # slide 5's brown entrance bar
+# The room-graph view (#12): door links blue, open passages green and dashed, so the two kinds
+# never rely on hue alone. Only shown with the toggle, never together with the zone colours.
+LINK_DOOR = "#2a78d6"
+LINK_OPENING = "#008300"
+LINK_OTHER = INK_SECONDARY  # via an excluded room (a what-if setting only)
 
 ELIGIBLE = ("living", "bedroom", "kitchen", "storage")
 EXCLUDED = ("bathroom", "balcony", "stair", "garden", "pool", "parking", "land")
@@ -250,6 +256,106 @@ def _fit(text: Any, room: _Room, ax: Axes, renderer: Any) -> None:
             return
     text.set_text(room.id if room.eligible else "no node")
     text.set_fontsize(_MIN_LABEL_PT)
+
+
+def draw_nodes(plan: Plan, ax: Axes) -> None:
+    """Every node as an ink dot with its id (N1…), on top of the base layer (#12)."""
+    for n in plan.nodes:
+        x, y = n.xy
+        ax.plot(
+            [x],
+            [y],
+            marker="o",
+            ms=6,
+            mfc=INK,
+            mec=SURFACE,
+            mew=1.2,
+            ls="none",
+            zorder=7,
+            gid=f"node:{n.id}",
+        )
+        ax.annotate(
+            n.id,
+            (x, y),
+            xytext=(5, 4),
+            textcoords="offset points",
+            fontsize=_LABEL_PT,
+            fontweight="bold",
+            color=INK,
+            zorder=7,
+            bbox={"boxstyle": "round,pad=0.12", "fc": SURFACE, "ec": "none", "alpha": 0.85},
+        )
+
+
+def _anchor(geom: BaseGeometry) -> Point:
+    """A point on a door or passage: its centroid when that's inside it, else a point that is."""
+    c = geom.centroid
+    return c if geom.contains(c) else geom.representative_point()
+
+
+def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
+    """The room graph (#9) between node points: one line per door, routed through the door's
+    gap (blue), and one per open passage, through the passage (green, dashed). A room with no
+    node (excluded) is reached at a hollow point inside it. Adds a "Room graph" legend."""
+    node_at = {n.room_id: Point(n.xy) for n in plan.nodes}
+    rooms = {r.id: r for r in plan.rooms}
+    doors = {d.id: d.polygon for d in plan.doors}
+
+    def at(room_id: str) -> Point:
+        return node_at.get(room_id) or rooms[room_id].polygon.representative_point()
+
+    hollow: set[str] = set()
+    kinds: set[str] = set()
+    for u, v, d in G.edges(data=True):
+        kind = d.get("kind")
+        if kind == "door":
+            vias = [(i, _anchor(doors[i])) for i in d.get("door_ids", []) if i in doors]
+            style = {"color": LINK_DOOR, "ls": "-"}
+        elif kind == "opening":
+            vias = [("opening", _anchor(d["region"]))]
+            style = {"color": LINK_OPENING, "ls": "--"}
+        else:
+            vias = [("via", None)]
+            style = {"color": LINK_OTHER, "ls": ":"}
+        kinds.add(kind)
+        for tag, via in vias:
+            pts = [at(u), *([via] if via is not None else []), at(v)]
+            ax.plot(
+                [p.x for p in pts],
+                [p.y for p in pts],
+                lw=1.6,
+                zorder=6,
+                solid_capstyle="round",
+                gid=f"edge:{u}-{v}:{tag}",
+                **style,
+            )
+        hollow |= {r for r in (u, v) if r not in node_at}
+    for r in sorted(hollow):
+        p = at(r)
+        ax.plot([p.x], [p.y], marker="o", ms=5, mfc=SURFACE, mec=INK_SECONDARY, ls="none", zorder=7)
+
+    handles = [
+        Line2D([], [], color=LINK_DOOR, lw=1.6, label="through a door"),
+        Line2D([], [], color=LINK_OPENING, lw=1.6, ls="--", label="open passage"),
+        Line2D([], [], color=LINK_OTHER, lw=1.6, ls=":", label="via an excluded room"),
+    ]
+    shown = [
+        h for h, k in zip(handles, ("door", "opening", "via_excluded"), strict=True) if k in kinds
+    ]
+    shown.append(
+        Line2D([], [], marker="o", ms=5, mfc=SURFACE, mec=INK_SECONDARY, ls="none", label="no node")
+    )
+    ax.legend(
+        handles=shown,
+        title="Room graph",
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.0),  # not-a-weight: centred under the axes
+        ncol=len(shown),
+        frameon=False,
+        fontsize=_LABEL_PT,
+        title_fontsize=_LABEL_PT,
+        labelcolor=INK_SECONDARY,
+    )
 
 
 def to_png(fig: Figure, dpi: int = 150) -> bytes:

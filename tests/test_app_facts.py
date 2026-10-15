@@ -81,7 +81,7 @@ def test_2814_kitchen_has_no_edge_in_the_graph_view():
     kitchen = room_by_label(plan, "kitchen_0").id
     edges = _edges(ax)
     assert edges, "the other rooms are linked"
-    assert not [e for e in edges if kitchen in e.removeprefix("edge:").split("-")]
+    assert not [e for e in edges if kitchen in e.split(":")[1].split("-")]
 
 
 def test_door_links_are_blue_and_openings_green_and_dashed():

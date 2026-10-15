@@ -7,12 +7,21 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hackhive.contracts import Constraints, CostWeights, Plan, lower_bound
+from hackhive import checker
+from hackhive.contracts import (
+    Constraints,
+    CostWeights,
+    Plan,
+    Submission,
+    Violation,
+    lower_bound,
+)
 from hackhive.io import load_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "plans"
 RAW_DIR = ROOT / "tests" / "fixtures" / "raw"
+SOLUTION_DIR = ROOT / "tests" / "fixtures" / "solutions"  # #11's hand-made submissions
 RESPLAN_JSONL = ROOT / "data" / "resplan" / "plans.jsonl"  # optional, never committed
 DEFAULT_FIXTURE = "5924"
 
@@ -105,13 +114,52 @@ def preset_rows(c: Constraints) -> list[tuple[str, str]]:
     ]
 
 
-def plan_summary(plan: Plan, c: Constraints) -> str:
-    """One line under the title: rooms, eligible area, nodes and the hub lower bound."""
-    eligible = [r for r in plan.rooms if r.eligible]
-    area = sum(r.area_m2 for r in eligible)
-    lb = lower_bound(area, len(plan.nodes), c)
-    rooms = sum(r.type != "land" for r in plan.rooms)
-    return (
-        f"{rooms} rooms ({len(eligible)} eligible) · {area:.1f} m² eligible · "
-        f"{len(plan.nodes)} nodes · at least {lb} hub{'s' if lb != 1 else ''}"
-    )
+def plan_facts(plan: Plan, c: Constraints) -> str:
+    """`150.0 m² · 5 nodes · LB 2`: eligible area, nodes and the hub lower bound (C7)."""
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    return f"{area:.1f} m² · {len(plan.nodes)} nodes · LB {lower_bound(area, len(plan.nodes), c)}"
+
+
+def room_counts(plan: Plan) -> str:
+    """`8 rooms (5 eligible)`; the plot outline (`land`) isn't a room."""
+    rooms = [r for r in plan.rooms if r.type != "land"]
+    return f"{len(rooms)} rooms ({sum(r.eligible for r in rooms)} eligible)"
+
+
+# --------------------------------------------------------------------------- reviewer panel
+
+
+def solution_path(plan_id: str) -> Path | None:
+    """The hand-made solution fixture for a test plan (#11 builds 5088's), if there is one."""
+    p = SOLUTION_DIR / f"{plan_id}-valid.json"
+    return p if p.exists() else None
+
+
+def checker_ready() -> bool:
+    """Whether the rule half of the checker mirror (#11) is merged yet."""
+    return hasattr(checker, "check_rules") and hasattr(checker, "checklist")
+
+
+def violation_line(v: Violation) -> str:
+    """One violation as coloured markdown: red ✗ for an error, orange ⚠ for a strict-only one.
+    The rule number and the severity are always written out, so colour never carries it alone."""
+    colour, mark = ("red", "✗") if v.severity == "error" else ("orange", "⚠")
+    hub = f" · {v.hub_id}" if v.hub_id else ""
+    return f":{colour}[{mark} **Rule {v.rule}**{hub} · {v.severity}: {v.message}]"
+
+
+def checklist_line(item: Any) -> str:
+    """One line of `checker.checklist`, as a (text, ok) pair or ready-made text."""
+    if isinstance(item, str):
+        return item
+    text, ok = item[0], bool(item[1])
+    return f"✓ {text}" if ok else f":red[✗ {text}]"
+
+
+def review(plan: Plan, solution: Path, c: Constraints) -> tuple[list[str], list[str]]:
+    """The reviewer panel for a solution file: checklist lines and violation lines, both
+    rendered only from the checker mirror (C26). Needs `checker_ready()`."""
+    sub = Submission.model_validate(json.loads(solution.read_text(encoding="utf-8")))
+    violations = checker.check_rules(plan, sub, c)
+    items = checker.checklist(violations, checker.metrics(sub.hubs, c))
+    return [checklist_line(i) for i in items], [violation_line(v) for v in violations]
