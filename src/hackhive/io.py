@@ -237,6 +237,15 @@ def _mic(g: Any) -> tuple[tuple[float, float], float]:
     return (float(x), float(y)), float(line.length)
 
 
+def _free(room: Polygon, obstacles: Any) -> Any:
+    """The room minus walls and windows. The overlay can leave a float-sized line beside the
+    polygon (16552), which maximum_inscribed_circle and boundary reject, so only polygons stay."""
+    free = room.difference(obstacles)
+    if isinstance(free, GeometryCollection):
+        free = MultiPolygon([g for g in get_geometries(free) if isinstance(g, Polygon)])
+    return free
+
+
 def _node_spot(room: Polygon, obstacles: Any) -> tuple[tuple[float, float], float]:
     """The max-clearance point of the room's free space (the room minus walls and windows) and
     its clearance, measured to the room outline (door gaps count, #46 Q3) and to those walls.
@@ -245,7 +254,7 @@ def _node_spot(room: Polygon, obstacles: Any) -> tuple[tuple[float, float], floa
     nodes 0.5 m from walls). A room entirely under walls keeps a node at its own max-clearance
     point with clearance 0, so it's flagged rather than dropped.
     """
-    free = room.difference(obstacles)
+    free = _free(room, obstacles)
     if free.is_empty:
         return _mic(room)[0], 0.0
     return _mic(free)
@@ -253,7 +262,7 @@ def _node_spot(room: Polygon, obstacles: Any) -> tuple[tuple[float, float], floa
 
 def _clearance(room: Polygon, obstacles: Any, xy: tuple[float, float]) -> float:
     """A given node's distance to its room's free-space edge; 0 if it lies under a wall."""
-    free, p = room.difference(obstacles), Point(xy)
+    free, p = _free(room, obstacles), Point(xy)
     return free.boundary.distance(p) if free.covers(p) else 0.0
 
 
