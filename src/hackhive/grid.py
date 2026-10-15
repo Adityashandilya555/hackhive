@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import shapely
+from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from hackhive.contracts import Constraints, Opening, Plan
@@ -78,7 +79,7 @@ class LabelGrid:
         n_rooms = len(plan.rooms)
         passages: list[tuple[str, np.ndarray]] = []
         for d in plan.doors:
-            passages.append((d.id, inside(d.polygon.buffer(plan.wall_depth_m / 2))))
+            passages.append((d.id, inside(door_gap(d.polygon, plan.wall_depth_m, g))))
         for o in openings:
             passages.append((o.id, inside(o.polygon)))
         for k, (pid, mask) in enumerate(passages):
@@ -177,6 +178,33 @@ class LabelGrid:
         r, c = self.cell_of(xy)
         rows, cols = self.labels.shape
         return int(self.labels[r, c]) if 0 <= r < rows and 0 <= c < cols else BLOCKED
+
+
+def door_gap(door: Polygon, wall_depth_m: float, cell_m: float) -> Polygon:
+    """The passable gap of one door: its rectangle stretched across the wall, never along it.
+
+    ResPlan door polygons can be thinner than the wall, so the gap spans the whole wall band
+    plus one cell into each room (``wall_depth_m + 2 · cell_m``), so it touches both rooms'
+    cells. Its width along the wall stays the door's own, so no wall beside the opening becomes
+    passable (#11's rule 5 measures the same gap).
+    """
+    rect = door.minimum_rotated_rectangle
+    if not isinstance(rect, Polygon):  # a degenerate door (a line or point)
+        return Polygon()
+    p0, p1, p2 = (np.array(xy) for xy in list(rect.exterior.coords)[:3])
+    e1, e2 = p1 - p0, p2 - p1
+    along, across = (e1, e2) if np.linalg.norm(e1) >= np.linalg.norm(e2) else (e2, e1)
+    width, thick = np.linalg.norm(along), np.linalg.norm(across)
+    if width == 0 or thick == 0:
+        return Polygon()
+    u, v = along / width, across / thick
+    half_w, half_t = width / 2, max(thick, wall_depth_m + 2 * cell_m) / 2
+    centre = np.array(rect.centroid.coords[0])
+    corners = [
+        centre + su * half_w * u + sv * half_t * v
+        for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1))
+    ]
+    return Polygon(corners)
 
 
 def _contacts(labels: np.ndarray, here: np.ndarray, n_rooms: int) -> dict[int, int]:
