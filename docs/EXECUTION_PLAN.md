@@ -18,40 +18,40 @@ Solid arrows = this member's order; dashed arrows = waits for another member's m
 ```mermaid
 flowchart LR
     subgraph AdiS1 [Adi]
-        i2[#2 contracts + scaffold]
-        i3[#3 architecture doc]
-        i13[#13 exact zoning]
-        i14[#14 first-cut hub + ring]
-        i16[#16 solve + CLI + gate]
+        i2["#35;2 contracts and scaffold"]
+        i3["#35;3 architecture doc"]
+        i13["#35;13 exact zoning"]
+        i14["#35;14 first-cut hub and ring"]
+        i16["#35;16 solve and CLI and gate"]
         i2 --> i3
         i3 --> i13
         i13 --> i14
         i14 --> i16
     end
     subgraph nexuszephyrS1 [nexuszephyr]
-        i4[#4 read plan to metres]
-        i6[#6 Plan + fixed nodes]
-        i9[#9 strict room graph]
-        i11[#11 checker hard rules]
+        i4["#35;4 read plan to metres"]
+        i6["#35;6 Plan and fixed nodes"]
+        i9["#35;9 strict room graph"]
+        i11["#35;11 checker hard rules"]
         i4 --> i6
         i6 --> i9
         i9 --> i11
     end
     subgraph V1702S1 [V1702]
-        i8[#8 bend-aware search]
-        i43[#43 checker metrics + slide 7]
-        i10[#10 label raster]
-        i15[#15 route rings]
+        i8["#35;8 bend-aware search"]
+        i43["#35;43 checker metrics and slide 7"]
+        i10["#35;10 label raster"]
+        i15["#35;15 route rings"]
         i8 --> i43
         i43 --> i10
         i10 --> i15
     end
     subgraph RohitS1 [Rohit]
-        i5[#5 draw base layer]
-        i7[#7 app shell + preset]
-        i12[#12 app: graph + checklist]
-        i17[#17 full overlay]
-        i18[#18 Sprint 1 verify]
+        i5["#35;5 draw base layer"]
+        i7["#35;7 app shell and preset"]
+        i12["#35;12 app: graph and checklist"]
+        i17["#35;17 full overlay"]
+        i18["#35;18 Sprint 1 verify"]
         i5 --> i7
         i7 --> i12
         i12 --> i17
@@ -75,40 +75,40 @@ Sprint 1 must be finished and verified (#18) first.
 ```mermaid
 flowchart LR
     subgraph AdiS2 [Adi]
-        i28[#28 cap-20 what-if]
-        i20[#20 exact hub + ring]
-        i22[#22 rank + enumerate + fallback]
-        i35[#35 Sprint 2 verify]
+        i28["#35;28 cap-20 what-if"]
+        i20["#35;20 exact hub and ring"]
+        i22["#35;22 rank and enumerate and fallback"]
+        i35["#35;35 Sprint 2 verify"]
         i28 --> i20
         i20 --> i22
         i22 --> i35
     end
     subgraph nexuszephyrS2 [nexuszephyr]
-        i23[#23 infeasible + reported]
-        i32[#32 batch runner]
-        i31[#31 interior-window box]
-        i33[#33 leaderboard]
-        i34[#34 output-format doc]
+        i23["#35;23 infeasible and reported"]
+        i32["#35;32 batch runner"]
+        i31["#35;31 interior-window box"]
+        i33["#35;33 leaderboard"]
+        i34["#35;34 output-format doc"]
         i23 --> i32
         i32 --> i31
         i31 --> i33
         i33 --> i34
     end
     subgraph V1702S2 [V1702]
-        i19[#19 path cache]
-        i21[#21 J-aware routing]
-        i30[#30 what-if sidebar]
-        i27[#27 Pareto H vs J]
+        i19["#35;19 path cache"]
+        i21["#35;21 J-aware routing"]
+        i30["#35;30 what-if sidebar"]
+        i27["#35;27 Pareto H vs J"]
         i19 --> i21
         i21 --> i30
         i30 --> i27
     end
     subgraph RohitS2 [Rohit]
-        i25[#25 step-through]
-        i24[#24 optimality badge]
-        i44[#44 presentation export]
-        i26[#26 gallery + filters]
-        i29[#29 cap 5 vs 20]
+        i25["#35;25 step-through"]
+        i24["#35;24 optimality badge"]
+        i44["#35;44 presentation export"]
+        i26["#35;26 gallery and filters"]
+        i29["#35;29 cap 5 vs 20"]
         i25 --> i24
         i24 --> i44
         i44 --> i26
