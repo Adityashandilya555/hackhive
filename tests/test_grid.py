@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import shapely
+from shapely.affinity import translate
 from shapely.geometry import MultiPolygon, Point, box, mapping
 from shapely.ops import unary_union
 
@@ -317,7 +318,10 @@ def test_doors_are_painted_over_openings():
     plan = _graph_plan("5924")
     door = next(d for d in plan.doors if d.rooms)
     gap = door_gap(door.polygon, plan.wall_depth_m, Constraints().grid_m)
-    band = Opening(id="opening_0", polygon=gap.buffer(0.3), rooms=door.rooms)
+    x0, y0, x1, y1 = gap.bounds  # 5924's doors are axis-aligned
+    half = ((x1 - x0) / 2, 0.0) if x1 - x0 > y1 - y0 else (0.0, (y1 - y0) / 2)
+    # a band over the door's far half, like 576's living–storage band at door_8
+    band = Opening(id="opening_0", polygon=translate(gap, *half), rooms=door.rooms)
     grid = LabelGrid.from_plan(plan, openings=[band])
     xs, ys = grid.centres()
     in_gap = shapely.contains_xy(gap, xs, ys) & (grid.labels != BLOCKED)
