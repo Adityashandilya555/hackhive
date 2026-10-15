@@ -142,6 +142,24 @@ def test_zone_links_via_excluded():
     assert nx.number_connected_components(eligible_graph(G)) == 1
 
 
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_via_excluded_never_replaces_a_door_or_opening(plan_id):
+    """The setting only adds edges: every default edge keeps its kind."""
+    plan, G = fixture(plan_id)
+    loose = build_graph(plan, Constraints(zone_links_via_excluded=True))
+    assert all(loose.edges[u, v]["kind"] == d["kind"] for u, v, d in G.edges(data=True))
+
+
+def test_via_excluded_doesnt_pass_through_a_balcony():
+    """decision_conventions §3 names bathrooms and stairs only."""
+    raw = _bed_bath_bed()
+    raw["balcony"] = raw.pop("bathroom")
+    plan = load_plan(raw)
+    G = build_graph(plan, Constraints(zone_links_via_excluded=True))
+    b0, b1 = room_by_label(plan, "bedroom_0").id, room_by_label(plan, "bedroom_1").id
+    assert not G.has_edge(b0, b1)
+
+
 # --------------------------------------------------------------------------- extras
 
 
