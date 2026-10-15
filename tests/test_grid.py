@@ -200,3 +200,44 @@ def test_default_cell_size_is_the_preset_grid():
     assert grid.cell_m == Constraints().grid_m
     assert grid.labels.dtype == np.int16
     assert Point(grid.to_xy((0, 0))).x < Point(grid.to_xy((0, 1))).x
+
+
+# --------------------------------------------------------------------------- door width (review)
+
+
+def _straight_crossings(grid: LabelGrid):
+    """Every straight room -> door cells -> room run along a row or column, as two centres."""
+    labels = grid.labels
+    rows, cols = labels.shape
+    for door, pair in grid.door_rooms.items():
+        for r, c in np.argwhere(labels == door):
+            for dr, dc in ((0, 1), (1, 0)):
+                if 0 <= r - dr < rows and 0 <= c - dc < cols and labels[r - dr, c - dc] == door:
+                    continue  # start each run at its first door cell
+                rr, cc = r, c
+                while 0 <= rr < rows and 0 <= cc < cols and labels[rr, cc] == door:
+                    rr, cc = rr + dr, cc + dc
+                a, b = (r - dr, c - dc), (rr, cc)
+                if not (
+                    0 <= a[0] < rows and 0 <= a[1] < cols and 0 <= b[0] < rows and 0 <= b[1] < cols
+                ):
+                    continue
+                if {int(labels[a]), int(labels[b])} == set(pair):
+                    yield door, grid.to_xy(a), grid.to_xy(b)
+
+
+@pytest.mark.parametrize("pid", PLAN_IDS)
+def test_no_legal_door_crossing_cuts_real_wall(pid):
+    """Doors may reach through the wall band, but never sideways along it (#11 rule 5)."""
+    from shapely.geometry import LineString
+
+    plan = _plan(pid)
+    grid = LabelGrid.from_plan(plan)
+    solid = unary_union(plan.walls).difference(unary_union([d.polygon for d in plan.doors]))
+    cuts = [
+        (door, a, b, LineString([a, b]).intersection(solid).length)
+        for door, a, b in _straight_crossings(grid)
+    ]
+    bad = [c for c in cuts if c[3] > 1e-6]
+    assert cuts, "every fixture has door crossings"
+    assert not bad, f"{len(bad)} crossings cut wall, worst {max(c[3] for c in bad):.3f} m"
