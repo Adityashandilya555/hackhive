@@ -79,9 +79,10 @@ If code and this page disagree, fix whichever is wrong, then update this page in
 |---|---|---|---|
 | L | the sum of polyline lengths over every leg of every ring, return legs included. A retraced stretch counts each time | slides 6-7 | §7: rectangle 4+2+3+3 → **L = 12**; out-and-back 3 m → **L = 6** |
 | X, cables crossing in the open | +1 per point, inside one ring or between rings | slides 6-7 | §7: plus-shaped crossing → **X = 1** |
-| X, legs meeting at a node or hub | 0 | slide 7 | §7: legs meet at a node → **X = 0** |
+| X, legs meeting at a node or hub | 0, but only for the legs that end there (consecutive legs at a node, first and last leg at the hub). A **foreign cable through a node or hub point counts 1** ⚠ (strict; the router avoids it, §4) | slide 7; principle 3 | §7: legs meet at a node → **X = 0**; `test_checker_metrics::foreign_cable_through_node_counts` |
 | X, T-touch (a vertex on another cable's interior), away from nodes and hubs | counts 1 ⚠ #46 Q4 (strict; the router avoids it) | slide 6 "meet" | `test_checker::t_touch` |
-| X, the ends of a shared same-line stretch where the cables diverge | each divergence point away from a node or hub counts 1 ⚠ #46 Q4 (strict reading of "points where two cables meet"); so a retrace is chosen only if it's still cheaper | slide 6 | `test_checker::divergence` |
+| X, the ends of a shared same-line stretch where the cables diverge | each divergence point away from a node or hub counts 1 ⚠ #46 Q4 (strict reading of "points where two cables meet"); so a retrace is chosen only if it's still cheaper | slide 6 | `test_checker_metrics::divergence_ends_count_strict` |
+| X, a corner two cables turn together (a retrace that turns a corner: both arrive at and leave the point in the same directions) | 0: neither cable diverges there, so it isn't a divergence point. Counting it would add a false +5 to every single-door retrace that turns a corner ⚠ #46 Q4 | slide 6; #43 review | `test_checker_metrics::co_routed_corner_is_not_a_divergence` |
 | X, many cables through one point | once per point | slide 7 | `test_checker::once_per_point` |
 | O | for every stretch covered by k legs (any rings) on the same line: (k − 1) × length. Lines within 1 mm are the same line; parallel lines further apart don't count | slides 6-7 | §7: 2 m shared → **O = 2**; parallel runs → **O = 0** |
 | O, collinear segments touching only at an endpoint | 0 | slide 7 | `test_checker::end_touch` |

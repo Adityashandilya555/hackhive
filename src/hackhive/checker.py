@@ -246,7 +246,13 @@ def _crossings(
         for lb, ib in pieces[n + 1 :]:
             A, B = legs[la], legs[lb]
             for p in _meet(A[ia], A[ia + 1], B[ib], B[ib + 1], tol):
-                if any(_dist(p, t) <= tol for t in terminals):
+                # free only where both legs end (they meet at their shared node or hub); a foreign
+                # cable through a node or hub counts (strict, decision_conventions principle 3)
+                if (
+                    any(_dist(p, t) <= tol for t in terminals)
+                    and any(_dist(p, e) <= tol for e in (A[0], A[-1]))
+                    and any(_dist(p, e) <= tol for e in (B[0], B[-1]))
+                ):
                     continue
                 # cables that arrive and leave p together don't meet there: the shared vertex of
                 # consecutive pieces, or a co-routed corner of a retrace (#43 decided ambiguity)
@@ -264,10 +270,12 @@ def _crossings(
 def crossing_points(
     polylines: Sequence[Sequence[Point]], terminals: Sequence[Point], tol: float = TOL
 ) -> list[Point]:
-    """X's points (slides 6-7): where cables cross or meet away from every terminal, once per point.
+    """X's points (slides 6-7): where cables cross or meet, once per point.
 
-    Strict (decision_conventions §6 ⚠ #46 Q4): a T-touch and each divergence end of a shared
-    same-line stretch count. Each polyline is one leg.
+    A meeting at a terminal (node or hub point) is free only when both legs end there; a foreign
+    cable through a node or hub counts. Strict (decision_conventions §6 ⚠ #46 Q4): a T-touch and
+    each divergence end of a shared same-line stretch count, but not a corner two cables turn
+    together. Each polyline is one leg.
     """
     legs = [clean_polyline(p, tol) for p in polylines]
     return [p for p, _ in _crossings(legs, [str(i) for i in range(len(legs))], terminals, tol)]

@@ -64,7 +64,9 @@ def test_slide7_L_rectangle():
         [(4, 2), (1, 2)],
         [(1, 2), (0, 2), (0, 0)],
     ]
-    assert metrics([ring((0, 0), legs)]).L == approx(12)
+    m = metrics([ring((0, 0), legs)])
+    assert (m.L, m.X, m.O, m.B) == (approx(12), 0, approx(0), 4)
+    assert m.J == approx(14)  # 12 + 0.5 · 4
 
 
 def test_slide7_L_out_and_back():
@@ -135,6 +137,21 @@ def test_co_routed_corner_is_not_a_divergence():
     m = metrics([ring((0, 0), [[(0, 0), (3, 0), (3, 2)], [(3, 2), (3, 0), (0, 0)]])])
     assert (m.L, m.X, m.O, m.B) == (approx(10), 0, approx(5), 4)
     assert m.J == approx(17)
+
+
+def test_x_inside_one_ring():
+    # a figure-8 ring crosses itself at (2, 0) (slide 6: X counts inside one ring)
+    legs = [[(0, 0), (4, 0), (4, 2)], [(4, 2), (2, 2), (2, -2)], [(2, -2), (0, -2), (0, 0)]]
+    assert metrics([ring((0, 0), legs)]).X == 1
+
+
+def test_foreign_cable_through_node_counts():
+    # H2's cable runs straight through H1's node N1 at (5, 5): only the node's own legs meet free
+    a = ring((0, 5), [[(0, 5), (5, 5)], [(5, 5), (5, 8), (0, 8), (0, 5)]], hub_id="H1")
+    b = ring((5, 0), [[(5, 0), (5, 3), (5, 10), (8, 10)], [(8, 10), (8, 0), (5, 0)]], hub_id="H2")
+    assert metrics([a, b]).X == 2  # (5, 5) and (5, 8), as with the cable shifted off the node
+    shifted = ring((4, 0), [[(4, 0), (4, 10), (8, 10)], [(8, 10), (8, 0), (4, 0)]], hub_id="H2")
+    assert metrics([a, shifted]).X == 2
 
 
 def test_once_per_point():
