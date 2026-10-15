@@ -1,0 +1,146 @@
+"""Acceptance tests for #2: data contracts, the problem-statement preset and the schemas."""
+
+import copy
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
+
+from hackhive.contracts import (
+    ORGANISER_WEIGHTS,
+    Constraints,
+    CostWeights,
+    Submission,
+    lower_bound,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests" / "fixtures"
+
+
+@pytest.fixture
+def slide8() -> dict:
+    return json.loads((FIXTURES / "slide8_example.json").read_text())
+
+
+def test_slide8_example_parses(slide8):
+    sub = Submission.model_validate(slide8)
+    hub = sub.hubs[0]
+    assert sub.units == "m"
+    assert isinstance(slide8["hubs"][0]["location"], dict)
+    assert hub.location.x == slide8["hubs"][0]["location"]["x"]
+    for seg in hub.route_segments:
+        assert all(len(p) == 2 for p in seg.polyline)
+
+
+def _paths_to_objects(obj, path=()):
+    """Every path (tuple of keys/indices) that points at a JSON object."""
+    if isinstance(obj, dict):
+        yield path
+        for k, v in obj.items():
+            yield from _paths_to_objects(v, (*path, k))
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            yield from _paths_to_objects(v, (*path, i))
+
+
+def test_extra_key_rejected_at_every_level(slide8):
+    paths = list(_paths_to_objects(slide8))
+    assert len(paths) >= 5  # root, hub, location, segment, reported_metrics
+    for path in paths:
+        bad = copy.deepcopy(slide8)
+        target = bad
+        for step in path:
+            target = target[step]
+        target["unexpected"] = 1
+        with pytest.raises(ValidationError):
+            Submission.model_validate(bad)
+
+
+def test_problem_statement_preset():
+    c = Constraints.problem_statement()
+    w = c.cost_weights
+    assert (w.length, w.cross, w.overlap, w.bend) == (1.0, 5.0, 1.0, 0.5)
+    assert c.hub_wall_clearance_m == 0.5
+    assert c.tolerance_m == 0.001
+    assert c.max_area_m2 == 100
+    assert c.max_nodes == 5
+    assert c.is_problem_statement
+    assert Constraints() == c
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"max_area_m2": 120},
+        {"max_nodes": 20},
+        {"hub_wall_clearance_m": 0.4},
+        {"tolerance_m": 0.01},
+        {"grid_m": 0.05},
+        {"flip_y": True},
+        {"origin_shift": (1.0, 0.0)},
+        {"interior_windows_as_doors": True},
+        {"zone_links_via_excluded": True},
+        {"cost_weights": CostWeights(1.0, 10.0, 1.0, 0.5)},
+    ],
+)
+def test_any_change_leaves_the_preset(change):
+    assert not Constraints(**change).is_problem_statement
+
+
+def test_constraints_frozen_and_hashable():
+    c = Constraints()
+    assert hash(c) == hash(Constraints.problem_statement())
+    with pytest.raises(ValidationError):
+        c.max_nodes = 20
+
+
+def test_zone_links_via_excluded_default_false():
+    assert Constraints().zone_links_via_excluded is False
+    assert not Constraints(zone_links_via_excluded=True).is_problem_statement
+
+
+def test_lower_bound():
+    assert lower_bound(150, 5, Constraints()) == 2
+    assert lower_bound(91.5, 7, Constraints()) == 2
+    assert lower_bound(91.5, 7, Constraints(max_nodes=20)) == 1
+
+
+def test_schemas_up_to_date():
+    r = subprocess.run(
+        [sys.executable, "-m", "hackhive.contracts", "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "schemas up to date" in r.stdout
+
+
+def test_weights_defined_only_once():
+    assert ORGANISER_WEIGHTS == CostWeights(1.0, 5.0, 1.0, 0.5)
+    hits = []
+    for f in (ROOT / "src").rglob("*.py"):
+        for n, line in enumerate(f.read_text().splitlines(), 1):
+            if (
+                re.search(r"(?<![\d.])(5\.0|0\.5)(?![\d])", line)
+                and "ORGANISER_WEIGHTS" not in line
+            ):
+                hits.append(f"{f.name}:{n}: {line.strip()}")
+    # hub_wall_clearance_m is a clearance, not a weight
+    hits = [h for h in hits if "clearance" not in h]
+    assert not hits, hits
+
+
+def test_fixtures_and_expected():
+    expected = json.loads((FIXTURES / "expected.json").read_text())
+    plans = sorted(p.stem.split("-")[1] for p in (FIXTURES / "plans").glob("plan-*.json"))
+    assert sorted(expected) == plans
+    assert len(plans) == 7
+    assert expected["5924"]["elig_m2"] == pytest.approx(150.0, abs=0.1)
+    assert expected["5924"]["lb5"] == 2
+    assert expected["13344"]["lb5"] == 2 and expected["13344"]["lb20"] == 1
