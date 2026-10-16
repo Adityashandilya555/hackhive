@@ -39,6 +39,7 @@ from hackhive.checker import (
     check_rules,
     metrics,
     reported_mismatches,
+    segment_length,
 )
 from hackhive.contracts import (
     ArrangementUsed,
@@ -110,6 +111,7 @@ class Result:
     plan: Plan | None
     submission: Submission | None
     sidecar: Sidecar
+    graph: nx.Graph | None = None  # solve()'s room graph, reused for case tags (#32)
 
     @property
     def submittable(self) -> bool:
@@ -197,6 +199,28 @@ def _hub_point_errors(plan: Plan, hubs: Sequence[Hub], c: Constraints) -> list[V
     return out
 
 
+DECIMALS = 4  # T6 (#34): 0.1 mm, well inside the checker's 1 mm tolerance
+SAME_M = 1e-9  # float noise only (13.450000000000001), never the checker's 1 mm
+
+
+def _rounded(polyline: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    """T6 (#34): every vertex to `DECIMALS`. A coordinate equal (up to float noise) to the
+    previous vertex's takes that vertex's rounded value, so each segment stays exactly
+    axis-aligned; a real sub-mm jog keeps its own value, so it never drifts along the run (#102
+    review). A jog under half a step rounds onto the previous point and is dropped."""
+    out: list[tuple[float, float]] = []
+    for i, (x, y) in builtins.enumerate(polyline):
+        rx, ry = round(x, DECIMALS), round(y, DECIMALS)
+        if out:
+            px, py = polyline[i - 1]
+            rx = out[-1][0] if abs(x - px) <= SAME_M else rx
+            ry = out[-1][1] if abs(y - py) <= SAME_M else ry
+            if (rx, ry) == out[-1] and (len(out) > 1 or i < len(polyline) - 1):
+                continue
+        out.append((rx, ry))
+    return out
+
+
 def _hub_out(hub: Hub, segments: Sequence[RouteSegment], ring_length_m: float = 0.0) -> HubOut:
     """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
     return HubOut.model_validate(
@@ -216,10 +240,21 @@ def _hub_out(hub: Hub, segments: Sequence[RouteSegment], ring_length_m: float = 
 def _submission(
     plan: Plan, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
 ) -> tuple[Submission, Metrics]:
-    out = [
-        _hub_out(hub, ring.segments, ring.ring_length_m)
-        for hub, ring in zip(hubs, rings, strict=True)
-    ]
+    """Coordinates are rounded (T6) and every length recomputed from the rounded polylines."""
+    out = []
+    for hub, ring in zip(hubs, rings, strict=True):
+        segments = []
+        for s in ring.segments:
+            poly = _rounded(s.polyline)
+            segments.append(
+                s.model_copy(
+                    update={"polyline": poly, "length_m": round(segment_length(poly), DECIMALS)}
+                )
+            )
+        x, y = hub.location
+        rounded_hub = dataclasses.replace(hub, location=(round(x, DECIMALS), round(y, DECIMALS)))
+        ring_m = round(sum(s.length_m for s in segments), DECIMALS)  # the written lengths' sum
+        out.append(_hub_out(rounded_hub, segments, ring_m))
     rooms = {r.id: r for r in plan.rooms}
     areas = {h.hub_id: sum(rooms[r].area_m2 for r in h.assigned_rooms) for h in out}
     m = metrics(out, c, hub_areas=areas)
@@ -227,7 +262,10 @@ def _submission(
         plan_id=plan.plan_id,
         units="m",
         hubs=out,
-        reported_metrics={"hub_count": m.H, "total_length_m": m.L},
+        reported_metrics={
+            "hub_count": m.H,
+            "total_length_m": round(sum(h.ring_length_m for h in out), DECIMALS),
+        },
     )
     return sub, m
 
@@ -460,6 +498,7 @@ def solve(
     notes = [*plan.warnings, *_fold_notes(plan), *_name_notes(plan.plan_id)]
     if note := what_if_note(c):  # #30: labelled, and `Result.submittable` keeps it unwritten
         notes.insert(0, note)
+    G = build_graph(plan, c)
     base = {"warnings": notes, "folded_parts": list(plan.folded_parts), "frame": plan.frame}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
@@ -473,7 +512,7 @@ def solve(
             bounds=Bounds(k_lb=k_lb),
             **base,
         )
-        return Result(plan, None, side)
+        return Result(plan, None, side, G)
 
     def designed(d: _Design, skipped: Sequence[_Design]) -> Result:
         sub, m, violations = d.submission, d.metrics, d.violations
@@ -512,9 +551,9 @@ def solve(
             folded_parts=list(plan.folded_parts),
             frame=plan.frame,
         )
-        return Result(plan, sub, side)
+        return Result(plan, sub, side, G)
 
-    g = eligible_graph(build_graph(plan, c))
+    g = eligible_graph(G)
     try:
         zonings = _zonings(plan, g, c)
     except Infeasible as e:
