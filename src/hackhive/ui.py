@@ -292,6 +292,53 @@ Q2_URL = "https://github.com/Adityashandilya555/hackhive/blob/main/docs/clarifyi
 _ROOM_OVER_CAP = re.compile(r"room (\S+) is ([\d.]+) m² > ([\d.]+) m²")
 
 
+# --------------------------------------------------------------------------- optimality badge
+
+# the proofs that make H the fewest hubs possible (#24); greedy and none prove nothing
+PROOFS = ("exhaustive", "lb_met")
+
+
+def proven_min_hubs(side: Sidecar) -> int | None:
+    """The hub count solve() proved minimal, or None when unproven. Read from `bounds.proof` as
+    solve() writes it; #22 sets `lb_met` / `exhaustive` / `none` per plan, and this follows."""
+    b = side.bounds
+    return b.k_found if b is not None and b.proof in PROOFS else None
+
+
+@dataclass(frozen=True)
+class Badge:
+    kind: str  # the Streamlit call: success (✓) or error (✗, only for an unproven H > LB)
+    text: str
+    explain: str | None = None  # why H > LB, for the expander; None when H = LB
+
+
+def optimality_badge(side: Sidecar, plan: Plan, c: Constraints) -> Badge | None:
+    """The Best tab's badge (#24, C7, T7) from the sidecar's bounds and cost; None without a
+    design. "optimal" is written only under a proof and refers to the hub count, never to J."""
+    b, m = side.bounds, side.cost
+    if b is None or b.k_found is None or m is None:
+        return None
+    k, lb = b.k_found, b.k_lb
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    hubs = f"{k} hub{'' if k == 1 else 's'}"
+    cost = f"J = {m.J:.2f} (L {m.L:.2f} m · X {m.X} · O {m.O:.2f} m · B {m.B})"
+    if k == lb:
+        return Badge(
+            "success", f"✓ {hubs} = lower bound ({area:.1f} m², {len(plan.nodes)} nodes) · {cost}"
+        )
+    if proven_min_hubs(side) == k:
+        return Badge(
+            "success",
+            f"✓ proven minimum · {hubs} · optimal (exhaustive search) · LB {lb} (+{k - lb})"
+            f" · {cost} · optimal refers to the hub count only",
+            f"The lower bound {lb} counts only area (≤ {c.max_area_m2:g} m²) and nodes "
+            f"(≤ {c.max_nodes}) per hub. Each zone must also be connected through its own doors: "
+            "when rooms open only onto the living room (a star around it), no split into "
+            f"{lb} zones fits both caps. Every zoning was checked, so {k} is the fewest possible.",
+        )
+    return Badge("error", f"✗ {hubs} > lower bound {lb} (+{k - lb}) · not proven minimal · {cost}")
+
+
 @dataclass(frozen=True)
 class CaseTag:
     id: str

@@ -32,9 +32,11 @@ from hackhive.ui import (
     load_submission,
     md_text,
     metrics_line,
+    optimality_badge,
     plan_facts,
     plan_from_bytes,
     preset_rows,
+    proven_min_hubs,
     readings_rows,
     resplan_raw,
     room_counts,
@@ -146,14 +148,19 @@ def overlay(
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
 def checked(
-    source: str, key: str, content: bytes | None, solution: str, settings: str
+    source: str,
+    key: str,
+    content: bytes | None,
+    solution: str,
+    settings: str,
+    proven_min: int | None = None,
 ) -> checker.Report:
     """`checker.report` on a solution file under the active settings: the six rules, the
     metrics, the checklist. The checker builds its own room graph from the plan, on purpose: it
-    trusts nothing of ours."""
+    trusts nothing of ours but solve()'s proven hub minimum (`proven_min`, #24 T7)."""
     plan, _ = load(source, key, content)
     c = Constraints.model_validate_json(settings)
-    return checker.report(plan, load_submission(Path(solution)), c)
+    return checker.report(plan, load_submission(Path(solution)), c, proven_min)
 
 
 # --------------------------------------------------------------------------- sidebar
@@ -225,12 +232,17 @@ def best_tab(
     judged under `c`; with `counting`, J under both readings of the counting rules (D3, #30)."""
     settings = c.model_dump_json()
     banner(side, plan)
+    if badge := optimality_badge(side, plan, c):  # #24: proof of the hub count, never of J
+        getattr(st, badge.kind)(badge.text)
+        if badge.explain:
+            with st.expander("Why more hubs than the lower bound?"):
+                st.markdown(badge.explain)
     if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
         st.caption("No design was submitted. The Plan tab still shows the plan.")
         return
     try:
         sub = load_submission(path)
-        rep = checked(source, key, content, str(path), settings)
+        rep = checked(source, key, content, str(path), settings, proven_min_hubs(side))
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
