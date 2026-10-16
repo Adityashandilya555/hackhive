@@ -20,7 +20,7 @@ from hackhive.ui import (
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "app.py")
 FIXTURES = ROOT / "tests" / "fixtures"
-TIMEOUT = 60  # the first draw of a plan takes a second or two on a cold laptop
+TIMEOUT = 120  # 13344 alone takes ~60 s since #95/#101; 60 flaked on a busy runner (#107)
 
 
 def _run(at: AppTest | None = None) -> AppTest:
@@ -62,6 +62,12 @@ def test_starts_with_fixture_5924_drawn():
     assert "PLAN_5924" in _main_text(at)
     assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
     assert not at.error
+
+
+def test_best_tab_offers_the_presentation_image():
+    at = _run()
+    labels = [b.proto.label for b in at.main.get("download_button")]
+    assert "Download presentation image" in labels  # #44: viz.presentation_png's bytes
 
 
 def test_problem_statement_is_locked_at_the_organisers_values():

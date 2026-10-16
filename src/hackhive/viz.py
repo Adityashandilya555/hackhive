@@ -903,6 +903,126 @@ def to_png(fig: Figure, dpi: int = 150) -> bytes:
     return buf.getvalue()
 
 
+# --------------------------------------------------------------------------- presentation (#44)
+
+_SLIDE_IN = (16.0, 9.0)  # slide 8's 16:9 frame, in inches
+_SLIDE_DPI = 200
+_ROW_H = 0.065  # one table row, as a fraction of the panel's height
+
+
+def hub_count_badge(bounds: Any) -> str:
+    """`6 hubs, proven minimal against a lower bound of 2`: H against the lower bound, from the
+    sidecar's `bounds` (#22's proof: `exhaustive` only when H is the fewest any zoning uses)."""
+    h, lb = bounds.k_found, bounds.k_lb
+    hubs = f"{h} hub{'' if h == 1 else 's'}"
+    if h == lb:
+        return f"{hubs}, proven minimal: equal to the lower bound"
+    if bounds.proof == "exhaustive":
+        return f"{hubs}, proven minimal against a lower bound of {lb}"
+    return f"{hubs} against a lower bound of {lb}"
+
+
+def draw_presentation(plan: Plan, result: Any) -> Figure:
+    """The slide-8 presentation image (#44), 16:9: #17's overlay on the left; on the right the
+    per-hub summary, the hub-count badge, the J breakdown and the assigned-area gap. `result` is
+    a `solve.Result` with a submission; every number is recomputed by the checker mirror."""
+    from hackhive.ui import hub_metrics  # ui imports solve, which viz must not load at import
+
+    sub, side = result.submission, result.sidecar
+    c = side.settings
+    m = checker.metrics(sub.hubs, c)
+    rows = hub_metrics(plan, sub, m)
+    fig = Figure(figsize=_SLIDE_IN, facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    left, right = fig.subplots(1, 2, width_ratios=[3, 2])
+    draw_solution(plan, sub, violations=side.violations, ax=left)
+    if result.what_if:
+        from hackhive.what_if import what_if_changes
+
+        label_what_if(fig, what_if_changes(c))
+    right.set_axis_off()
+    right.text(0, 1, side.plan_id, fontsize=18, fontweight="bold", color=INK, va="top")
+    right.text(
+        0,
+        0.93,
+        hub_count_badge(side.bounds),
+        fontsize=12,
+        color=INK,
+        va="top",
+        gid="presentation:badge",
+    )
+    height = _ROW_H * (len(rows) + 1)  # a fixed bbox would stretch a one-hub row to 2 inches
+    table = right.table(
+        cellText=[
+            [
+                h.hub_id,
+                ", ".join(dict.fromkeys(h.assigned_rooms)),
+                f"{r.area_m2:.1f}",
+                str(r.n_nodes),
+                f"{r.L:.2f}",
+                str(r.B),
+            ]
+            for r, h in zip(rows, sub.hubs, strict=True)
+        ],
+        colLabels=["Hub", "Rooms", "m²", "Nodes", "Ring (m)", "Bends"],
+        colWidths=[0.08, 0.44, 0.1, 0.11, 0.16, 0.11],
+        cellLoc="left",  # right-aligned cells overflow leftwards into the Hub column
+        bbox=[0, 0.85 - height, 1, height],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(10)
+    w = c.cost_weights
+    right.text(
+        0,
+        0.8 - height,
+        f"J = {w.length:g}·L + {w.cross:g}·X + {w.overlap:g}·O + {w.bend:g}·B\n"
+        f"L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B}\nJ {m.J:.3f}",
+        fontsize=12,
+        color=INK,
+        va="top",
+        linespacing=1.6,
+        gid="presentation:J",
+    )
+    gap = checker.area_gap(r.area_m2 for r in rows)
+    right.text(
+        0,
+        0.65 - height,  # under the three J lines
+        f"Assigned-area gap (max − min): {gap:.1f} m²",
+        fontsize=12,
+        color=INK_SECONDARY,
+        va="top",
+        gid="presentation:gap",
+    )
+    return fig
+
+
+def export_presentation(plan: Plan, result: Any, out_dir: str | Path) -> list[Path]:
+    """Write `<plan_id>.presentation.png` (dpi 200) and `.svg` into `out_dir` (#44). Nothing is
+    written when there is no design to show; the paths written are returned."""
+    if result.submission is None:
+        return []
+    from hackhive.solve import file_stem
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    stem = f"{file_stem(result.sidecar.plan_id)}.presentation"
+    png, svg = out / f"{stem}.png", out / f"{stem}.svg"
+    png.write_bytes(presentation_png(plan, result))
+    fig = draw_presentation(plan, result)
+    fig.savefig(svg, facecolor=fig.get_facecolor())
+    fig.clear()
+    return [png, svg]
+
+
+def presentation_png(plan: Plan, result: Any) -> bytes:
+    """`draw_presentation` as PNG bytes at dpi 200: the exported file and the app's download."""
+    fig = draw_presentation(plan, result)
+    buf = io.BytesIO()  # no bbox_inches="tight": it would break the 16:9 frame
+    fig.savefig(buf, format="png", dpi=_SLIDE_DPI, facecolor=fig.get_facecolor())
+    fig.clear()
+    return buf.getvalue()
+
+
 # --------------------------------------------------------------------------- CLI
 
 
