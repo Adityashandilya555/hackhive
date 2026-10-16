@@ -18,6 +18,7 @@ from itertools import pairwise
 from pathlib import Path
 
 import networkx as nx
+import numpy as np
 import shapely
 from pydantic import ValidationError
 from shapely.geometry.base import BaseGeometry
@@ -314,9 +315,16 @@ def _crossings(
     legs: Sequence[Sequence[Point]], owners: Sequence[str], terminals: Sequence[Point], tol: float
 ) -> list[tuple[Point, set[str]]]:
     pieces = [(li, i) for li, leg in enumerate(legs) for i in range(len(leg) - 1)]
+    # every point _meet returns lies within 2·tol of both pieces, so a pair whose boxes, grown by
+    # 3·tol, don't touch meets nowhere: skipping it changes nothing, in the same order (#20)
+    ends = np.array([(*legs[li][i], *legs[li][i + 1]) for li, i in pieces]).reshape(-1, 4)
+    lo = np.minimum(ends[:, :2], ends[:, 2:]) - 3 * tol
+    hi = np.maximum(ends[:, :2], ends[:, 2:]) + 3 * tol
     found: list[tuple[Point, set[str]]] = []
     for n, (la, ia) in enumerate(pieces):
-        for lb, ib in pieces[n + 1 :]:
+        near = np.all((lo[n + 1 :] <= hi[n]) & (hi[n + 1 :] >= lo[n]), axis=1)
+        for m in np.flatnonzero(near).tolist():
+            lb, ib = pieces[n + 1 + m]
             A, B = legs[la], legs[lb]
             for p in _meet(A[ia], A[ia + 1], B[ib], B[ib + 1], tol):
                 # free only where both legs end (they meet at their shared node or hub); a foreign
@@ -866,30 +874,49 @@ def check_rules(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -
     and skips the rest of rules 4-6 (no cascades); rules 1-3 don't depend on the ring. `error`
     is a certain slide break; `strict` a conservative reading (#46 Q3, Q5).
     """
-    graph = build_graph(plan, c)  # also fills plan.openings, which rule 5 needs
-    ctx = _Context(
-        plan=plan,
-        c=c,
-        rooms={r.id: r for r in plan.rooms},
-        nodes={n.id: n for n in plan.nodes},
-        graph=graph,
-        eligible=eligible_graph(graph),
-        single_door=single_door_rooms(graph),
-        hub_walls=wall_geometry(plan),
-    )
-    out = _rule1_coverage(submission, ctx)
-    space: _FreeSpace | None = None
+    ctx = RuleContext(plan, c)
+    out = _rule1_coverage(submission, ctx.ctx)
     for hub in submission.hubs:
-        out += _rule2_capacity(hub, ctx) + _rule3_zone(hub, ctx)
-        if broken := _ring_shape(hub, ctx):
-            out.append(broken)
-            continue
-        space = space or _free_space(plan, c)
-        out += _rule4_endpoints(hub, ctx) + _rule4_retraces(hub, ctx)
-        for s in hub.route_segments:
-            out += _rule5_leg(s.polyline, space, c, hub.hub_id, f"{s.from_}→{s.to}")
-        out += _rule6_hub_point(hub, ctx)
+        out += hub_rules(hub, ctx)
     return sorted(out, key=lambda v: (v.rule, v.hub_id or "", v.message))
+
+
+class RuleContext:
+    """What `check_rules` reads from a plan, built once: the room graph (#9) and its views, and
+    rule 5's free space on first use. `hub_rules` with one context checks many candidate rings of
+    the same plan without rebuilding either (#20)."""
+
+    def __init__(self, plan: Plan, c: Constraints = _DEFAULT) -> None:
+        graph = build_graph(plan, c)  # also fills plan.openings, which rule 5 needs
+        self.ctx = _Context(
+            plan=plan,
+            c=c,
+            rooms={r.id: r for r in plan.rooms},
+            nodes={n.id: n for n in plan.nodes},
+            graph=graph,
+            eligible=eligible_graph(graph),
+            single_door=single_door_rooms(graph),
+            hub_walls=wall_geometry(plan),
+        )
+        self._space: _FreeSpace | None = None
+
+    @property
+    def space(self) -> _FreeSpace:
+        if self._space is None:
+            self._space = _free_space(self.ctx.plan, self.ctx.c)
+        return self._space
+
+
+def hub_rules(hub: HubOut, ctx: RuleContext) -> list[Violation]:
+    """Rules 2-6 for one hub (`check_rules` without rule 1's plan-wide coverage), unsorted."""
+    c = ctx.ctx.c
+    out = _rule2_capacity(hub, ctx.ctx) + _rule3_zone(hub, ctx.ctx)
+    if broken := _ring_shape(hub, ctx.ctx):
+        return [*out, broken]
+    out += _rule4_endpoints(hub, ctx.ctx) + _rule4_retraces(hub, ctx.ctx)
+    for s in hub.route_segments:
+        out += _rule5_leg(s.polyline, ctx.space, c, hub.hub_id, f"{s.from_}→{s.to}")
+    return out + _rule6_hub_point(hub, ctx.ctx)
 
 
 # --------------------------------------------------------------------------- checklist and CLI
