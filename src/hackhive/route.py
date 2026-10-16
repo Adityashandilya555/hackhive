@@ -18,7 +18,7 @@ import heapq
 import itertools
 import math
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -470,28 +470,52 @@ def single_door_nodes(plan: Plan, c: Constraints = _DEFAULT) -> frozenset[str]:
     return frozenset(n.id for n in plan.nodes if n.room_id in one_door)
 
 
+def own_rooms_grid(grid: LabelGrid, rooms: Collection[str]) -> LabelGrid:
+    """The grid with every room outside `rooms` blocked, and every door/opening that touches
+    none of them (D7, #79). A ring routed on it stays in its own hub's rooms."""
+    own = {grid.room_label(r) for r in rooms}
+    # a passage to a blocked room is a dead end, but its band can lie inside an own room
+    # (13344's opening_0 strip in living_0: blocking it cost 0.2 m)
+    allowed = own | {p for p, (a, b) in grid.door_rooms.items() if a in own or b in own}
+    labels = np.where(np.isin(grid.labels, list(allowed)), grid.labels, BLOCKED)
+    return replace(grid, labels=labels.astype(grid.labels.dtype))
+
+
 def route_rings(
-    grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
+    grid: LabelGrid,
+    plan: Plan,
+    hubs: Sequence[Hub],
+    c: Constraints = _DEFAULT,
+    *,
+    zones: Sequence[Collection[str]],
 ) -> list[RoutedRing]:
-    """Every hub's ring, routed independently in hub order (no rip-up yet, #21)."""
+    """Every hub's ring, routed independently in hub order (no rip-up yet, #21), each inside its
+    own zone's rooms unless `c.route_through_other_rooms` (D7)."""
     from hackhive.checker import _free_space, metrics  # checker imports grid, which imports us
 
     retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings _free_space needs
     free = _free_space(plan, c).free  # rule 5's own geometry, so stubs and checker agree
     nodes = {n.id: n for n in plan.nodes}
     out = []
-    for hub in hubs:
+    for hub, zone in zip(hubs, zones, strict=True):
         stops = [
             Stop(hub.hub_id, hub.location, hub.room_id),
             *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
         ]
-        segments = route_ring(grid, stops, c, retrace_ok=retrace_ok, free=free)
+        if c.route_through_other_rooms:
+            segments = route_ring(grid, stops, c, retrace_ok=retrace_ok, free=free)
+        else:
+            own = own_rooms_grid(grid, zone)
+            try:
+                segments = route_ring(own, stops, c, retrace_ok=retrace_ok, free=free)
+            except ValueError as e:  # never falls back to other rooms
+                raise ValueError(f"{hub.hub_id}: {e} inside its own rooms (D7)") from e
         hub_out = HubOut.model_validate(
             {
                 "hub_id": hub.hub_id,
                 "room_id": hub.room_id,
                 "location": {"x": hub.location[0], "y": hub.location[1]},
-                "assigned_rooms": [hub.room_id],
+                "assigned_rooms": [hub.room_id, *sorted(set(zone) - {hub.room_id})],
                 "assigned_nodes": hub.ring[1:-1],
                 "closed_sequence": hub.ring,
                 "route_segments": [s.model_dump(by_alias=True) for s in segments],

@@ -48,6 +48,8 @@ class Constraints(BaseModel):
     origin_shift: tuple[float, float] = (0.0, 0.0)
     interior_windows_as_doors: bool = False
     zone_links_via_excluded: bool = False
+    # D7: a ring may cross excluded / other hubs' rooms (WHAT-IF; app toggle #30)
+    route_through_other_rooms: bool = False
     cost_weights: CostWeights = ORGANISER_WEIGHTS
 
     @classmethod

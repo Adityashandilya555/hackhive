@@ -259,7 +259,7 @@ def solve(
     except ValueError as e:
         return no_design(f"grid failed: {e}")
     try:
-        rings = route_rings(grid, plan, hubs, c)
+        rings = route_rings(grid, plan, hubs, c, zones=_zone_order(zoning))
     except ValueError as e:
         return no_design(f"routing failed: {e}")
 
