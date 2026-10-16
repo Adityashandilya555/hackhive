@@ -23,7 +23,7 @@ This file picks up from #46, which was closed **with no answers recorded**. Rule
 | D4 | An eligible room > 100 m² (old O12) | **Ignore.** No submission, and the sidecar says why. The area-cap slider (#30) shows such plans solved under a higher cap, as a WHAT-IF. | 2.1% of ResPlan, and slide 2 says the benchmark excludes them. |
 | D5 | Zone link through a bathroom or stair (old O7) | **Default: no link.** A WHAT-IF toggle allows it (`zone_links_via_excluded`, #30). | The default is valid under either reading. |
 | D6 | Windows on interior walls (old O16) | **Default: obstacle.** A WHAT-IF checkbox treats them as doors (#31). | The default is valid under either reading. |
-| D7 | Cable through a bathroom or another hub's room (old O17) | **Default: allowed** (no rule forbids it). A WHAT-IF toggle forbids it. | Measured: **0 m** of 4,071 m of cable in 124 solved plans goes through one, so neither reading changes a design. |
+| D7 | Cable through a bathroom or another hub's room (old O17) | **Default: forbidden.** A ring stays in its own hub's rooms, which is always possible because a zone is connected by its own doors. A WHAT-IF toggle allows it. Router: #21; toggle: #30. | Valid under either reading. Measured: **0 m** of 4,071 m of cable in 124 solved plans goes through one today, so forbidding it costs nothing, and it stays safe when #21 starts rerouting. |
 | D8 | #49 greedy zoning for > 16 connected rooms | **Backlog.** The "too large" sidecar stays as the safety net. | Measured: **0 of 16,999** plans have > 16 connected eligible rooms (largest: 9). |
 | D9 | Assigned-area gap (old O8) | Largest − smallest hub area. | Only breaks ties of equal J. |
 | D10 | Output frame "origin lower-left" (old O13) | Write in the frame of the organisers' own node points (#38 moves the geometry into it). | Their checker matches our cables to their node points, so their frame is right by construction. O1's sample confirms it. |
@@ -45,7 +45,7 @@ This file picks up from #46, which was closed **with no answers recorded**. Rule
 |---|---|---|
 | T1 | Close #28 (≤ 20 what-if) and #29 (5 vs 20 side by side)? | **Yes** (D1). Also update `rings.py`'s error that still points to "Held-Karp (#28)". |
 | T2 | Gallery filters (#26)? | Hub count only. |
-| T3 | Which WHAT-IFs does #30 offer? | Area cap, J weights (D2), hub offset, counting rules (D3), zone link through bathroom/stair (D5), interior windows as doors (D6, #31), cable through bathrooms/other zones (D7). |
+| T3 | Which WHAT-IFs does #30 offer? | Area cap, J weights (D2), hub offset, counting rules (D3), zone link through bathroom/stair (D5), interior windows as doors (D6, #31), allow cable through bathrooms/other hubs' rooms (D7). |
 | T4 | Keep submitting `strict`-only designs? | **Yes, as the fallback.** A missing plan scores 0 for sure, but strict-only isn't guaranteed valid (Q2). #21's target is **zero** retraces outside single-door rooms. |
 | T5 | **New P0:** 11% of plans get no design because the grid misses thin doors and open passages. | **New issue, fixed first** (draft below). |
 | T6 | Round output to 4 decimals? | Yes, in the writer: snap both ends of a segment to the same rounded coordinate, with a test that every segment stays exactly axis-aligned (#34). |

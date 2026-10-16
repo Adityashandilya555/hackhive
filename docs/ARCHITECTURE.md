@@ -41,7 +41,7 @@ For any unseen floor plan, with no manual step, hackhive:
 | C10 | ring H → N1 → … → Nk → same H, closed, each node once | C29 | all feasible arrangements, filterable; constraints configurable in the UI |
 | C11 | invalid: open ends, branches, skipped/repeated nodes, ending at another hub | C30 | 7 low-effort novelty views |
 | C12 | horizontal and vertical runs only | C31 | visible-first delivery |
-| C13 | change rooms only through doors and open passages | C33 | cables may cross any room inside the building; overlaps and crossings between rings are cost, not violations |
+| C13 | change rooms only through doors and open passages | C33 | by default a ring stays in its own hub's rooms, never through an excluded room or another hub's room (D7, 2026-10-16; allowing it is a WHAT-IF); overlaps and crossings between rings are cost, not violations |
 | C14 | never through walls, windows or the outside; stay inside `inner` | C35 | each sprint ends with a pull-and-run-locally verification |
 | C15 | single-door room: in and out through the same door, either a same-line retrace (its length counts as overlap) or two parallel runs (no overlap) | C36 | sprints carry no dates |
 | C16 | rank: fewest hubs H first, then lowest J, then the smaller assigned-area gap | C37 | interior "windows": both readings, switched by a UI checkbox; default = obstacle |
