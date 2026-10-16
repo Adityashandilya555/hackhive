@@ -9,6 +9,7 @@ from functools import cache
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved_path
 
 from hackhive import ui
 from hackhive.io import load_plan
@@ -28,8 +29,10 @@ def _script():
 
 @cache
 def _facts(path: Path) -> ui.CaseFacts:
-    plan = load_plan(path)
-    return ui.case_facts(plan, solve(plan))
+    if (result := solved_path(path)) is None:  # a case plan, not one of the shared fixtures
+        plan = load_plan(path)
+        result = solve(plan)
+    return ui.case_facts(result.plan, result)
 
 
 def test_every_listed_plan_exists_and_cases_are_known():

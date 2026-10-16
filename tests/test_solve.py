@@ -2,12 +2,12 @@
 `enumerate()`, `rank_key` and the fallback down the ranked list."""
 
 import dataclasses
-import functools
 import json
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 from shapely.geometry import MultiPolygon, Point, box, mapping
 
 import hackhive.solve as solve_mod
@@ -34,12 +34,11 @@ def _submission(out: Path, plan_id: str) -> Submission:
     return Submission.model_validate_json((out / f"{plan_id}.json").read_text("utf-8"))
 
 
-@functools.cache
 def _solved(plan_id: str) -> Result:
-    """One `solve_file` per fixture for this module: 13344 takes ~12 s on 4 workers (~34 s on one
-    core) since #22 ranks every 3-hub arrangement. `Result` is frozen and `submit` never changes
-    it, so sharing is safe."""
-    return solve_file(PLANS / f"plan-{plan_id}.json", C)
+    """One `solve_file` per fixture for the whole session (`fixture_solves`): 13344 takes ~12 s
+    on 4 workers (~34 s on one core) since #22 ranks every 3-hub arrangement. `Result` is frozen
+    and `submit` never changes it, so sharing is safe."""
+    return solved(plan_id)
 
 
 # --------------------------------------------------------------------------- the 7 fixtures
