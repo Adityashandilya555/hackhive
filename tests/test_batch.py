@@ -47,6 +47,10 @@ def _sample(tmp_path: Path) -> Path:
     return src
 
 
+def _line(pid: int) -> str:
+    return json.dumps(json.loads((PLANS / f"plan-{pid}.json").read_text("utf-8")))
+
+
 def _rows(path: Path) -> list[dict]:
     with path.open(newline="", encoding="utf-8") as f:
         return list(csv.DictReader(f))
@@ -146,7 +150,7 @@ def test_a_file_that_is_not_json_becomes_an_input_error_row(tmp_path):
     (tmp_path / "plan-5088.json").write_text((PLANS / "plan-5088.json").read_text("utf-8"), "utf-8")
     rows = batch.run(tmp_path, "test", 5, tmp_path / "out" / "batch.csv", C)
     assert [r["status"] for r in rows] == ["input_error", "ok"]
-    assert rows[0]["plan_id"] == "a.json"
+    assert rows[0]["plan_id"] == "a"
 
 
 def test_rows_carry_the_case_tags(tmp_path):
@@ -156,4 +160,59 @@ def test_rows_carry_the_case_tags(tmp_path):
     (src / "plan-576.json").write_text((PLANS / "plan-576.json").read_text("utf-8"), "utf-8")
     (row,) = batch.run(src, "test", 1, tmp_path / "batch.csv", C)
     assert batch.COLUMNS[-1] == "tags"
-    assert row["tags"] and isinstance(row["tags"], str)
+    assert {"open_passage", "multi_living"} <= set(row["tags"].split(";"))  # ids, not labels
+
+
+def test_a_line_that_is_not_an_object_becomes_an_input_error_row(tmp_path):
+    """#108 review: `null`, `[]`, `42` are JSON but not plans; each ends as its own row."""
+    src = tmp_path / "plans.jsonl"
+    lines = ["null", "[]", "42", _line(5088)]
+    src.write_text("".join(x + "\n" for x in lines), "utf-8")
+    rows = batch.run(src, "test", 9, tmp_path / "batch.csv", C)
+    assert [r["status"] for r in rows] == ["input_error"] * 3 + ["ok"]
+    assert rows[0]["reason"] == "input_error: not a JSON object"
+
+
+def test_a_truncated_gz_keeps_the_rows_read_and_ends_with_an_input_error_row(tmp_path):
+    """#108 review: a cut-off download fails mid-file; the rows before it are kept."""
+    whole = gzip.compress(((_line(5088) + "\n") * 3).encode())
+    src = tmp_path / "plans.jsonl.gz"
+    src.write_bytes(whole[: len(whole) - 20])
+    rows = batch.run(src, "test", 9, tmp_path / "batch.csv", C)
+    assert rows[-1]["status"] == "input_error"
+    assert rows[-1]["reason"] == "input_error: unreadable file"
+
+
+def test_a_file_that_is_not_utf8_becomes_an_input_error_row(tmp_path):
+    """#108 review: undecodable bytes end as an `input_error` row with a sidecar, not a crash."""
+    (tmp_path / "b.json").write_bytes(b"\xff\xfe{")
+    rows = batch.run(tmp_path, "test", 5, tmp_path / "out" / "batch.csv", C)
+    assert [(r["plan_id"], r["status"], r["reason"]) for r in rows] == [
+        ("b", "input_error", "input_error: not UTF-8")
+    ]
+    side = json.loads((tmp_path / "out" / "batch" / "b.sidecar.json").read_text("utf-8"))
+    assert side["status"] == "input_error"
+
+
+def test_an_unreadable_line_is_dropped_when_a_split_file_says_which_plans_count(tmp_path, capsys):
+    """#108 review: with `split.json`, a line with no readable id can't be in the split."""
+    src = _sample(tmp_path)
+    with gzip.open(src, "at", encoding="utf-8") as f:
+        f.write("{oops\n")
+    rows = batch.run(src, "test", 20, tmp_path / "batch.csv", C)
+    assert "input_error" not in {r["status"] for r in rows}
+    assert "line7" in capsys.readouterr().err
+
+
+def test_summary_times_only_the_plans_that_loaded():
+    rows = [
+        {**dict.fromkeys(batch.COLUMNS, ""), "status": "input_error", "ms": 0, "reason": "x"},
+        {**dict.fromkeys(batch.COLUMNS, ""), "status": "infeasible", "ms": 40, "reason": "y"},
+    ]
+    assert "p50 40 ms" in batch.summary(rows)
+
+
+def test_the_cli_exits_1_when_no_plan_loaded(tmp_path):
+    (tmp_path / "a.json").write_text("{oops", "utf-8")
+    code = cli.main(["batch", "--plans", str(tmp_path), "--out", str(tmp_path / "o" / "b.csv")])
+    assert code == 1
