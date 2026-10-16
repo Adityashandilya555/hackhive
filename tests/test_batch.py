@@ -154,7 +154,7 @@ def test_a_file_that_is_not_json_becomes_an_input_error_row(tmp_path):
 
 
 def test_rows_carry_the_case_tags(tmp_path):
-    """#106 review, for #33's "plans per case tag": a `tags` column of `ui.case_tags` labels."""
+    """#106 review, for #33's "plans per case tag": a `tags` column of `cases.case_tags` ids."""
     src = tmp_path / "p"
     src.mkdir()
     (src / "plan-576.json").write_text((PLANS / "plan-576.json").read_text("utf-8"), "utf-8")
@@ -179,7 +179,7 @@ def test_a_truncated_gz_keeps_the_rows_read_and_ends_with_an_input_error_row(tmp
     src = tmp_path / "plans.jsonl.gz"
     src.write_bytes(whole[: len(whole) - 20])
     rows = batch.run(src, "test", 9, tmp_path / "batch.csv", C)
-    assert rows[-1]["status"] == "input_error"
+    assert [r["status"] for r in rows] == ["ok", "ok", "input_error"]
     assert rows[-1]["reason"] == "input_error: unreadable file"
 
 
@@ -230,13 +230,27 @@ def test_batch_does_not_depend_on_the_streamlit_helpers():
 
 def test_each_plan_builds_its_room_graph_once(tmp_path, monkeypatch):
     """#108 review: the tags reuse solve()'s room graph instead of rebuilding it."""
-    from hackhive import solve
+    from hackhive import graph, solve
 
     calls = []
-    real = solve.build_graph
-    monkeypatch.setattr(solve, "build_graph", lambda *a, **k: calls.append(1) or real(*a, **k))
+    real = graph.build_graph
+    count = lambda *a, **k: calls.append(1) or real(*a, **k)  # noqa: E731
+    monkeypatch.setattr(solve, "build_graph", count)  # solve's own import
+    monkeypatch.setattr(graph, "build_graph", count)  # a rebuild via `graph.build_graph`
     d = tmp_path / "p"
     d.mkdir()
     (d / "plan-576.json").write_text((PLANS / "plan-576.json").read_text("utf-8"), "utf-8")
     (row,) = batch.run(d, "test", 1, tmp_path / "batch.csv", C)
     assert row["tags"] and len(calls) == 1
+
+
+def test_load_errors_group_by_kind_and_the_sidecar_says_the_same(tmp_path):
+    """#108 re-review: `plan <id>: ` and the value don't split the summary's reasons."""
+    src = tmp_path / "plans.jsonl"
+    base = json.loads(_line(5088))
+    src.write_text("".join(json.dumps({**base, "id": i, "area": -1}) + "\n" for i in (1, 2)), "utf-8")
+    rows = batch.run(src, "test", 9, tmp_path / "batch.csv", C)
+    assert {r["reason"] for r in rows} == {"input_error: area must be a finite number > 0"}
+    side = json.loads((tmp_path / "batch" / "PLAN_1.sidecar.json").read_text("utf-8"))
+    assert side["reason"] == rows[0]["reason"] and side["provenance"]["version"]
+    assert "got -1" in side["warnings"][0]
