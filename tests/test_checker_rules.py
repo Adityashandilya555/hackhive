@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from hackhive import checker
-from hackhive.checker import check_rules, checklist, metrics, verdict
+from hackhive.checker import check_rules, checklist, metrics, report, verdict
 from hackhive.checker import main as checker_main
 from hackhive.contracts import Constraints, Submission, lower_bound
 from hackhive.graph import build_graph
@@ -35,6 +35,7 @@ BROKEN = [  # the issue's order and expected rules
     ("5088-window-crossing.json", 5),
     ("5088-hub-0.3m-from-wall.json", 6),
     ("5088-hub-in-unassigned-room.json", 6),
+    ("5088-duplicate-hub-id.json", 1),  # #68 review
 ]
 
 
@@ -247,8 +248,8 @@ def test_rule_3_builds_the_room_graph_once(monkeypatch):
 
 
 def test_checklist_lines():
-    """Line 5 states the bound; strict-only lines stay ✓ with a count; a rule-6 error maps to no
-    line but makes the plan invalid."""
+    """Line 5 states the bound; strict-only lines stay ✓ with a count; a hub-point violation adds
+    a sixth line (#68 review), so an error never hides behind five ticks."""
     plan, violations = run("5088-valid.json")
     lines = lines_for(plan, submission("5088-valid.json"), violations)
     assert lines[4] == "✓ 1 hub = lower bound 1 (50.0 m², 3 nodes)"
@@ -260,10 +261,63 @@ def test_checklist_lines():
 
     plan, violations = run("5088-hub-0.3m-from-wall.json")
     lines = lines_for(plan, submission("5088-hub-0.3m-from-wall.json"), violations)
-    assert all(line.startswith("✓") for line in lines) and verdict(violations) == "invalid"
+    assert len(lines) == 6 and all(line.startswith("✓") for line in lines[:5])
+    assert lines[5].startswith("✗ each hub in an assigned eligible room")
+    assert verdict(violations) == "invalid"
 
     no_metrics = checklist(violations, None, 1, 50.0, 3)
     assert no_metrics[4].startswith("✗") and "not computed" in no_metrics[4]
+
+
+@pytest.mark.parametrize(("name", "rule"), BROKEN)
+def test_no_error_hides_behind_the_checklist(name, rule):
+    """#68 review: every invalid fixture shows at least one ✗ line."""
+    plan, violations = run(name)
+    assert any(line.startswith("✗") for line in lines_for(plan, submission(name), violations))
+
+
+def test_valid_plans_keep_slide_5s_five_lines():
+    for name in (
+        "5088-valid.json",
+        "5088-two-hubs-valid.json",
+        "5088-hub-in-single-door-room.json",
+    ):
+        plan, violations = run(name)
+        assert len(lines_for(plan, submission(name), violations)) == 5
+
+
+def test_hub_ids_are_unique_and_not_node_ids():
+    """#68 review: two hubs called H1 (5088-duplicate-hub-id, in BROKEN), or a hub called N1,
+    make `closed_sequence` ambiguous: rule 1."""
+    sub = submission("5088-two-hubs-valid.json")
+    h2 = sub.hubs[1]
+    h2.hub_id, h2.closed_sequence = "N1", ["N1", "N2", "N1"]
+    h2.route_segments[0].from_, h2.route_segments[1].to = "N1", "N1"
+    _, violations = run("5088-two-hubs-valid.json", sub)
+    assert any(v.rule == 1 and v.severity == "error" and "node id" in v.message for v in violations)
+
+
+def test_hub_in_a_single_door_room_may_leave_and_return_on_one_line():
+    """#68 review, slide 3 rule 4: a hub sharing the single-door kitchen with N3 must leave and
+    re-enter through its passage; that retrace (2.20 m here, between legs that aren't adjacent)
+    is legal, like a node's."""
+    _, violations = run("5088-hub-in-single-door-room.json")
+    assert violations == []
+
+
+def test_report_bundles_what_a_reviewer_sees():
+    """#68 review: one call for the CLI and the app's reviewer panel (#12)."""
+    plan = load_plan(plan_path("5088-hub-0.3m-from-wall.json"))
+    sub = submission("5088-hub-0.3m-from-wall.json")
+    r = report(plan, sub)
+    assert r.violations == check_rules(plan, sub)
+    assert r.lines == lines_for(plan, sub, r.violations) and r.verdict == "invalid"
+    assert r.metrics is not None and r.metrics.H == 1 and r.lower_bound == 1
+
+    bad = sub.model_copy(deep=True)
+    bad.hubs[0].location.x = math.nan
+    r = report(plan, bad)
+    assert r.metrics is None and r.lines[4].startswith("✗") and r.verdict == "invalid"
 
 
 # --------------------------------------------------------------------------- checker and router agree

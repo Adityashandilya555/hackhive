@@ -294,6 +294,41 @@ FIVE_088 = {
             leg("N2", "N1", N2, (N2[0], N2[1] - 1), (8.6, N2[1] - 1), (8.6, 4.0), (N1[0], 4.0), N1),
         )
     ),
+    # #68 review: two hubs called H1 (H2 renamed throughout)
+    "5088-duplicate-hub-id.json": submission(
+        "PLAN_5088",
+        TWO_H1,
+        hub(
+            "H1",
+            "R02",
+            (7.5, 5.5),
+            ["R02"],
+            ["N2"],
+            ["H1", "N2", "H1"],
+            [
+                leg("H1", "N2", (7.5, 5.5), (N2[0], 5.5), N2),
+                leg("N2", "H1", N2, (8.6, N2[1]), (8.6, 5.2), (7.5, 5.2), (7.5, 5.5)),
+            ],
+        ),
+    ),
+    # #68 review: the hub shares the single-door kitchen with N3, so the ring must leave and
+    # re-enter through the kitchen's open passage on one line (x 4.6): legal, not strict
+    "5088-hub-in-single-door-room.json": _with_h1(
+        hub(
+            "H1",
+            "R03",
+            (4.6, 6.6),
+            ["R01", "R02", "R03"],
+            ["N1", "N2", "N3"],
+            ["H1", "N1", "N2", "N3", "H1"],
+            [
+                leg("H1", "N1", (4.6, 6.6), (4.6, 4.4), (N1[0], 4.4), N1),
+                leg("N1", "N2", N1, (N1[0], 4.0), (8.6, 4.0), (8.6, N2[1]), N2),
+                leg("N2", "N3", N2, (N2[0], 4.4), (4.6, 4.4), (4.6, N3[1]), N3),
+                leg("N3", "H1", N3, (N3[0], 6.6), (4.6, 6.6)),
+            ],
+        )
+    ),
 }
 
 # --------------------------------------------------------------------------- synthetic zones
