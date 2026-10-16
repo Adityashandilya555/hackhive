@@ -1,7 +1,6 @@
 """Acceptance tests for #14: hub candidates, first-cut hub placement and ring order.
 
-Until #6 lands there are no plan nodes, so the 5924 tests place one node per eligible room
-at its maximum-clearance point, as #6 will for ResPlan plans.
+Fixtures load through `io.load_plan` (one node per eligible room, #6) and #9's `build_graph`.
 """
 
 import itertools
@@ -9,35 +8,26 @@ from pathlib import Path
 
 import networkx as nx
 import pytest
-from shapely import maximum_inscribed_circle
 from shapely.geometry import Point, box
 
 from hackhive.contracts import Constraints, Node, Plan, Room
+from hackhive.graph import build_graph, eligible_graph
+from hackhive.io import load_plan
 from hackhive.rings import first_ring, hub_candidates, manhattan, order_ring
-from hackhive.vault import load_vault
-from hackhive.zoning import enumerate_zonings, min_hubs, wall_geometry
+from hackhive.zoning import eligible_area_and_nodes, enumerate_zonings, min_hubs, wall_geometry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 C = Constraints()
 
 
-def _with_nodes(plan: Plan) -> Plan:
-    nodes = []
-    for i, room in enumerate((r for r in plan.rooms if r.eligible), start=1):
-        mic = maximum_inscribed_circle(room.polygon)
-        centre = mic.coords[0]
-        nodes.append(Node(id=f"N{i}", room_id=room.id, xy=centre, clearance_m=mic.length))
-    return plan.model_copy(update={"nodes": nodes})
-
-
 def _fixture(plan_id: str):
-    plan, g = load_vault(next((FIXTURES / "raw").glob(f"plan-{plan_id}-*.json")))
-    return _with_nodes(plan), g
+    plan = load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
+    return plan, eligible_graph(build_graph(plan))
 
 
 def _min_zoning(plan: Plan, g: nx.Graph):
-    area = {r.id: r.area_m2 for r in plan.rooms if r.eligible}
-    zonings = enumerate_zonings(g, area, C)
+    area, nodes = eligible_area_and_nodes(plan)
+    zonings = enumerate_zonings(g, area, C, nodes=nodes)
     k = min_hubs(zonings)
     return next(z for z in zonings if len(z) == k)
 

@@ -426,7 +426,7 @@ Every edge case is decided in `docs/decision_conventions.md`; the format is docu
   |---|---|
   | 5088 | small |
   | 3086 | open passage |
-  | 1293 | 2 hubs at the LB |
+  | 1293 | LB 2, needs 3 (the vault's corner-door links dropped, #62) |
   | 5924 | star: LB 2, needs 3 |
   | 576 | multi-part living, 2 components, needs 6 |
   | 13344 | 3 hubs at cap 5, 1 at cap 20 |

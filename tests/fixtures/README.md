@@ -8,7 +8,7 @@
 | id | label | why it's here |
 |---|---|---|
 | 576 | odd | two living parts, an opening, 6 hubs at cap 5 |
-| 1293 | large | 188.7 m², area binds the lower bound |
+| 1293 | large | 188.7 m², LB 2 but 3 hubs: two vault links were corner-door artefacts (#62) |
 | 2814 | interior-window | a window on an interior wall, a zero-door eligible room |
 | 3086 | median | a typical plan with one open passage |
 | 5088 | small | 50 m², one hub |
@@ -27,6 +27,12 @@ CC BY-NC-SA 4.0; see `docs/ARCHITECTURE.md` § Sources). Attribution: Abouagour 
 `elig_m2`, `lb5`, `lb20`, `min_hubs5`, `min_hubs20`, `n_all5`, `n_all20`, `comp_direct`,
 `single_door_elig`, `zero_door_elig` and `e_via_opening`, converted to numbers. Rebuild it from
 `raw/` if the vault changes.
+
+**One deliberate difference (#13):** 1293's `min_hubs5`/`min_hubs20` (2 → 3), `n_all5`/`n_all20`
+(12 → 6) and `e_via_opening` (0 → 1) follow #9's room graph, not the vault. The vault linked
+`bedroom_0`–`bedroom_1` and `living_0`–`bedroom_2` through doors that sit at room corners and join
+neither pair, and counted the open living–kitchen passage as a door (#62). Keep this when
+rebuilding.
 
 ## Slide 8
 `slide8_example.json` is the organisers' slide-8 output example, verbatim where the slide shows values:

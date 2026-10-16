@@ -1,0 +1,100 @@
+{
+  "plan_id": "PLAN_SYN_OVERCAP",
+  "units": "m",
+  "hubs": [
+    {
+      "hub_id": "H1",
+      "room_id": "R01",
+      "location": {
+        "x": 3.0,
+        "y": 3.0
+      },
+      "assigned_rooms": [
+        "R01",
+        "R02"
+      ],
+      "assigned_nodes": [
+        "N1",
+        "N2"
+      ],
+      "closed_sequence": [
+        "H1",
+        "N1",
+        "N2",
+        "H1"
+      ],
+      "route_segments": [
+        {
+          "from": "H1",
+          "to": "N1",
+          "length_m": 3.95,
+          "polyline": [
+            [
+              3.0,
+              3.0
+            ],
+            [
+              4.95,
+              3.0
+            ],
+            [
+              4.95,
+              5.0
+            ]
+          ]
+        },
+        {
+          "from": "N1",
+          "to": "N2",
+          "length_m": 11.7,
+          "polyline": [
+            [
+              4.95,
+              5.0
+            ],
+            [
+              4.95,
+              4.2
+            ],
+            [
+              15.05,
+              4.2
+            ],
+            [
+              15.05,
+              5.0
+            ]
+          ]
+        },
+        {
+          "from": "N2",
+          "to": "H1",
+          "length_m": 14.05,
+          "polyline": [
+            [
+              15.05,
+              5.0
+            ],
+            [
+              15.05,
+              4.7
+            ],
+            [
+              3.0,
+              4.7
+            ],
+            [
+              3.0,
+              3.0
+            ]
+          ]
+        }
+      ],
+      "ring_length_m": 29.7
+    }
+  ],
+  "reported_metrics": {
+    "hub_count": 1,
+    "total_length_m": 29.7
+  }
+}
