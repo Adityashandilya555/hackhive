@@ -1,0 +1,187 @@
+[
+  {
+    "case": "ok",
+    "title": "A clean design",
+    "look_for": "green ✓: every rule met, nothing to explain",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "open_passage",
+    "title": "open passage",
+    "look_for": "cable crosses a wall-less gap",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "en_suite",
+    "title": "en-suite single-door",
+    "look_for": "a room whose only other door is its own bathroom: retracing in is legal",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "one_node_ring",
+    "title": "one-node ring",
+    "look_for": "hub → node → hub: out-and-back, or a thin two-lane loop when the node is far (#81)",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "lb_met",
+    "title": "hubs = lower bound",
+    "look_for": "no zoning can use fewer hubs",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_1",
+    "title": "hubs > lower bound (+1, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_4",
+    "title": "hubs > lower bound (+4, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  },
+  {
+    "case": "many_hubs",
+    "title": "4+ hubs",
+    "look_for": "many rings share the doors",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  },
+  {
+    "case": "disconnected",
+    "title": "disconnected groups",
+    "look_for": "rooms no door joins need own hubs",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "isolated",
+    "title": "isolated eligible room",
+    "look_for": "no door or open passage to another eligible room: it needs its own hub",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "multi_living",
+    "title": "multi-part living",
+    "look_for": "each living part has a node",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  }
+]
