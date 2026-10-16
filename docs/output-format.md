@@ -5,11 +5,12 @@ characters become `_`):
 
 - `<plan_id>.json`: the **submission**, exactly slide 8's keys. Written only when the design has no
   `error` violation (C43): an invalid or missing plan scores zero.
-- `<plan_id>.sidecar.json`: **everything else** (status, violations, bounds, cost, settings,
-  provenance, warnings). Always written.
+- `<plan_id>.sidecar.json`: **everything else** (status, violations, bounds, the arrangement
+  used, cost, settings, provenance, warnings). Always written.
 
 The JSON schemas of both are committed in `schemas/` (`python -m hackhive.contracts --check` fails if
-they are stale). Edge cases are decided in [`decision_conventions.md` §8](decision_conventions.md#8-output-and-submission).
+they are stale). Edge cases are decided in [`decision_conventions.md` §8](decision_conventions.md#8-output-and-submission),
+including the gate that walks down the ranked arrangements.
 
 ## The submission (slide 8)
 
@@ -48,7 +49,8 @@ rounded value, so both ends of every segment snap to the same number and each se
 
 This is `hackhive solve tests/fixtures/plans/plan-5924.json`'s submission. `tests/test_docs.py`
 checks that it parses, matches `schemas/submission.schema.json` and passes `hackhive check` against
-`tests/fixtures/plans/plan-5924.json`. Regenerate it when the solver's choice changes (#22).
+`tests/fixtures/plans/plan-5924.json`. It is `enumerate()`'s first-ranked arrangement (#22); regenerate it
+when the solver's choice changes.
 
 ```json
 {
@@ -200,20 +202,32 @@ checks that it parses, matches `schemas/submission.schema.json` and passes `hack
 | `reason` | why there is no submission, in words (`infeasible`, `input_error`) |
 | `frame` | the organiser node frame the geometry was moved into (`identity`, `flip_y`, `origin_shift`), or null when no plan loaded |
 | `violations[]` | the checker mirror's findings: `rule`, `severity` (`error` or `strict`), `message`, `ids`, `hub_id`, `where` (points drawn in red) |
-| `bounds` | `k_lb` (the hub lower bound), `k_found`, `proof` (`exhaustive` today; `lb_met`, `greedy`, `none` are reserved) |
-| `cost` | `H`, `L`, `X`, `O`, `B`, `J` and `area_gap` of the design (see [Metrics](#metrics-and-j)) |
+| `bounds` | `k_lb` (the hub lower bound), `k_found` (the submitted design's hub count), `proof`, see below |
+| `arrangement` | which ranked arrangement was submitted (null when nothing was): `rank` (1 = the best-ranked; null for the walking skeleton's first cut), `signature` (its zones, e.g. `R01+R02+R05\|R03\|R04`), `skipped[]` (each better-ranked one, best first, as `#<rank> <signature>: <why not>`) |
+| `cost` | `H`, `L`, `X`, `O`, `B`, `J` and `area_gap` of the submitted design, under the strict counting reading (see [Metrics](#metrics-and-j)) |
 | `hubs[]` | per hub: `area_m2`, `n_nodes`, `L`, `X`, `O`, `B` |
 | `settings` | every constraint used; anything other than the problem statement is a WHAT-IF |
 | `provenance` | `input_path`, `input_digest` (sha256), `version` |
 | `warnings[]` | readable lines, see below |
 | `folded_parts[]` | living slivers folded into a neighbour (generated nodes only) |
 
+### Proof
+
+`bounds.proof` says what is proven about `k_found`:
+
+| `proof` | When |
+|---|---|
+| `lb_met` | `k_found` equals the lower bound `k_lb`, so no design can use fewer hubs |
+| `exhaustive` | every zoning was enumerated and none uses fewer hubs than `k_found` |
+| `none` | a design with fewer hubs exists but had only `strict` or `error` violations, or couldn't be built, so the gate moved up a hub count |
+| `greedy` | not emitted yet: reserved for the greedy zoning fallback (#49) |
+
 ### Status
 
 | `status` | When | Submission written? |
 |---|---|---|
-| `ok` | the design passes every rule of the checker mirror | yes |
-| `submitted_strict_only` | the design's only violations are `strict` (a stricter reading of an unclear rule, e.g. a hub 0.5 m from the walls but closer to a door) | yes, flagged |
+| `ok` | an arrangement passes every rule of the checker mirror: the first clean one in rank order, even at more hubs, but at most one hub count above the first design with no `error` | yes |
+| `submitted_strict_only` | no clean arrangement in that range; the best-ranked one whose only violations are `strict` (a stricter reading of an unclear rule, e.g. a hub 0.5 m from the walls but closer to a door) | yes, flagged |
 | `infeasible` | no design could be built (no zoning, a room over the area cap, routing failed) or the design has an `error` violation; `reason` says which | no |
 | `input_error` | the plan file can't be read or fails the organiser-format check (#38) | no |
 
@@ -241,5 +255,6 @@ Each is a line in `warnings[]`; none of them stops a submission.
 J = L + 5X + O + 0.5B, in metres: L the total cable length (return legs included), X the crossings, O
 the overlapping length, B the bends. The weights are the organisers' starting values, kept as settings
 (#48). Designs rank by fewest hubs H, then lowest J, then the smaller assigned-area gap (max − min of
-the hubs' assigned eligible area). The exact counting rules (what counts as a crossing, overlap or bend)
+the hubs' assigned eligible area). Each arrangement is scored under both readings of the unclear
+counting rules (strict and lenient, D3) and ranked by its **worse** J. The exact counting rules (what counts as a crossing, overlap or bend)
 are in [`decision_conventions.md` §6](decision_conventions.md#6-metrics-our-checker-mirror-slides-6-7).

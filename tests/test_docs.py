@@ -1,15 +1,17 @@
-"""#34 (pre-#22 part): `docs/output-format.md` stays true to what the writer and `solve` emit."""
+"""#34: `docs/output-format.md` stays true to what the writer and `solve` emit, and the README's
+commands run."""
 
 import inspect
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import get_args
 
 import jsonschema
 
 from hackhive import cli, rings, solve
-from hackhive.contracts import SCHEMA_DIR, Sidecar, Submission
+from hackhive.contracts import SCHEMA_DIR, Bounds, Sidecar, Submission
 
 ROOT = Path(__file__).resolve().parents[1]
 DOC = (ROOT / "docs" / "output-format.md").read_text(encoding="utf-8")
@@ -45,3 +47,22 @@ def test_every_status_and_hub_warning_is_documented():
     assert codes, "no hub warning code found: the grep is stale"
     missing = sorted(s for s in statuses | codes if f"`{s}`" not in DOC)
     assert not missing, f"undocumented in docs/output-format.md: {missing}"
+
+
+def test_every_sidecar_key_and_proof_is_documented():
+    """C43 (#22): the sidecar's keys, `arrangement` included, and every `bounds.proof` value."""
+    names = set(Sidecar.model_fields) | set(get_args(Bounds.model_fields["proof"].annotation))
+    missing = sorted(n for n in names if not re.search(rf"`{n}(\[\])?`", DOC))
+    assert not missing, f"undocumented in docs/output-format.md: {missing}"
+
+
+def test_the_readme_hackhive_commands_run_on_a_fresh_clone(tmp_path):
+    """C22: every `uv run hackhive ...` line in the README runs on the committed fixtures alone
+    (`out/` is redirected to a temp dir)."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    commands = re.findall(r"^uv run hackhive (.+)$", readme, re.M)
+    assert {c.split()[0] for c in commands} == {"solve", "check", "batch"}
+    for line in commands:
+        argv = [a.replace("out/", f"{tmp_path.as_posix()}/") for a in shlex.split(line)]
+        argv = [str(ROOT / a) if a.startswith("tests/") else a for a in argv]
+        assert cli.main(argv) == 0, line
