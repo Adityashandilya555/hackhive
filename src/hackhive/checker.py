@@ -201,6 +201,79 @@ def _overlaps(
     return total, credit
 
 
+@dataclass(frozen=True)
+class Stretch:
+    """A same-line stretch that k ≥ 2 leg pieces cover (O counts (k - 1) · length of it)."""
+
+    axis: str  # "h" (y fixed) or "v" (x fixed)
+    at: float  # the fixed coordinate
+    lo: float
+    hi: float
+    k: int
+    owners: tuple[str, ...]  # the rings involved, sorted
+
+    @property
+    def length(self) -> float:
+        return self.hi - self.lo
+
+    @property
+    def ends(self) -> tuple[Point, Point]:
+        if self.axis == "h":
+            return (self.lo, self.at), (self.hi, self.at)
+        return (self.at, self.lo), (self.at, self.hi)
+
+
+def overlap_stretches(
+    legs: Sequence[Sequence[Point]], owners: Sequence[str], tol: float = TOL
+) -> list[Stretch]:
+    """Every same-line stretch covered by k ≥ 2 pieces, with the same clustering and sweep as O
+    (`_overlaps`), so Σ (k - 1) · length is exactly O. Adjacent runs with the same k and rings
+    are merged. For the overlay (#17): each stretch is drawn once, marked ×k."""
+    lines: dict[tuple[str, float], list[tuple[float, float, str]]] = {}
+    raw: list[tuple[str, float, float, float, str]] = []
+    for leg, owner in zip(legs, owners, strict=True):
+        for a, b in pairwise(leg):
+            if abs(a[1] - b[1]) <= tol:
+                raw.append(("h", (a[1] + b[1]) / 2, a[0], b[0], owner))
+            elif abs(a[0] - b[0]) <= tol:
+                raw.append(("v", (a[0] + b[0]) / 2, a[1], b[1], owner))
+    for axis in ("h", "v"):
+        pieces = [r for r in raw if r[0] == axis]
+        rep = _cluster([r[1] for r in pieces], tol)
+        for _, c, s, e, owner in pieces:
+            lines.setdefault((axis, rep[c]), []).append((min(s, e), max(s, e), owner))
+
+    out: list[Stretch] = []
+    for (axis, at), intervals in sorted(lines.items()):
+        rep = _cluster([v for lo, hi, _ in intervals for v in (lo, hi)], tol)
+        events = sorted(
+            (rep[v], d, owner)
+            for lo, hi, owner in intervals
+            if rep[lo] != rep[hi]
+            for v, d in ((lo, 1), (hi, -1))
+        )
+        active: Counter[str] = Counter()
+        prev = None
+        for pos, d, owner in events:
+            k = sum(active.values())
+            if prev is not None and k >= 2 and pos > prev:
+                who = tuple(sorted(active))
+                last = out[-1] if out else None
+                if (
+                    last is not None
+                    and (last.axis, last.at, last.k, last.owners) == (axis, at, k, who)
+                    and last.hi == prev
+                ):
+                    out[-1] = Stretch(axis, at, last.lo, pos, k, who)
+                else:
+                    out.append(Stretch(axis, at, prev, pos, k, who))
+            active[owner] += d
+            if not active[owner]:
+                del active[owner]
+            prev = pos
+    return out
+
+
 def overlap_length(polylines: Sequence[Sequence[Point]], tol: float = TOL) -> float:
     """O (slide 7): on each line, a stretch covered by k pieces adds (k − 1) × length.
 

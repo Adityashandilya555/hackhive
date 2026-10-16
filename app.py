@@ -22,6 +22,7 @@ from hackhive.ui import (
     fixture_ids,
     fixture_label,
     fixture_path,
+    hub_table,
     load_submission,
     metrics_line,
     plan_facts,
@@ -35,7 +36,7 @@ from hackhive.ui import (
     verdict_line,
     violation_line,
 )
-from hackhive.viz import draw_graph, draw_layers, draw_nodes, to_png
+from hackhive.viz import draw_graph, draw_layers, draw_nodes, draw_solution, to_png
 
 PRESET = Constraints.problem_statement()
 FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
@@ -68,6 +69,14 @@ def picture(source: str, key: str, content: bytes | None = None, show: bool = Fa
         draw_graph(plan, G, ax)
     draw_nodes(plan, ax)
     return to_png(fig)
+
+
+@st.cache_data(max_entries=64, show_spinner="Drawing the solution…")
+def overlay(source: str, key: str, content: bytes | None, solution: str) -> bytes:
+    """`viz.draw_solution` of a solution file, with the checker's violations in red (#17)."""
+    plan, _ = load(source, key, content)
+    rep = checked(source, key, content, solution)
+    return to_png(draw_solution(plan, load_submission(Path(solution)), rep.violations))
 
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
@@ -105,29 +114,56 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
     return source, up.name, up.getvalue()
 
 
-def reviewer_panel(source: str, key: str, content: bytes | None, plan: Plan) -> None:
-    """Slide 5's "what a reviewer confirms", rendered only from the checker mirror (C26, #11):
-    its checklist lines verbatim, its verdict and metrics, and every violation in red."""
-    st.subheader("Reviewer checklist")
+def pick_solution(plan: Plan) -> Path | None:
+    """The solution to show: one of the plan's hand-made fixtures (#11), valid first. `solve()`
+    (#16) will add its own result here; until then plans without fixtures have none."""
     solutions = solution_paths(plan.plan_id.removeprefix("PLAN_"))
     if not solutions:
-        st.caption("No solution yet: the solver arrives in Sprint 2 (#17).")
-        return
-    path = st.selectbox(
-        "Hand-made solution (#11)",
+        return None
+    return st.selectbox(
+        "Solution",
         solutions,
         format_func=solution_label,
         key="solution",
-        help="5088's valid submission and one broken variant per rule, from the checker's tests.",
+        help="5088's hand-made submissions from the checker's tests (#11): the valid one and one "
+        "broken variant per rule. solve() (#16) will add its own.",
     )
+
+
+def best_tab(source: str, key: str, content: bytes | None, plan: Plan, path: Path | None) -> None:
+    """Slide 5's expected solution: the overlay, the per-hub summary (C25) and the reviewer
+    checklist (C26), all from the submission and the checker mirror."""
+    if path is None:
+        st.caption(
+            "No solution yet: solve() arrives with #16. Pick 5088 to see a hand-made one, "
+            "or open the Plan tab for the plan and its room graph."
+        )
+        return
     try:
-        mismatch = submission_mismatch(load_submission(path), plan)
+        sub = load_submission(path)
         rep = checked(source, key, content, str(path))
+        png = overlay(source, key, content, str(path))
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
-    if mismatch:
-        st.warning(mismatch)
+    picture_col, panel = st.columns([5, 3], gap="large")
+    with picture_col:
+        if mismatch := submission_mismatch(sub, plan):
+            st.warning(mismatch)
+        st.image(png, width="stretch")
+        st.subheader("Per-hub summary")
+        if rep.metrics is None:
+            st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
+        else:
+            st.dataframe(hub_table(plan, sub, rep.metrics), hide_index=True)
+    with panel:
+        reviewer_panel(rep)
+
+
+def reviewer_panel(rep: checker.Report) -> None:
+    """Slide 5's "what a reviewer confirms", rendered only from the checker mirror (C26, #11):
+    its checklist lines verbatim, its verdict and metrics, and every violation in red."""
+    st.subheader("Reviewer checklist")
     for line in rep.lines:
         st.markdown(checklist_line(line))
     st.markdown(verdict_line(rep.verdict))
@@ -173,7 +209,8 @@ st.set_page_config(page_title="HackHive · hub planner", layout="wide")
 
 with st.sidebar:
     choice = pick_plan()
-    show_graph = st.toggle("Show room graph", key="show_graph")
+    solution_slot = st.container()  # filled once the plan is loaded
+    show_graph = st.toggle("Show room graph", key="show_graph", help="On the Plan tab.")
     st.divider()
     locked_preset(PRESET)
 
@@ -192,20 +229,26 @@ except Exception as e:  # a plan we can parse but not handle further: say so, ne
     st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
     st.stop()
 
+with solution_slot:
+    solution = pick_solution(plan)
+
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
-drawing, panel = st.columns([5, 3], gap="large")
-with drawing:
-    try:
-        st.image(picture(source, key, content, show_graph), width="stretch")
-    except Exception as e:  # drawing a plan we loaded: never a traceback
-        st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
-    if plan.warnings:
-        with st.expander(f"{len(plan.warnings)} plan warning(s)"):
-            for w in plan.warnings:
-                st.markdown(f"- {w}")
-with panel:
-    st.subheader("Facts")
-    st.markdown(f"**{plan_facts(plan, PRESET)}**")
-    st.markdown(f"{plan.m_per_unit:.4f} m/unit · walls {plan.wall_depth_m:.2f} m")
-    st.caption("Eligible area · nodes · LB = the fewest hubs any zoning can use.")
-    reviewer_panel(source, key, content, plan)
+best, plan_tab = st.tabs(["Best", "Plan"])
+with best:
+    best_tab(source, key, content, plan, solution)
+with plan_tab:
+    drawing, panel = st.columns([5, 3], gap="large")
+    with drawing:
+        try:
+            st.image(picture(source, key, content, show_graph), width="stretch")
+        except Exception as e:  # drawing a plan we loaded: never a traceback
+            st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
+        if plan.warnings:
+            with st.expander(f"{len(plan.warnings)} plan warning(s)"):
+                for w in plan.warnings:
+                    st.markdown(f"- {w}")
+    with panel:
+        st.subheader("Facts")
+        st.markdown(f"**{plan_facts(plan, PRESET)}**")
+        st.markdown(f"{plan.m_per_unit:.4f} m/unit · walls {plan.wall_depth_m:.2f} m")
+        st.caption("Eligible area · nodes · LB = the fewest hubs any zoning can use.")
