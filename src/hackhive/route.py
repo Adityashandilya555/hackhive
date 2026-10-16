@@ -971,8 +971,10 @@ def route_ring(
     choices the ring with the lowest J (`checker.metrics`) wins; ties go to the first; past
     `MAX_CORNER_COMBOS` combinations, one greedy pass per stop. With `free` (rule 5's free
     space), no stub corner runs through a wall. With `occupancy`, legs avoid used cell edges by
-    J's overlap weight and are committed to it (#80). Raises ValueError for fewer than 2 stops,
-    a stop its room can't snap or reach without a wall, or an unreachable leg.
+    J's overlap weight and are committed to it (#80). Without it, a ring whose legs share a
+    cell edge is also routed as parallel runs, and the lower J of the two layouts wins (#81).
+    Raises ValueError for fewer than 2 stops, a stop its room can't snap or reach without a
+    wall, or an unreachable leg.
     """
     return _route_ring(grid, stops, c, retrace_ok, free, occupancy)[0]
 
@@ -987,26 +989,20 @@ def _route_ring(
 ) -> tuple[list[RouteSegment], list[list[Cell]]]:
     """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed).
 
-    Where the ring may come back out the way it went in (`_both_layouts`), pass 0 (no
-    `occupancy`) routes it twice: (a) every leg on its own shortest path, so legs may share a
-    line (a retrace, scored as O), and (b) with a fresh `Occupancy` of its own legs, so a leg
-    takes a parallel line a cell away when J's overlap costs more than its bends. The lower J
-    wins; (a) on a tie (decision_conventions §5, #81)."""
+    In pass 0 (no `occupancy`), a ring whose legs share a cell edge is routed twice: (a) every
+    leg on its own shortest path, so legs may share a line (a retrace, scored as O), and (b)
+    with a fresh `Occupancy` of its own legs, so a leg takes a parallel line a cell away when
+    J's overlap costs more than its bends. The lower ring J wins; (a) on a tie
+    (decision_conventions §5, #81)."""
     prep = _prepare(grid, stops, c, occupancy)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
     j, best = _best_corners(prep, options)
-    if occupancy is None and _both_layouts(stops, retrace_ok) and _shares_an_edge(prep.cells):
+    if occupancy is None and _shares_an_edge(prep.cells):
         lanes = _prepare(grid, stops, c, Occupancy())
         lanes_j, lanes_best = _best_corners(lanes, options, start=best)
         if lanes_j < j - _EPS:
             prep, best = lanes, lanes_best
     return _segments(prep, best), prep.cells
-
-
-def _both_layouts(stops: Sequence[Stop], retrace_ok: Collection[str]) -> bool:
-    """A one-node ring, or a ring with a node in a single-door room: both may retrace or run
-    parallel, so `_route_ring` tries both (#81)."""
-    return len(stops) == 2 or any(s.id in retrace_ok for s in stops)
 
 
 def _shares_an_edge(legs: Sequence[Sequence[Cell]]) -> bool:
@@ -1021,10 +1017,12 @@ def _best_corners(
     options: Sequence[list[tuple[int | None, int | None]]],
     start: list[tuple[int | None, int | None]] | None = None,
 ) -> tuple[float, list[tuple[int | None, int | None]]]:
-    """The stub corner choice with the lowest ring J, and that J. From `start`, only one greedy
-    pass per stop (the parallel-run variant starts from the retrace's choice, ADR-003)."""
+    """The stub corner choice with the lowest ring J, and that J: every combination up to
+    `MAX_CORNER_COMBOS`, else one greedy pass per stop. From `start`, always the greedy pass
+    (the parallel-run variant starts from the retrace's choice, ADR-003)."""
     n = len(prep.stops)
     cache: dict[tuple[int, int | None, int | None], list[Point2]] = {}
+    scores: dict[tuple[tuple[int | None, int | None], ...], float] = {}
 
     def legs(choice: Sequence[tuple[int | None, int | None]]) -> list[list[Point2]]:
         out = []
@@ -1036,12 +1034,15 @@ def _best_corners(
         return out
 
     def score(choice: Sequence[tuple[int | None, int | None]]) -> float:
-        return _score(prep, legs(choice))
+        key = tuple(choice)
+        if key not in scores:
+            scores[key] = _score(prep, legs(choice))
+        return scores[key]
 
     if start is None and math.prod(len(o) for o in options) <= MAX_CORNER_COMBOS:
         best = list(min(itertools.product(*options), key=score))
-    else:  # ponytail: one greedy pass from every stop's first option; exact search is #19's
-        best = list(start) if start else [o[0] for o in options]
+    else:  # ponytail: one greedy pass from `start` or each stop's first option; exact is #19's
+        best = list(start) if start is not None else [o[0] for o in options]
         for i, opts in enumerate(options):
             best = min(([*best[:i], o, *best[i + 1 :]] for o in opts), key=score)
     return score(best), best
@@ -1108,7 +1109,8 @@ def route_passes(
     """Every hub's ring, each inside its hub's `assigned_rooms` unless
     `c.route_through_other_rooms` (D7), over 1 + `passes` passes (#80, ADR-004).
 
-    Pass 0 routes each ring alone, in hub order. Every later pass rips each ring up in turn,
+    Pass 0 routes each ring alone, in hub order, as a retrace or as parallel runs, whichever
+    has the lower ring J (`route_ring`, #81). Every later pass rips each ring up in turn,
     longest (pass 0's L) first, and reroutes it with an occupancy penalty: each cell edge that
     another cable uses, this ring's own earlier legs included, costs J's overlap weight once
     per cable (`overlap_weight_cells`). `best_pass` picks the winner: validity first, then the
