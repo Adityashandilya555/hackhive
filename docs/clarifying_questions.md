@@ -18,7 +18,7 @@ This file picks up from #46, which was closed **with no answers recorded**. Rule
 | # | Point | Decision | Why we don't ask |
 |---|---|---|---|
 | D1 | Node cap: slides say ≤ 5, the Honeywell brief says ≤ 20 | **5 only.** No ≤ 20 mode, no 5-vs-20 view. | Settled. Close #28 and #29. |
-| D2 | J weights (1 / 5 / 1 / 0.5) are "starting values, fixed after reference runs" (slide 6) | **The organisers' weights by default**, read from settings rather than code. Sidebar sliders change them as a labelled WHAT-IF. **The submitted design is always picked with the official weights**, since that's what's scored. | When final weights are published, we change one setting. |
+| D2 | J weights (1 / 5 / 1 / 0.5) are "starting values, fixed after reference runs" (slide 6) | **Hard-coded for now:** `ORGANISER_WEIGHTS` holds the organisers' values (Adi, 2026-10-16), and every metric reads them through `c.cost_weights`. A settings file and WHAT-IF sliders come **later**; even then, the submitted design is always picked with the official weights. | When final weights are published, #48 changes the one constant. |
 | D3 | Unclear counting rules: T-touch and split points as crossings, overlap between different rings, bends at nodes (old O3, O4, O9) | **Robust scoring:** score each design under both readings and submit the one whose worse J is lowest. The app gets a "counting rules" toggle that shows both. | Whichever way the organisers count, we aren't surprised. |
 | D4 | An eligible room > 100 m² (old O12) | **Ignore.** No submission, and the sidecar says why. The area-cap slider (#30) shows such plans solved under a higher cap, as a WHAT-IF. | 2.1% of ResPlan, and slide 2 says the benchmark excludes them. |
 | D5 | Zone link through a bathroom or stair (old O7) | **Default: no link.** A WHAT-IF toggle allows it (`zone_links_via_excluded`, #30). | The default is valid under either reading. |
@@ -45,7 +45,7 @@ This file picks up from #46, which was closed **with no answers recorded**. Rule
 |---|---|---|
 | T1 | Close #28 (≤ 20 what-if) and #29 (5 vs 20 side by side)? | **Yes** (D1). Also update `rings.py`'s error that still points to "Held-Karp (#28)". |
 | T2 | Gallery filters (#26)? | Hub count only. |
-| T3 | Which WHAT-IFs does #30 offer? | Area cap, J weights (D2), hub offset, counting rules (D3), zone link through bathroom/stair (D5), interior windows as doors (D6, #31), allow cable through bathrooms/other hubs' rooms (D7). |
+| T3 | Which WHAT-IFs does #30 offer? | Area cap, hub offset (J weights later, D2), counting rules (D3), zone link through bathroom/stair (D5), interior windows as doors (D6, #31), allow cable through bathrooms/other hubs' rooms (D7). |
 | T4 | Keep submitting `strict`-only designs? | **Yes, as the fallback.** A missing plan scores 0 for sure, but strict-only isn't guaranteed valid (Q2). #21's target is **zero** retraces outside single-door rooms. |
 | T5 | **New P0:** 11% of plans get no design because the grid misses thin doors and open passages. | **New issue, fixed first** (draft below). |
 | T6 | Round output to 4 decimals? | Yes, in the writer: snap both ends of a segment to the same rounded coordinate, with a test that every segment stays exactly axis-aligned (#34). |

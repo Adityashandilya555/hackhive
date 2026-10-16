@@ -23,7 +23,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 |---|---|---|---|
 | 0.1 | When the slides and the Honeywell brief disagree, **the slides win**: axis-aligned routes, single-door retrace allowed, fewest hubs first, given node points, one JSON per plan. The brief only fills gaps. | ours (Adi, 2026-10-15) | `AGENTS.md` |
 | 0.2 | **Node cap = 5 per hub.** The brief's "≤ 20 devices" case is **not needed**: no ≤ 20 mode, no 5-vs-20 comparison. | clarified (D1) | `Constraints.max_nodes = 5`; #28, #29 close (T1) |
-| 0.3 | The J weights 1 / 5 / 1 / 0.5 are the slides' starting values. **Default = the organisers' weights**, to be read from settings, not code. Sidebar sliders change them as a WHAT-IF. The submitted design is **always picked with the official weights**. Today they're one constant (`contracts.ORGANISER_WEIGHTS`) with no CLI or UI control. | D2, not built yet (#30, #48) | `contracts.py` |
+| 0.3 | The J weights 1 / 5 / 1 / 0.5 are the slides' starting values, **hard-coded** in `contracts.ORGANISER_WEIGHTS` and read everywhere through `c.cost_weights` (Adi, 2026-10-16). A settings file and WHAT-IF sliders come later; the submitted design will always use the official weights. | D2 | `contracts.py`, #48 |
 
 ## 1. Input and units
 
