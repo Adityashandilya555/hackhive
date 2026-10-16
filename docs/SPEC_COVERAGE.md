@@ -75,7 +75,7 @@ Round 2 (2026-10-16) updated #2, #6, #9-#17, #20-#23, #30-#32, #38 and #44 (inpu
 | S5.1 | Overlay legend: hub colour per zone, node, numbered cable, last number = return, excluded room, door gaps | C23 | #5, #7, #12, #17, #25, #44 | `test_viz_base`, `test_viz_solution` | covered |
 | S5.2 | Single-door room: in and back out through the same door (two parallel runs) | C15 | #9, #11, #17, #21, #43 | `test_viz_solution` (submitted polylines) | partial (the J-based choice of retrace vs parallel runs is not built or tested yet, #21) |
 | S5.3 | Per-hub summary: rooms, m², nodes, length, bends | C25 | #17, #44 | `test_viz_solution` summary rows | covered |
-| S5.4 | What a reviewer confirms (5-line checklist incl. hubs = lower bound) | C26 | #11, #12, #16, #18, #24, #26 | `checker.checklist`; app checklist | covered |
+| S5.4 | What a reviewer confirms (5-line checklist incl. hubs = lower bound) | C26 | #11, #12, #16, #18, #24, #26 | `checker.checklist`; app checklist; `test_badge -k checklist_line_5` | covered |
 
 ## Slide 6: evaluation
 | # | Requirement (organisers' wording, condensed) | C-ids | Issues | Proven by | Status |
