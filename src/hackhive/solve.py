@@ -207,7 +207,11 @@ def solve(
     provenance = provenance or Provenance(version=__version__)
     area, nodes = eligible_area_and_nodes(plan)
     k_lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
-    base = {"warnings": list(plan.warnings), "folded_parts": list(plan.folded_parts)}
+    base = {
+        "warnings": list(plan.warnings),
+        "folded_parts": list(plan.folded_parts),
+        "frame": plan.frame,
+    }
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
         side = _sidecar(
@@ -271,6 +275,7 @@ def solve(
         ],
         warnings=[*plan.warnings, *(f"{h.hub_id}: {w}" for h in hubs for w in h.warnings)],
         folded_parts=list(plan.folded_parts),
+        frame=plan.frame,
     )
     return Result(plan, sub, side)
 

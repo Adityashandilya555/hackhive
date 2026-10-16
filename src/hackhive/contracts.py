@@ -174,6 +174,9 @@ class Sidecar(_Strict):
     plan_id: str
     status: Literal["ok", "submitted_strict_only", "infeasible", "input_error"]
     reason: str | None = None  # why there is no submission (infeasible, input_error), in words
+    # The organiser's node frame (#38, `Plan.frame`). The submission is already in it: the
+    # geometry was moved, never the nodes, so nothing is transformed back on output.
+    frame: Literal["identity", "flip_y", "origin_shift"] = "identity"
     violations: list[Violation] = []
     bounds: Bounds | None = None
     cost: CostBreakdown | None = None
