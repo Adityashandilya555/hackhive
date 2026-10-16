@@ -408,6 +408,15 @@ def test_nodes_room_under_walls_keeps_a_node():
     assert node.clearance_m == 0.0 and len(plan.warnings) == 1
 
 
+def test_nodes_take_the_middle_of_a_max_clearance_plateau():
+    """An 8 × 3 m room is 1.5 m clear all along its centre line. GEOS returns one end of it, and a
+    different point on macOS arm64 than on Linux (up to 0.73 m apart, #38), so the node is the
+    line's middle, the same on every platform."""
+    (node,) = load_plan(synthetic(bedroom=box(0, 0, 80, 30))).nodes
+    assert node.xy == pytest.approx((4.0, 1.5), abs=1e-3)
+    assert node.clearance_m == pytest.approx(1.5, abs=1e-3)
+
+
 def test_nodes_sliver_by_free_space_is_folded():
     """C38: a living part 1.2 m wide by its outline but 0.3 m wide between walls is a sliver,
     judged on the same free space as the node."""
@@ -427,6 +436,20 @@ def test_nodes_given_node_inside_a_wall_is_kept_and_flagged():
     assert node.given and node.xy == (20 * plan.m_per_unit, 10 * plan.m_per_unit)
     assert node.clearance_m == 0.0
     assert len(plan.warnings) == 1 and "N1" in plan.warnings[0]
+
+
+@pytest.mark.parametrize("given", [False, True])
+def test_nodes_free_space_with_a_stray_line_16552(given):
+    """ResPlan 16552 (trimmed to bedroom_0 and the walls it touches): room − walls leaves a
+    1 mm line beside the polygon. The node is still placed (or a given one measured) on the
+    polygon, instead of maximum_inscribed_circle / boundary raising on the collection."""
+    raw = read_json(FIXTURES / "plan-16552-stray-line.json")
+    if given:
+        raw["nodes"] = [list(shape(raw["bedroom"]).representative_point().coords[0])]
+    plan = load_plan(raw)
+    (node,) = plan.nodes
+    assert node.given is given
+    assert plan.rooms[0].polygon.covers(Point(node.xy)) and node.clearance_m > 0
 
 
 def test_nodes_zero_given_in_a_room_warns():

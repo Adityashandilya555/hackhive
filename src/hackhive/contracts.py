@@ -235,6 +235,8 @@ class Plan(_Geo):
     nodes: list[Node] = []
     warnings: list[str] = []
     folded_parts: list[FoldedPart] = []
+    # The organiser's node frame (#38): the geometry was moved into it so given nodes never move.
+    frame: Literal["identity", "flip_y", "origin_shift"] = "identity"
 
 
 # --------------------------------------------------------------------------- schema export

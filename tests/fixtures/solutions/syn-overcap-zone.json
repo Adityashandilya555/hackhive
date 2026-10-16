@@ -27,7 +27,7 @@
         {
           "from": "H1",
           "to": "N1",
-          "length_m": 3.95,
+          "length_m": 3.9333,
           "polyline": [
             [
               3.0,
@@ -38,19 +38,19 @@
               3.0
             ],
             [
-              4.95,
-              5.0
+              4.949901,
+              4.9833
             ]
           ]
         },
         {
           "from": "N1",
           "to": "N2",
-          "length_m": 11.7,
+          "length_m": 11.6833,
           "polyline": [
             [
-              4.95,
-              5.0
+              4.949901,
+              4.9833
             ],
             [
               4.95,
@@ -90,11 +90,11 @@
           ]
         }
       ],
-      "ring_length_m": 29.7
+      "ring_length_m": 29.6666
     }
   ],
   "reported_metrics": {
     "hub_count": 1,
-    "total_length_m": 29.7
+    "total_length_m": 29.6666
   }
 }
