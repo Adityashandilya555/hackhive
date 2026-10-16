@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import re
 import statistics
 import sys
 import time
@@ -17,6 +18,7 @@ from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
+from hackhive import __version__
 from hackhive.cases import case_tags
 from hackhive.contracts import Constraints, Provenance
 from hackhive.io import InputFormatError, load_plan
@@ -97,11 +99,13 @@ def plans(source: Path, split: str) -> Iterator[tuple[str, dict | None, str]]:
         yield where, raw, why
 
 
-def _input_error(pid: str, why: str, c: Constraints, out_dir: Path, t0: float) -> dict:
-    """An `input_error` row; the CSV reason is the fixed kind (it is grouped in the summary),
-    the detail goes to the sidecar."""
-    reason = f"input_error: {why.split(' (')[0]}"
-    side = _sidecar(pid, c, Provenance(), status="input_error", reason=reason, warnings=[why])
+def _input_error(
+    pid: str, reason: str, detail: str, c: Constraints, out_dir: Path, t0: float
+) -> dict:
+    """An `input_error` row and its sidecar, both with `reason` (a fixed kind, grouped in the
+    summary); the detail goes to the sidecar's warnings."""
+    prov = Provenance(version=__version__)
+    side = _sidecar(pid, c, prov, status="input_error", reason=reason, warnings=[detail])
     submit(Result(None, None, side), out_dir)
     row = dict.fromkeys(COLUMNS, "")
     row.update(plan_id=pid, submitted=False, status="input_error", reason=reason)
@@ -112,14 +116,14 @@ def _input_error(pid: str, why: str, c: Constraints, out_dir: Path, t0: float) -
 def _row(where: str, raw: dict | None, why: str, c: Constraints, out_dir: Path) -> dict:
     t0 = time.perf_counter()
     if raw is None:
-        return _input_error(where, why, c, out_dir, t0)
+        return _input_error(where, f"input_error: {why.split(' (')[0]}", why, c, out_dir, t0)
     try:
         plan = load_plan(raw, c)
     except (InputFormatError, ValueError) as e:
         pid = raw.get("plan_id") or f"PLAN_{raw.get('id')}"
-        row = _input_error(str(pid), str(e), c, out_dir, t0)
-        row["reason"] = f"input_error: {e}"  # load errors are already short and kind-like
-        return row
+        # io's messages start `plan <id>: ` and may end `, got <value>`: drop both to group them
+        kind = re.sub(r"^plan \S+: ", "", str(e)).split(", got ")[0]
+        return _input_error(str(pid), f"input_error: {kind}", str(e), c, out_dir, t0)
     result: Result = solve(plan, c)
     submit(result, out_dir)
     ms = round((time.perf_counter() - t0) * 1000)
