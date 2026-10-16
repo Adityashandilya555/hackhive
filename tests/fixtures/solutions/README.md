@@ -1,13 +1,15 @@
 # Solution fixtures (#11)
 
 Hand-made slide-8 submissions for the checker's six hard rules. `make_fixtures.py` builds every
-file here from fixed coordinates (metres); `tests/test_checker_rules.py` regenerates them and
-checks nothing has drifted. 5088's are checked against `tests/fixtures/plans/plan-5088.json`; the
+file here from hand-picked waypoints (metres) and the node points `io.load_plan` places (rounded to
+1 µm); `tests/test_checker_rules.py` regenerates them and checks nothing has drifted. If node
+placement changes, rerun `uv run python tests/fixtures/solutions/make_fixtures.py` and commit the
+result. 5088's are checked against `tests/fixtures/plans/plan-5088.json`; the
 `syn-*-zone.json` ones against their `syn-*-plan.json` (raw plans in drawing units, 10 units = 1 m).
 
 | File | Breaks |
 |---|---|
-| `5088-valid.json` | nothing (1 hub; L 24.805, B 12, J 30.805) |
+| `5088-valid.json` | nothing (1 hub; L 24.331, B 12, J 30.331) |
 | `5088-two-hubs-valid.json` | nothing (2 hubs; checklist line 5 ✗: 2 hubs > lower bound 1) |
 | `5088-omitted-room.json` | rule 1: R03 in no hub, and N3's room isn't in H1 |
 | `5088-duplicated-node.json` | rule 1: N2 assigned twice |
