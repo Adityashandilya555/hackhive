@@ -26,6 +26,7 @@ from hackhive.contracts import (
     lower_bound,
 )
 from hackhive.io import load_plan
+from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "plans"
