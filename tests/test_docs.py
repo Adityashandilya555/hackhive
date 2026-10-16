@@ -66,3 +66,12 @@ def test_the_readme_hackhive_commands_run_on_a_fresh_clone(tmp_path):
         argv = [a.replace("out/", f"{tmp_path.as_posix()}/") for a in shlex.split(line)]
         argv = [str(ROOT / a) if a.startswith("tests/") else a for a in argv]
         assert cli.main(argv) == 0, line
+
+
+def test_the_readme_list_command_runs(capsys):
+    """The README's `python -m hackhive.solve --list` line runs on a committed fixture (from #100)."""
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    (line,) = re.findall(r"^uv run python -m hackhive\.solve (.+)$", readme, re.M)
+    argv = [str(ROOT / a) if a.startswith("tests/") else a for a in shlex.split(line)]
+    assert solve.main(argv) == 0
+    assert "R01+R02+R05|R03|R04" in capsys.readouterr().out

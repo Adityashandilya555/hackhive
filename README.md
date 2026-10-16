@@ -46,6 +46,14 @@ and keeps the `--split` (default `test`) listed in a `split.json` beside it. `da
 for a full run, put ResPlan (below) there as `data/resplan/plans.jsonl`, one plan per line, with its
 `split.json` beside it.
 
+Every arrangement of a plan, ranked (#22: fewest hubs, then the worse J of the two counting
+readings, then the area gap). J here is pass 0's, each ring routed alone; `solve` submits the first
+arrangement that passes the checker mirror after the rip-up passes, so its J can differ:
+
+```sh
+uv run python -m hackhive.solve --list tests/fixtures/plans/plan-5924.json
+```
+
 `solve --help` lists the what-if flags (area cap, hub clearance, D5, D7). A what-if run is labelled
 WHAT-IF and never writes a submission.
 
