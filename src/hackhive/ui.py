@@ -275,6 +275,8 @@ def step_caption(sub: Submission, step: int) -> str:
     """`Step 3 of 9 · H1: N2 → N1`: what the step-through slider (#25) has just drawn."""
     order = [(h.hub_id, s) for h in sub.hubs for s in h.route_segments]
     total = len(order)
+    if total == 0:  # the slider is disabled: nothing to walk through (#88 review)
+        return "No cable to step through"
     if step <= 0:
         return f"Step 0 of {total} · hubs and nodes only"
     if step >= total:
