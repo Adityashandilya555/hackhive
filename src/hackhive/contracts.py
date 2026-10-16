@@ -270,6 +270,9 @@ class Plan(_Geo):
     front_doors: list[Polygon] = []  # the entrance: never a room-to-room passage
     doors: list[Door] = []
     openings: list[Opening] = []
+    # windows on interior walls read as doors (#31, WHAT-IF only): `build_graph` fills them from
+    # `windows` when `Constraints.interior_windows_as_doors` is on, and empties them when it's off
+    window_doors: list[Door] = []
     nodes: list[Node] = []
     warnings: list[str] = []
     folded_parts: list[FoldedPart] = []

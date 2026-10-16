@@ -3,6 +3,7 @@ says. Nothing here imports streamlit, so all of it is unit-tested without runnin
 
 from __future__ import annotations
 
+import csv
 import json
 import re
 from collections.abc import Callable, Collection, Sequence
@@ -12,7 +13,7 @@ from typing import Any
 
 import networkx as nx
 
-from hackhive import checker, graph
+from hackhive import batch, checker, graph
 from hackhive.cases import CaseTag, case_tags  # noqa: F401  (re-exported for app.py)
 from hackhive.contracts import (
     Constraints,
@@ -25,7 +26,7 @@ from hackhive.contracts import (
     Violation,
     lower_bound,
 )
-from hackhive.io import load_plan
+from hackhive.io import NODE_CLEARANCE_M, load_plan
 from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -611,6 +612,155 @@ def readings_rows(sub: Submission, c: Constraints) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+# --------------------------------------------------------------------------- batch leaderboard (#33)
+
+# #32's CSV, read only: the app never solves a batch (research note frontend-novelty, feature 7).
+# The fresh run first, then a committed sample if #32 adds one.
+BATCH_PATHS: tuple[Path, ...] = (
+    ROOT / "out" / "batch.csv",
+    ROOT / "data" / "sample" / "batch-test-100.csv",
+)
+BATCH_COMMAND = "uv run hackhive batch --split test --n 100 --out out/batch.csv"
+# #32's columns, read from `hackhive batch` itself so the two never drift (#106 review). `tags`
+# (#83's case-tag labels, ";"-joined) is an optional extra.
+BATCH_COLUMNS = tuple(batch.COLUMNS)
+OPTIONAL_COLUMNS = ("tags",)  # #108's case-tag ids; a CSV from before it still loads
+# `cases.case_tags` ids (what #108 writes) → what the tab shows. The +k of "hubs > lower bound"
+# lives in the plan's own label, not its id, so the batch groups every above-the-bound plan.
+TAG_LABELS = {
+    "open_passage": "open passage",
+    "en_suite": "en-suite single-door",
+    "one_node_ring": "one-node ring",
+    "lb_met": "hubs = lower bound",
+    "above_lb": "hubs > lower bound",
+    "many_hubs": "4+ hubs",
+    "disconnected": "disconnected groups",
+    "isolated": "isolated eligible room",
+    "multi_living": "multi-part living",
+    "low_clearance": f"node clearance < {NODE_CLEARANCE_M:g} m",
+    "folded": "folded sliver",
+}
+
+
+def tag_label(tag_id: str) -> str:
+    """A case-tag id's label; an id the tab doesn't know yet is shown as is."""
+    return TAG_LABELS.get(tag_id, tag_id)
+
+
+_INTS = ("n_nodes", "k_lb", "H", "X", "B", "ms")
+_FLOATS = ("area_m2", "L", "O", "J", "area_gap")
+
+
+def find_batch_csv() -> Path | None:
+    """The first batch CSV that exists in `BATCH_PATHS`, or None."""
+    return next((p for p in BATCH_PATHS if p.is_file()), None)
+
+
+def _number(text: str, kind: type) -> int | float | None:
+    text = text.strip()
+    if not text:
+        return None
+    return kind(float(text)) if kind is int else kind(text)
+
+
+def read_batch(path: Path) -> list[dict[str, Any]]:
+    """#32's batch CSV as typed rows: numbers as int / float (None when empty, as for an
+    infeasible plan), `submitted` as a bool. Raises ValueError naming any missing column or a
+    value that isn't a number, so the tab can say what's wrong."""
+    with path.open(encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        have = reader.fieldnames or []
+        missing = [c for c in BATCH_COLUMNS if c not in OPTIONAL_COLUMNS and c not in have]
+        if missing:
+            raise ValueError(f"{path.name}: missing column(s) {', '.join(missing)} (#32's CSV)")
+        rows = []
+        for line, raw in enumerate(reader, start=2):
+            row: dict[str, Any] = dict(raw)
+            try:
+                for name in _INTS:
+                    row[name] = _number(raw[name], int)
+                for name in _FLOATS:
+                    row[name] = _number(raw[name], float)
+            except ValueError as e:
+                raise ValueError(f"{path.name} line {line}: {e}") from e
+            row["submitted"] = raw["submitted"].strip().lower() in ("true", "1", "yes")
+            rows.append(row)
+    return rows
+
+
+@dataclass(frozen=True)
+class BatchSummary:
+    """The Batch tab's cards (C16, C17, C22, C43)."""
+
+    n: int
+    ok: int
+    strict_only: int
+    infeasible: int
+    input_error: int
+    feasible: int  # loaded and not infeasible: #32's denominator (`batch.summary`)
+    valid_pct: float | None  # feasible plans with a submission (ok or strict-only); None if none
+    at_lb_pct: float | None  # submitted plans whose hub count is the lower bound
+    mean_J: float | None  # over submitted plans
+
+
+def batch_summary(rows: list[dict[str, Any]]) -> BatchSummary:
+    """Counts by status, the validity %, the % at the lower bound and the mean J. Validity is
+    #32's: submitted plans of the feasible ones (loaded and not infeasible), so the card and
+    `hackhive batch`'s summary give one number."""
+    status = [r["status"] for r in rows]
+    sub = [r for r in rows if r["submitted"]]
+    feasible = len(rows) - status.count("input_error") - status.count("infeasible")
+    at_lb = [r for r in sub if r["H"] is not None and r["H"] == r["k_lb"]]
+    js = [r["J"] for r in sub if r["J"] is not None]
+    return BatchSummary(
+        n=len(rows),
+        ok=status.count("ok"),
+        strict_only=status.count("submitted_strict_only"),
+        infeasible=status.count("infeasible"),
+        input_error=status.count("input_error"),
+        feasible=feasible,
+        valid_pct=100 * len(sub) / feasible if feasible else None,
+        at_lb_pct=100 * len(at_lb) / len(sub) if sub else None,
+        mean_J=sum(js) / len(js) if js else None,
+    )
+
+
+def hub_gap_counts(rows: list[dict[str, Any]]) -> dict[int, int]:
+    """How many submitted plans use the lower bound's hub count (0), one more (1), …: H − LB."""
+    out: dict[int, int] = {}
+    for r in rows:
+        if r["submitted"] and r["H"] is not None and r["k_lb"] is not None:
+            gap = r["H"] - r["k_lb"]
+            out[gap] = out.get(gap, 0) + 1
+    return dict(sorted(out.items()))
+
+
+def plans_by_tag(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    """Plan ids per case-tag id (#83; #108 writes `cases.case_tags` ids), from the optional `tags`
+    column; empty without it. `tag_label` gives each id's label."""
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        for tag in filter(None, (t.strip() for t in (r.get("tags") or "").split(";"))):
+            out.setdefault(tag, []).append(r["plan_id"])
+    return {tag: sorted(ids, key=_id_order) for tag, ids in sorted(out.items())}
+
+
+def _id_order(plan_id: str) -> tuple[int, str]:
+    tail = plan_id.removeprefix("PLAN_")
+    return (int(tail), "") if tail.isdigit() else (1 << 62, tail)
+
+
+def open_target(plan_id: str) -> tuple[str, str] | None:
+    """Where the app can open a batch row's plan: ("Test plans", id) for a fixture, else
+    ("ResPlan id", id) when the ResPlan file is here; None when neither can."""
+    key = plan_id.removeprefix("PLAN_")
+    if key in fixture_ids():
+        return "Test plans", key
+    if RESPLAN_JSONL.exists():
+        return "ResPlan id", key
+    return None
 
 
 # --------------------------------------------------------------------------- arrangements (#26)

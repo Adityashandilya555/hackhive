@@ -428,3 +428,57 @@ def test_fixture_script_reproduces_the_committed_files(tmp_path):
     assert sorted(p.name for p in written) == committed
     for p in written:
         assert p.read_text(encoding="utf-8") == (SOL / p.name).read_text(encoding="utf-8"), p.name
+
+
+# --------------------------------------------------------------------------- #31 interior windows
+
+WINDOWS_ON = Constraints(interior_windows_as_doors=True)
+
+
+def _2814_kitchen_leg(c: Constraints):
+    """A leg from 2814's living node to its kitchen node, routed under `c`'s graph."""
+    from hackhive.io import room_by_label
+
+    plan = load_plan(FIXTURES / "plans" / "plan-2814.json")
+    build_graph(plan, WINDOWS_ON)  # route through the window
+    grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
+    kitchen, living = (room_by_label(plan, x).id for x in ("kitchen_0", "living_0"))
+    a = next(n for n in plan.nodes if n.room_id == living)
+    b = next(n for n in plan.nodes if n.room_id == kitchen)
+    (ca, (sa, _)), (cb, (_, sb)) = grid.snap(a.xy, a.room_id), grid.snap(b.xy, b.room_id)
+    cells = path_to(search(grid.labels, grid.door_rooms, [ca], 0.0), cb)
+    assert cells
+    return plan, [a.xy, sa, *map(grid.to_xy, cells), sb, b.xy]
+
+
+def test_interior_window_route_accepted_only_with_the_setting():
+    """#31, C37, C14: rule 5 accepts a route through 2814's interior window only when the setting
+    is on; the strict default rejects it as a window crossing."""
+    plan, pts = _2814_kitchen_leg(WINDOWS_ON)
+    build_graph(plan, WINDOWS_ON)
+    assert (
+        checker._rule5_leg(pts, checker._free_space(plan, WINDOWS_ON), WINDOWS_ON, "H1", "x") == []
+    )
+    c = Constraints()
+    build_graph(plan, c)
+    flagged = checker._rule5_leg(pts, checker._free_space(plan, c), c, "H1", "x")
+    assert flagged and any("window" in v.message for v in flagged)
+
+
+def test_interior_window_setting_still_rejects_exterior_windows():
+    """#31, C14: with the setting on, the exterior-window crossing on 5088 stays a rule-5 error."""
+    plan = load_plan(plan_path("5088-window-crossing.json"))
+    violations = check_rules(plan, submission("5088-window-crossing.json"), WINDOWS_ON)
+    assert any(v.rule == 5 and "window" in v.message for v in violations)
+
+
+def test_interior_window_rule_3_zone_through_the_window():
+    """#31: a zone of living + kitchen on 2814 is connected (rule 3) only with the setting on."""
+    from hackhive.io import room_by_label
+
+    plan = load_plan(FIXTURES / "plans" / "plan-2814.json")
+    on = checker.RuleContext(plan, WINDOWS_ON).ctx
+    pair = [room_by_label(plan, x).id for x in ("kitchen_0", "living_0")]
+    assert on.eligible.subgraph(pair).number_of_edges() == 1
+    off = checker.RuleContext(plan, Constraints()).ctx
+    assert off.eligible.subgraph(pair).number_of_edges() == 0

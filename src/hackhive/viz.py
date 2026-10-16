@@ -425,6 +425,7 @@ def _clear_point(room: Room, ax: Axes, renderer: Any) -> Point:
 _KNOWN_LINKS = {
     "door": ({"color": LINK_DOOR, "ls": "-"}, "through a door"),
     "opening": ({"color": LINK_OPENING, "ls": "--"}, "open passage"),
+    "window_door": ({"color": LINK_OTHER, "ls": "-"}, "window read as a door (WHAT-IF)"),
     "via_excluded": ({"color": LINK_OTHER, "ls": ":"}, "via an excluded room"),
 }
 
@@ -437,7 +438,7 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
     silently. Adds a "Room graph" legend."""
     node_at = {n.room_id: Point(n.xy) for n in plan.nodes}
     rooms = {r.id: r for r in plan.rooms}
-    doors = {d.id: d.polygon for d in plan.doors}
+    doors = {d.id: d.polygon for d in [*plan.doors, *plan.window_doors]}
     renderer = _renderer(ax.figure)
     hollow = {
         r: _clear_point(rooms[r], ax, renderer)
@@ -454,7 +455,7 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
         kind = str(d.get("kind"))
         style, name = _KNOWN_LINKS.get(kind, ({"color": LINK_OTHER, "ls": "-."}, kind))
         seen[kind] = (style, name)
-        if kind == "door":
+        if kind in ("door", "window_door"):
             vias = [(i, _anchor(doors[i])) for i in d.get("door_ids", []) if i in doors]
         elif kind == "opening":
             vias = [("opening", _anchor(d["region"]))]
@@ -865,6 +866,32 @@ def draw_solution(
         title_fontsize=_LABEL_PT + 1,
         labelcolor=INK_SECONDARY,
     )
+    return fig
+
+
+def draw_gap_histogram(counts: Mapping[int, int]) -> Figure:
+    """The Batch tab's histogram (#33): submitted plans per H − LB, the hubs used above the lower
+    bound. One bar per gap that occurs, its count written on it; integer ticks across the range."""
+    fig = Figure(figsize=(5, 2.6), facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot()
+    ax.set_facecolor(SURFACE)
+    for gap, k in counts.items():
+        ax.bar(gap, k, width=0.8, color=LINK_DOOR, gid=f"gap:{gap}", zorder=2)
+        ax.text(gap, k, f"{k}", ha="center", va="bottom", fontsize=_LABEL_PT + 1, color=INK)
+    top = max(counts.values(), default=1)
+    ax.set_xticks(range(0, max(counts, default=0) + 1))
+    ax.set_ylim(0, top * 1.2 + 0.1)
+    ax.set_xlabel(
+        "H − LB (hubs above the lower bound)", fontsize=_LABEL_PT + 1, color=INK_SECONDARY
+    )
+    ax.set_ylabel("plans", fontsize=_LABEL_PT + 1, color=INK_SECONDARY)
+    ax.tick_params(colors=INK_SECONDARY, labelsize=_LABEL_PT + 1)
+    ax.grid(axis="y", color=INK_SECONDARY, alpha=0.15, zorder=0)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(INK_SECONDARY)
     return fig
 
 

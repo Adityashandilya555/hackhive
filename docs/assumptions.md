@@ -49,7 +49,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | # | Assumption | Status | Where |
 |---|---|---|---|
 | 3.1 | Two rooms linked **only through an excluded room** (bedroom → bathroom → bedroom) are **not** linked. The setting `zone_links_via_excluded` (bathroom and stair) exists, default off; #30 makes it a WHAT-IF toggle. | D5 | `graph.eligible_graph` |
-| 3.2 | A window drawn on an interior wall (a ResPlan quirk) is an **obstacle**. "Treat as a door" will be a WHAT-IF checkbox, never submitted. | D6 (#31) | `graph.py`, #31 |
+| 3.2 | A window drawn on an interior wall (a ResPlan quirk) is an **obstacle**. The WHAT-IF checkbox "Treat windows on interior walls as doors" (`interior_windows_as_doors`) reads a window touching exactly two interior rooms (no balcony or outdoor layer) as a `window_door`; never submitted. | D6 (#31) | `graph.py`, #31 |
 | 3.3 | A doorless eligible room is its own zone, with its own hub. | ours | `zoning.py` |
 | 3.4 | A zone must contain a room that can host a hub (a point ≥ 0.51 m from walls). Otherwise that zoning is skipped, and a plan with no such zoning gets no submission. | ours | `zoning.py`, `solve.enumerate` |
 | 3.5 | A zoning is skipped when one of its zones has no node, because there is no ring to build (also when a zone's ring can't be ordered or routed). | ours | `solve.enumerate` |

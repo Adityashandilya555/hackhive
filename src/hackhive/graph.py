@@ -3,8 +3,10 @@
 Slide 3 rule 3: windows, wall-only adjacency and the entrance never link rooms. Nodes are every
 room id (eligible and excluded) with `type`, `label` and `eligible` attributes. Edges:
 `kind="door"` (`door_ids`), `kind="opening"` (`region`, `opening_ids`; open passages have no
-geometry of their own in ResPlan, so they are derived) and, only with
-`Constraints.zone_links_via_excluded`, `kind="via_excluded"` (`via`).
+geometry of their own in ResPlan, so they are derived), only with
+`Constraints.zone_links_via_excluded`, `kind="via_excluded"` (`via`), and, only with
+`Constraints.interior_windows_as_doors` (#31, WHAT-IF), `kind="window_door"` (`door_ids` naming
+the windows, `window_<i>` by their place in `plan.windows`).
 `python -m hackhive.graph <plan.json>` prints the edges and the eligible-graph components.
 """
 
@@ -33,6 +35,8 @@ VIA_TYPES = ("bathroom", "stair")  # what `zone_links_via_excluded` may pass thr
 # A door into one of these that leads nowhere else is no second way out of a room, for the
 # single-door retrace rule (decided 2026-10-16, Rohit; bathrooms only, balconies still count)
 DEAD_END_TYPES = ("bathroom",)
+# A window with one of these on a side is on an outer wall, never an interior one (#31)
+NOT_INTERIOR = ("balcony", *OUTDOOR)
 
 DOOR_REACH = 0.6  # × wall depth: rooms this close to a door are its candidates (spec)
 SIDE_SHARE = 0.10  # a side's room must fill ≥ 10% of its probe strip
@@ -164,6 +168,39 @@ def _connectors(plan: Plan) -> tuple[list[Record], list[str]]:
     return records, warnings
 
 
+def window_id(i: int) -> str:
+    """The id a window gets as a door (#31): its place in `plan.windows`."""
+    return f"window_{i}"
+
+
+def interior_windows(plan: Plan) -> list[Door]:
+    """The windows on interior walls, as doors (#31, ADR-007's ResPlan reading): a window whose
+    `buffer(DOOR_REACH · wall depth)` touches exactly two rooms, both interior (no balcony or
+    outdoor layer), picked by the same per-side top-2 as a door. Each comes back with `rooms`."""
+    wd = plan.wall_depth_m
+    rooms = [r for r in plan.rooms if r.type not in OUTDOOR]
+    every = [r for r in plan.rooms if r.type != "land"]  # a garden on the far side: exterior
+    out = []
+    for i, w in enumerate(plan.windows):
+        reach = w.buffer(DOOR_REACH * wd)
+        touching = [r for r in every if r.polygon.intersects(reach)]
+        if len(touching) != 2 or any(r.type in NOT_INTERIOR for r in touching):
+            continue
+        door = Door(id=window_id(i), polygon=w)
+        ids = {r.id for r in touching}
+        pair, _ = _door_pair(door, [r for r in rooms if r.id in ids], wd)
+        if pair is not None:
+            door.rooms = pair
+            out.append(door)
+    return out
+
+
+def passage_doors(plan: Plan) -> list[Door]:
+    """Every door cable may cross: the plan's doors, then any interior windows read as doors
+    (#31; `build_graph` fills them only with the setting on). The grid and rule 5 share it."""
+    return [*plan.doors, *plan.window_doors]
+
+
 def _link_via_excluded(G: nx.Graph) -> None:
     """Link eligible rooms that both connect to the same bathroom or stair (never replacing a
     door or opening edge). Only with `Constraints.zone_links_via_excluded` (#46 Q2)."""
@@ -180,8 +217,9 @@ def _link_via_excluded(G: nx.Graph) -> None:
 
 def build_graph(plan: Plan, c: Constraints | None = None) -> nx.Graph:
     """The room graph over every room (C8, C13, C14, C34). Also fills `plan.openings` (one
-    `Opening` per kept piece), `Door.rooms` for every door that links two rooms, and
-    `plan.warnings`; safe to call again on the same plan."""
+    `Opening` per kept piece), `Door.rooms` for every door that links two rooms,
+    `plan.window_doors` (#31: empty unless `c.interior_windows_as_doors`) and `plan.warnings`;
+    safe to call again on the same plan, with any settings."""
     c = c or Constraints()
     G = nx.Graph()
     G.add_nodes_from(
@@ -205,6 +243,13 @@ def build_graph(plan: Plan, c: Constraints | None = None) -> nx.Graph:
                 Opening(id=i, polygon=p, rooms=(u, v)) for i, p in zip(ids, payload, strict=True)
             ]
             G.add_edge(u, v, kind="opening", region=unary_union(payload), opening_ids=ids)
+    plan.window_doors = interior_windows(plan) if c.interior_windows_as_doors else []
+    for w in plan.window_doors:  # a pair a door or opening links already keeps that edge
+        u, v = w.rooms
+        if not G.has_edge(u, v):
+            G.add_edge(u, v, kind="window_door", door_ids=[w.id])
+        elif G.edges[u, v]["kind"] == "window_door":
+            G.edges[u, v]["door_ids"].append(w.id)
     if c.zone_links_via_excluded:
         _link_via_excluded(G)
     plan.openings = openings
@@ -243,7 +288,11 @@ def _edge_lines(plan: Plan, G: nx.Graph) -> Iterable[str]:
     lines = []
     for u, v, d in G.edges(data=True):
         u, v = sorted((u, v), key=order.__getitem__)
-        extra = {"door": d.get("door_ids"), "via_excluded": d.get("via")}.get(d["kind"])
+        extra = {
+            "door": d.get("door_ids"),
+            "window_door": d.get("door_ids"),
+            "via_excluded": d.get("via"),
+        }.get(d["kind"])
         text = f"{u} {G.nodes[u]['label']} — {v} {G.nodes[v]['label']} · {d['kind']}"
         if extra:
             text += (" via " if d["kind"] == "via_excluded" else " ") + ", ".join(extra)
