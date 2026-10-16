@@ -77,7 +77,7 @@ uv run ruff check . && uv run ruff format --check . && uv run pytest -q
 
 ## Data attribution
 
-Floor plans come from **ResPlan** ([m-agour/ResPlan](https://github.com/m-agour/ResPlan)), data
-licensed **CC BY 4.0** (its `croissant.json` says CC BY-NC-SA 4.0, so we treat it as non-commercial).
-The plans in `tests/fixtures/` are derived from it. `src/hackhive/io.py`'s loader helpers are copied
+Floor plans come from **ResPlan** ([m-agour/ResPlan](https://github.com/m-agour/ResPlan)). Its
+README says CC BY 4.0 and its `croissant.json` says CC BY-NC-SA 4.0; we follow the stricter terms
+(attribution, non-commercial, share-alike). The plans in `tests/fixtures/` are derived from it. `src/hackhive/io.py`'s loader helpers are copied
 from ResPlan's MIT-licensed `resplan_utils.py` and keep its notice.

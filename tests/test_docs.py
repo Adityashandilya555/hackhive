@@ -10,7 +10,7 @@ from typing import get_args
 
 import jsonschema
 
-from hackhive import cli, rings, solve
+from hackhive import checker, cli, graph, io, rings, solve, what_if
 from hackhive.contracts import SCHEMA_DIR, Bounds, Sidecar, Submission
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,3 +75,28 @@ def test_the_readme_list_command_runs(capsys):
     argv = [str(ROOT / a) if a.startswith("tests/") else a for a in shlex.split(line)]
     assert solve.main(argv) == 0
     assert "R01+R02+R05|R03|R04" in capsys.readouterr().out
+
+
+# (module, the text it writes, how docs/output-format.md names it): every sidecar warning line
+WARNINGS = [
+    (io, "{n.clearance_m:.2f} m <", "clearance 0.42 m < 0.5 m"),
+    (solve, "too narrow for a node at the wall clearance (C38)", "too narrow for a node"),
+    (io, 'f"frame: {frame}', "`frame: …`"),
+    (io, "lies {out:.0%} outside inner", "lies NN% outside inner"),
+    (checker, "recomputed {", "`reported … recomputed …`"),
+    (checker, "reported hub_count", "`reported hub_count …`"),
+    (solve, "isn't a safe file name", "isn't a safe file name"),
+    (what_if, "{WHAT_IF}: ", "`WHAT-IF: …`"),
+    (io, "(slide 2: one per room)", "(slide 2: one per room)"),
+    (graph, "near-square door, its sides picked by room contact", "near-square door"),
+    (graph, "no room found on both sides, so it links nothing", "no room found on both sides"),
+    (io, 'f"room > {c.max_area_m2:g} m²"', "`room > 100 m²`"),
+]
+
+
+def test_every_free_text_warning_is_documented():
+    """C43, #102 review: each warning line the sidecar can carry still exists in the source and is
+    documented. A new warning belongs in this list and in the doc's table."""
+    for module, text, doc in WARNINGS:
+        assert text in inspect.getsource(module), (module.__name__, text)
+        assert doc in DOC, doc

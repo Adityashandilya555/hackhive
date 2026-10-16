@@ -379,3 +379,18 @@ def test_the_frame_type_is_defined_once():
     assert typing.get_args(contracts.Frame) == ("identity", "flip_y", "origin_shift")
     assert Plan.model_fields["frame"].annotation is contracts.Frame
     assert Sidecar.model_fields["frame"].annotation == contracts.Frame | None
+
+
+def test_a_node_under_1_mm_off_a_grid_line_keeps_the_ring_closed(tmp_path):
+    """#102 review: N4 0.6 mm off H1's line. Every leg starts where the previous one ended, the
+    ring closes on the hub, and the given node is met within half a rounding step."""
+    raw = _guess()
+    m = load_plan(raw).m_per_unit
+    next(n for n in raw["nodes"] if n["id"] == "N4")["y"] = 9.7506 / m
+    result = _solve_raw(raw, tmp_path)
+    _assert_solved_in_the_nodes_frame(raw, result)
+    for hub in result.submission.hubs:
+        segs = hub.route_segments
+        assert segs[0].polyline[0] == segs[-1].polyline[-1] == (hub.location.x, hub.location.y)
+        for a, b in zip(segs, segs[1:], strict=False):
+            assert a.polyline[-1] == b.polyline[0], (a.from_, a.to)

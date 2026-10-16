@@ -84,6 +84,18 @@ def _assert_rounded_and_axis_aligned(text: str, sub: Submission) -> None:
                 assert ax == bx or ay == by, (h.hub_id, s.from_, s.to, (ax, ay), (bx, by))
 
 
+def test_rounding_keeps_a_sub_mm_jog_and_drops_duplicate_points():
+    """#102 review: only float noise snaps to the previous vertex, so a real 0.9 mm jog never
+    drifts along the run; a jog under half a step rounds away without a duplicate point."""
+    chain = [(0, 0), (0, 1), (0.0009, 1), (0.0009, 2), (0.0018, 2), (0.0018, 3), (0.0027, 3)]
+    assert solve_mod._rounded(chain)[-1] == (0.0027, 3)
+    assert solve_mod._rounded([(1.0, 1.0), (1.00002, 1.0), (1.00002, 2.0)]) == [
+        (1.0, 1.0),
+        (1.0, 2.0),
+    ]
+    assert solve_mod._rounded([(0.1 + 0.2, 0.0), (0.3, 1.0)]) == [(0.3, 0.0), (0.3, 1.0)]
+
+
 @pytest.mark.parametrize("plan_id", ["5924", "13344"])
 def test_the_writer_follows_slide_8(plan_id):
     """C48: assigned_rooms starts with the hub's room, nodes sorted, segments in ring order."""
@@ -555,7 +567,7 @@ def test_solve_submits_enumerate_first_fully_routed(plan_id):
     assert [h.assigned_rooms for h in sub.hubs] == [h.assigned_rooms for h in top.hubs]
     routed = solve_mod.route(top, plan, C)
     assert [[s.polyline for s in h.route_segments] for h in sub.hubs] == [
-        [solve_mod._rounded(s.polyline, C.tolerance_m) for s in r.segments] for r in routed.rings
+        [solve_mod._rounded(s.polyline) for s in r.segments] for r in routed.rings
     ]
     assert check_rules(plan, sub, C) == [] and side.status == "ok"
     assert (side.arrangement.rank, side.arrangement.signature) == (1, top.signature)

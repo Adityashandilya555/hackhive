@@ -36,14 +36,20 @@ Metres, origin lower-left, y up. Unknown keys are rejected (`extra="forbid"`).
 | `reported_metrics.total_length_m` | the sum of every `ring_length_m` |
 
 The organisers recompute every length and metric from the polylines and ignore the reported ones
-(C42). Ours are always recomputed from the written polylines; a mismatch is a sidecar warning.
+(C42). The writer computes ours from the rounded polylines, then reads the file back: a reported value
+that differs from its polyline by more than 1 mm becomes a sidecar warning (`hackhive check` prints
+the same).
 
 ### Rounding (T6)
 
 Every number in the submission is written with **at most 4 decimals** (0.1 mm, inside the checker's
-1 mm tolerance). Along a polyline, a coordinate within 1 mm of the previous vertex's takes that vertex's
-rounded value, so both ends of every segment snap to the same number and each segment stays
-**exactly** horizontal or vertical. Lengths are then recomputed from the rounded points.
+1 mm tolerance). Along a polyline, a coordinate equal (up to float noise) to the previous vertex's
+takes that vertex's rounded value, so both ends of every segment snap to the same number and each
+segment stays **exactly** horizontal or vertical. A real sub-millimetre jog keeps its own value, so
+every written point is within 0.05 mm of the routed one and consecutive segments meet exactly; a
+jog shorter than 0.05 mm rounds onto the previous point and that duplicate point is dropped.
+`length_m` is then recomputed from the rounded points, `ring_length_m` is the sum of the ring's
+written `length_m`, and `total_length_m` the sum of every `ring_length_m`.
 
 ### Example (fixture 5924)
 
@@ -236,7 +242,7 @@ its status.
 
 ### Warnings
 
-Each is a line in `warnings[]`; none of them stops a submission.
+Each is a line in `warnings[]`. Two come with no submission: `room > 100 m²`, because no design exists, and `WHAT-IF: …`. The others never stop one by themselves.
 
 | Warning | When | Submission written? |
 |---|---|---|
@@ -248,7 +254,11 @@ Each is a line in `warnings[]`; none of them stops a submission.
 | `frame: …` | organiser geometry was moved into the given nodes' frame (#38) | yes |
 | `plan_id '…' isn't a safe file name` | files are written under a sanitised name | yes |
 | `… lies NN% outside inner` | an eligible room sticks out of the plan outline by more than 20 % | yes |
-| `reported … recomputed …` | a reported length disagrees with its polyline by more than 1 mm (C42) | yes |
+| `reported … recomputed …`, `reported hub_count …` | a reported length disagrees with its polyline by more than 1 mm, or the hub count with the hubs (C42) | yes |
+| `… (slide 2: one per room)` | an eligible room of an organiser plan has no given node, or more than one | yes, if the design passes |
+| `door_<n>: near-square door, its sides picked by room contact` | a door is about as wide as it is deep, so its two rooms are picked by contact | yes |
+| `door_<n>: no room found on both sides, so it links nothing` | a door has a room on one side only; it joins nothing | yes, if the design passes |
+| `room > 100 m²` | an eligible room alone is over the hub area cap, so no zoning exists | no (`infeasible`) |
 
 ## Metrics and J
 
