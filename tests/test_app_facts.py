@@ -141,7 +141,7 @@ def test_app_graph_toggle_draws_2814():
     at = _pick(_run(), "2814")
     at.sidebar.toggle(key="show_graph").set_value(True)
     _run(at)
-    assert len(at.main.image) == 1
+    assert len(at.main.image) == 2  # Best's design and the Plan tab with its graph
 
 
 # --------------------------------------------------------------------------- reviewer panel
@@ -169,12 +169,23 @@ def test_solutions_are_found_for_5088_only_with_valid_first():
     assert solution_label(paths[0]) == "valid"
 
 
-def test_no_solution_yet_for_a_plan_without_one():
-    assert "no solution yet" in _main_text(_run()).lower()
+@pytest.mark.parametrize("pid", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_best_tab_shows_solves_design_for_every_fixture(pid):
+    """#18 (C26): the Best tab runs solve() (#16) on the picked plan and shows its design, first
+    in the Solution list, with the checker's verdict: never "no solution yet" (#72 is merged)."""
+    at = _pick(_run(), pid)
+    text = _main_text(at)
+    assert "no solution yet" not in text.lower()
+    assert at.sidebar.selectbox(key="solution").index == 0
+    assert "Reviewer checklist" in text and "Per-hub summary" in text
+    assert "valid" in text and "invalid" not in text
+    assert at.main.image, "the design overlay is drawn"
 
 
 def test_5088_checklist_shows_five_ticks_from_the_checker():
     at = _pick(_run(), "5088")
+    at.sidebar.selectbox(key="solution").set_value("valid")  # the hand-made one, after solve()'s
+    _run(at)
     text = _main_text(at)
     assert "Reviewer checklist" in text
     rep = checker.report(_plan("5088"), load_submission(solution_paths("5088")[0]), Constraints())
@@ -347,14 +358,18 @@ def test_an_unknown_edge_kind_is_drawn_and_named_in_the_legend():
 
 
 def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
-    """Follow-up 10: load() keeps the graph, so the picture doesn't build it again."""
+    """Follow-up 10: load() keeps the graph, so the picture doesn't build it again. solve() and
+    the checker build their own on purpose (they trust nothing of the app's), so only the app
+    script's own calls count."""
+    import sys
+
     import hackhive.graph
 
     calls = []
     real = hackhive.graph.build_graph
 
     def counting(*a, **k):
-        calls.append(1)
+        calls.append(sys._getframe(1).f_globals.get("__name__"))
         return real(*a, **k)
 
     monkeypatch.setattr(hackhive.graph, "build_graph", counting)
@@ -365,4 +380,4 @@ def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
     _run(at)
     at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
     _run(at)
-    assert at.main.image and len(calls) == 1
+    assert at.main.image and calls.count("__main__") == 1, calls

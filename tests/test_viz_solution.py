@@ -314,6 +314,8 @@ def _app(pid: str):
 
 def test_best_tab_shows_the_overlay_and_the_per_hub_summary():
     at = _app("5088")
+    at.sidebar.selectbox(key="solution").set_value("valid")  # the hand-made one, after solve()'s
+    at.run()
     assert [t.label for t in at.tabs][:2] == ["Best", "Plan"]
     best = at.tabs[0]
     assert len(best.image) == 1
@@ -333,11 +335,24 @@ def test_best_tab_follows_the_solution_picker():
     assert list(at.tabs[0].dataframe[0].value["Hub"]) == ["H1", "H2"]
 
 
-def test_best_tab_says_no_solution_yet_without_one():
+def test_best_tab_says_why_when_solve_writes_no_design():
+    """C27, C43: 5924 scaled ×4 has a room over 100 m², so solve()'s gate writes no submission;
+    the Best tab says so with the sidecar's status, and the Plan tab still draws the plan."""
+    raw = json.loads((PLANS / "plan-5924.json").read_text(encoding="utf-8"))
+    raw["area"] *= 4
     at = _app("5924")
+    at.sidebar.radio(key="source").set_value("Upload")
+    at.run()
+    at.sidebar.file_uploader(key="upload").set_value(
+        ("big.json", json.dumps(raw).encode(), "application/json")
+    )
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
     best = at.tabs[0]
     assert not best.image and not best.dataframe
-    assert any("no solution yet" in c.value.lower() for c in best.caption)
+    assert any(
+        "no valid design" in w.value.lower() and "infeasible" in w.value for w in best.warning
+    )
     assert len(at.tabs[1].image) == 1  # the Plan tab still draws the plan
 
 
