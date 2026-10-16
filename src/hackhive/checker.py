@@ -2,18 +2,42 @@
 
 Metrics half (#43): H, L, X, O, B, J and the assigned-area gap, recomputed only from the submitted
 polylines at the 1 mm tolerance; reported lengths are never read (C42). Where the slides are
-ambiguous we count strictly (docs/decision_conventions.md §6). The hard rules (#11) go below.
+ambiguous we count strictly (docs/decision_conventions.md §6). Rules half (#11): slide 3's six
+hard rules, slide 5's reviewer checklist, and `python -m hackhive.checker <plan> <submission>`.
 """
 
 from __future__ import annotations
 
+import argparse
 import math
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise
+from pathlib import Path
 
-from hackhive.contracts import Constraints, HubOut
+import networkx as nx
+import shapely
+from pydantic import ValidationError
+from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
+
+from hackhive.contracts import (
+    AREA_EPS_M2,
+    Constraints,
+    HubOut,
+    Node,
+    Plan,
+    Room,
+    Submission,
+    Violation,
+    lower_bound,
+)
+from hackhive.graph import OUTDOOR, build_graph, eligible_graph
+from hackhive.grid import door_gap
+from hackhive.io import get_geometries, load_plan
+from hackhive.zoning import wall_geometry
 
 Point = tuple[float, float]
 _DEFAULT = Constraints()  # frozen, so safe as a shared default
@@ -366,3 +390,579 @@ def metrics(
 
 
 # --------------------------------------------------------------------------- rules (#11)
+
+COVERAGE, CAPACITY, ZONE, RING, FREE_SPACE, HUB_POINT = range(1, 7)  # slide 3's rule numbers
+
+
+@dataclass(frozen=True)
+class _Context:
+    """What the rules read from the plan, built once per `check_rules` call."""
+
+    plan: Plan
+    c: Constraints
+    rooms: dict[str, Room]
+    nodes: dict[str, Node]
+    graph: nx.Graph  # the full room graph (#9), for zones and single-door rooms
+    eligible: nx.Graph  # its eligible view
+    hub_walls: BaseGeometry  # zoning.wall_geometry: what rule 6 measures from
+
+
+@dataclass(frozen=True)
+class _FreeSpace:
+    """Rule 5's geometry: where cable may run, and where it may change rooms."""
+
+    free: BaseGeometry  # inner minus walls, windows and the entrance, plus passages, grown by tol
+    passages: BaseGeometry  # door gaps (as the router's raster has them) and open passages
+    walls: BaseGeometry
+    windows: BaseGeometry
+    entrance: BaseGeometry
+    inner: BaseGeometry
+    room_zones: list[BaseGeometry]  # every room but the outdoor layers, grown by tol
+
+
+def _v(
+    rule: int,
+    message: str,
+    hub_id: str | None = None,
+    where: Iterable[Sequence[float]] = (),
+    ids: Iterable[str] = (),
+    severity: str = "error",
+) -> Violation:
+    return Violation(
+        rule=rule,
+        severity=severity,
+        message=message,
+        ids=list(dict.fromkeys(ids)),
+        hub_id=hub_id,
+        where=[(float(p[0]), float(p[1])) for p in where],
+    )
+
+
+def _rep(room: Room) -> Point:
+    p = room.polygon.representative_point()
+    return (p.x, p.y)
+
+
+def _hub_where(hub: HubOut, ctx: _Context) -> list[Point]:
+    """The hub's location, or its room's representative point if the location isn't finite."""
+    x, y = hub.location.x, hub.location.y
+    if math.isfinite(x) and math.isfinite(y):
+        return [(x, y)]
+    room = ctx.rooms.get(hub.room_id)
+    return [_rep(room)] if room else []
+
+
+def _free_space(plan: Plan, c: Constraints) -> _FreeSpace:
+    """Rule 5's geometry; `build_graph` must have filled `plan.openings` first.
+
+    Cable crosses a wall only inside `grid.door_gap` (the door stretched across the wall band),
+    exactly where the router's raster lets it, so the two agree (#60 review).
+    """
+    gaps = [door_gap(d.polygon, plan.wall_depth_m, c.grid_m) for d in plan.doors]
+    never = unary_union([*plan.windows, *plan.front_doors])
+    walls = unary_union(plan.walls)
+    passages = (
+        unary_union([*gaps, *(o.polygon for o in plan.openings)])
+        .difference(never)
+        .intersection(plan.inner)
+    )
+    free = plan.inner.difference(walls).difference(never).union(passages).buffer(c.tolerance_m)
+    return _FreeSpace(
+        free=free,
+        passages=passages,
+        walls=walls,
+        windows=unary_union(plan.windows),
+        entrance=unary_union(plan.front_doors),
+        inner=plan.inner,
+        room_zones=[r.polygon.buffer(c.tolerance_m) for r in plan.rooms if r.type not in OUTDOOR],
+    )
+
+
+def _rule1_coverage(sub: Submission, ctx: _Context) -> list[Violation]:
+    """Every eligible room and every node in exactly one hub; a node's room in its hub (C1, C9).
+    Hub ids are unique and never a node's id, or `closed_sequence` is ambiguous (#68 review)."""
+    out: list[Violation] = []
+    for hid, k in Counter(h.hub_id for h in sub.hubs).items():
+        where = [p for h in sub.hubs if h.hub_id == hid for p in _hub_where(h, ctx)]
+        if k > 1:
+            out.append(_v(COVERAGE, f"hub id {hid} is used by {k} hubs", hid, where, [hid]))
+        if hid in ctx.nodes:
+            out.append(_v(COVERAGE, f"hub id {hid} is also a node id", hid, where, [hid]))
+    room_hubs: dict[str, list[str]] = {}
+    node_hubs: dict[str, list[str]] = {}
+    for hub in sub.hubs:
+        for rid in hub.assigned_rooms:
+            room_hubs.setdefault(rid, []).append(hub.hub_id)
+        for nid in hub.assigned_nodes:
+            node_hubs.setdefault(nid, []).append(hub.hub_id)
+        for rid in dict.fromkeys(hub.assigned_rooms):
+            room = ctx.rooms.get(rid)
+            if room is None:
+                out.append(
+                    _v(
+                        COVERAGE,
+                        f"{rid} isn't a room of the plan",
+                        hub.hub_id,
+                        _hub_where(hub, ctx),
+                        [rid],
+                    )
+                )
+            elif not room.eligible:
+                msg = f"{rid} ({room.label}) is an excluded {room.type}: it can't be assigned"
+                out.append(_v(COVERAGE, msg, hub.hub_id, [_rep(room)], [rid]))
+        for nid in dict.fromkeys(hub.assigned_nodes):
+            node = ctx.nodes.get(nid)
+            if node is None:
+                out.append(
+                    _v(
+                        COVERAGE,
+                        f"{nid} isn't a node of the plan",
+                        hub.hub_id,
+                        _hub_where(hub, ctx),
+                        [nid],
+                    )
+                )
+            elif node.room_id not in hub.assigned_rooms:
+                msg = f"{nid}'s room {node.room_id} isn't one of {hub.hub_id}'s rooms"
+                out.append(_v(COVERAGE, msg, hub.hub_id, [node.xy], [nid, node.room_id]))
+    for room in (r for r in ctx.plan.rooms if r.eligible):
+        hubs = room_hubs.get(room.id, [])
+        if len(hubs) != 1:
+            what = (
+                "is in no hub" if not hubs else f"is assigned {len(hubs)} times ({', '.join(hubs)})"
+            )
+            out.append(
+                _v(
+                    COVERAGE,
+                    f"{room.id} ({room.label}) {what}",
+                    None,
+                    [_rep(room)],
+                    [room.id, *hubs],
+                )
+            )
+    for node in ctx.plan.nodes:
+        hubs = node_hubs.get(node.id, [])
+        if len(hubs) != 1:
+            what = (
+                "is in no hub" if not hubs else f"is assigned {len(hubs)} times ({', '.join(hubs)})"
+            )
+            out.append(_v(COVERAGE, f"{node.id} {what}", None, [node.xy], [node.id, *hubs]))
+    return out
+
+
+def _rule2_capacity(hub: HubOut, ctx: _Context) -> list[Violation]:
+    """At most `max_area_m2` of assigned eligible area and `max_nodes` nodes per hub (C5, C6)."""
+    c = ctx.c
+    rooms = [ctx.rooms[r] for r in dict.fromkeys(hub.assigned_rooms) if r in ctx.rooms]
+    rooms = [r for r in rooms if r.eligible]
+    area = sum(r.area_m2 for r in rooms)
+    out = []
+    if area - AREA_EPS_M2 > c.max_area_m2:
+        msg = f"{area:.1f} m² of eligible rooms (limit {c.max_area_m2:g} m²)"
+        out.append(_v(CAPACITY, msg, hub.hub_id, _hub_where(hub, ctx), [r.id for r in rooms]))
+    n_nodes = len(set(hub.assigned_nodes))
+    if n_nodes > c.max_nodes:
+        msg = f"{n_nodes} nodes (limit {c.max_nodes})"
+        out.append(
+            _v(CAPACITY, msg, hub.hub_id, _hub_where(hub, ctx), sorted(set(hub.assigned_nodes)))
+        )
+    return out
+
+
+def _rule3_zone(hub: HubOut, ctx: _Context) -> list[Violation]:
+    """The hub's eligible rooms are connected through doors and open passages only (#9's graph:
+    windows, wall-only adjacency and the entrance never link rooms; C8, C34)."""
+    rooms = [r for r in dict.fromkeys(hub.assigned_rooms) if r in ctx.eligible]
+    if len(rooms) < 2:
+        return []
+    zone = ctx.eligible.subgraph(rooms)
+    if nx.is_connected(zone):
+        return []
+    parts = " | ".join(
+        ", ".join(sorted(p)) for p in sorted(map(sorted, nx.connected_components(zone)))
+    )
+    msg = f"zone isn't connected through doors or open passages: {parts}"
+    return [_v(ZONE, msg, hub.hub_id, [_rep(ctx.rooms[r]) for r in rooms], rooms)]
+
+
+def _ring_shape(hub: HubOut, ctx: _Context) -> Violation | None:
+    """One rule-4 error when the ring's shape is broken, else None (then rules 4-6 check it).
+
+    Broken: a non-finite coordinate; `closed_sequence` not [hub, each assigned node once, the same
+    hub] (open, repeated, ending at another hub); segments not following it; a segment with
+    fewer than 2 points."""
+    h, seq = hub.hub_id, hub.closed_sequence
+
+    def broken(msg: str) -> Violation:
+        return _v(RING, msg, h, _hub_where(hub, ctx), [h])
+
+    points = [
+        (hub.location.x, hub.location.y),
+        *(p for s in hub.route_segments for p in s.polyline),
+    ]
+    if not all(math.isfinite(x) and math.isfinite(y) for x, y in points):
+        return broken("non-finite coordinate in the location or a polyline")
+    if len(seq) < 3 or seq[0] != h:
+        return broken(f"closed_sequence must start at {h} and visit its nodes: {seq}")
+    if seq[-1] != h:
+        return broken(f"the ring ends at {seq[-1]}, not at its own hub {h}")
+    middle = seq[1:-1]
+    repeated = sorted(n for n, k in Counter(middle).items() if k > 1)
+    if repeated:
+        return broken(f"{', '.join(repeated)} visited more than once")
+    missing = sorted(set(hub.assigned_nodes) - set(middle))
+    extra = sorted(set(middle) - set(hub.assigned_nodes))
+    if missing or extra:
+        gaps = [f"misses {', '.join(missing)}"] * bool(missing) + [
+            f"visits {', '.join(extra)}"
+        ] * bool(extra)
+        return broken(f"closed_sequence {' and '.join(gaps)}")
+    if [(s.from_, s.to) for s in hub.route_segments] != list(pairwise(seq)):
+        return broken("route_segments don't follow closed_sequence")
+    short = [f"{s.from_}→{s.to}" for s in hub.route_segments if len(s.polyline) < 2]
+    if short:
+        return broken(f"{', '.join(short)} has fewer than 2 points")
+    return None
+
+
+def _rule4_endpoints(hub: HubOut, ctx: _Context) -> list[Violation]:
+    """Each segment starts at its `from` point and ends at its `to` point, within tol: the hub's
+    location or the node's point in the plan (nodes can't move, slide 2)."""
+    tol = ctx.c.tolerance_m
+    out = []
+    for s in hub.route_segments:
+        for pid, pt, verb in ((s.from_, s.polyline[0], "starts"), (s.to, s.polyline[-1], "ends")):
+            if pid == hub.hub_id:
+                target = (hub.location.x, hub.location.y)
+            elif pid in ctx.nodes:
+                target = ctx.nodes[pid].xy
+            else:
+                out.append(_v(RING, f"{pid} isn't a node of the plan", hub.hub_id, [pt], [pid]))
+                continue
+            d = _dist(pt, target)
+            if d > tol:
+                msg = f"{s.from_}→{s.to} {verb} {d * 100:.1f} cm from {pid}"
+                out.append(_v(RING, msg, hub.hub_id, [pt, target], [pid]))
+    return out
+
+
+def _same_line_overlap(
+    p: Point, q: Point, r: Point, s: Point, tol: float
+) -> tuple[Point, Point] | None:
+    """The stretch two axis-aligned pieces share on one line (longer than tol), else None."""
+    for fixed, along in ((1, 0), (0, 1)):  # horizontal pieces (y fixed), then vertical (x fixed)
+        if all(abs(u[fixed] - p[fixed]) <= tol for u in (q, r, s)):
+            lo = max(min(p[along], q[along]), min(r[along], s[along]))
+            hi = min(max(p[along], q[along]), max(r[along], s[along]))
+            if hi - lo > tol:
+                at = p[fixed]
+                return ((lo, at), (hi, at)) if along == 0 else ((at, lo), (at, hi))
+    return None
+
+
+def _shared_stretches(
+    a: Sequence[Point], b: Sequence[Point] | None, tol: float
+) -> list[tuple[Point, Point]]:
+    """Same-line stretches that pieces of a and b share; with b None, a's pieces with each other."""
+    pa = list(pairwise(a))
+    pb = pa if b is None else list(pairwise(b))
+    return [
+        st
+        for i, (p, q) in enumerate(pa)
+        for j, (r, s) in enumerate(pb)
+        if b is not None or j > i
+        if (st := _same_line_overlap(p, q, r, s, tol))
+    ]
+
+
+def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
+    """The single-door rooms (degree 1 in the full graph) this ring must enter, because its hub
+    or one of its nodes is there, each with its one door gap or open passage, grown by tol."""
+    tol = ctx.c.tolerance_m
+    doors = {d.id: d for d in ctx.plan.doors}
+    rooms = {hub.room_id, *(ctx.nodes[n].room_id for n in hub.closed_sequence if n in ctx.nodes)}
+    zones = []
+    for rid in sorted(rooms):
+        if rid not in ctx.graph or ctx.graph.degree(rid) != 1:
+            continue
+        ((_, _, link),) = ctx.graph.edges(rid, data=True)
+        parts = [ctx.rooms[rid].polygon]
+        if link["kind"] == "opening":
+            parts.append(link["region"])
+        for d in link.get("door_ids", []):
+            parts.append(door_gap(doors[d].polygon, ctx.plan.wall_depth_m, ctx.c.grid_m))
+        zones.append(unary_union(parts).buffer(tol))
+    return zones
+
+
+def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
+    """`strict` for a same-line retrace within one ring (#46 Q5). A retrace into a single-door
+    room is legal and scored as O (#43, slide 3 rule 4), so these are exempt: any stretch two
+    legs share around a node in a degree-1 room, and any stretch that touches a single-door room
+    (or its passage) holding the ring's hub or one of its nodes, whichever legs share it (a hub
+    there must leave and re-enter through the same door, #68 review). Overlaps between
+    different rings are cost only."""
+    tol = ctx.c.tolerance_m
+    legs = [clean_polyline(s.polyline, tol) for s in hub.route_segments]
+    labels = [f"{s.from_}→{s.to}" for s in hub.route_segments]
+    seq = hub.closed_sequence
+    dead_ends = _dead_ends(hub, ctx)
+    out = []
+    for i in range(len(legs)):
+        for j in range(i, len(legs)):
+            node = ctx.nodes.get(seq[j]) if j == i + 1 else None
+            if node is not None and ctx.graph.degree(node.room_id) == 1:
+                continue
+            for a, b in _shared_stretches(legs[i], legs[j] if j != i else None, tol):
+                stretch = shapely.LineString([a, b])
+                if any(zone.intersects(stretch) for zone in dead_ends):
+                    continue
+                what = labels[i] if i == j else f"{labels[i]} and {labels[j]}"
+                msg = f"{what} retrace {_dist(a, b):.2f} m of the same line (#46 Q5)"
+                out.append(_v(RING, msg, hub.hub_id, [a, b], [labels[i], labels[j]], "strict"))
+    return out
+
+
+def _rule5_leg(
+    pts: Sequence[Point], space: _FreeSpace, c: Constraints, hub_id: str | None, label: str
+) -> list[Violation]:
+    """Rule 5 on one polyline: horizontal or vertical pieces only, inside free space, and room
+    changes only inside door gaps or open passages (C12-C14)."""
+    tol = c.tolerance_m
+    out = []
+    for p, q in pairwise(pts):
+        if abs(p[0] - q[0]) > tol and abs(p[1] - q[1]) > tol:
+            out.append(_v(FREE_SPACE, f"{label} has a diagonal piece", hub_id, [p, q], [label]))
+    line = shapely.LineString(pts)
+    if not line.within(space.free):
+        outside = line.difference(space.free)
+        crossed = [
+            name
+            for name, geom in (
+                ("a wall", space.walls),
+                ("a window", space.windows),
+                ("the entrance", space.entrance),
+            )
+            if outside.intersects(geom)
+        ]
+        causes = [f"crosses {' and '.join(crossed)}"] if crossed else []
+        if not outside.difference(space.inner).is_empty:
+            causes.append("leaves inner")
+        msg = f"{label} {' and '.join(causes) or 'leaves free space'} ({outside.length:.3f} m outside free space)"
+        out.append(
+            _v(FREE_SPACE, msg, hub_id, map(tuple, shapely.get_coordinates(outside)), [label])
+        )
+    for piece in get_geometries(line.difference(space.passages)):
+        if piece.length <= tol or any(zone.covers(piece) for zone in space.room_zones):
+            continue
+        msg = f"{label} changes room outside a door or open passage"
+        out.append(_v(FREE_SPACE, msg, hub_id, map(tuple, shapely.get_coordinates(piece)), [label]))
+    return out
+
+
+def _rule6_hub_point(hub: HubOut, ctx: _Context) -> list[Violation]:
+    """`error` unless the hub sits in an eligible room it's assigned, at least the hub clearance
+    from wall geometry; `strict` if only its room's edge (a door or open passage) is closer than
+    the clearance (#46 Q3). A hub may share a node's room (C18)."""
+    c, tol = ctx.c, ctx.c.tolerance_m
+    clearance = c.hub_wall_clearance_m
+    loc = (hub.location.x, hub.location.y)
+    p = shapely.Point(loc)
+    room = ctx.rooms.get(hub.room_id)
+
+    def fail(msg: str, severity: str = "error") -> list[Violation]:
+        return [_v(HUB_POINT, msg, hub.hub_id, [loc], [hub.room_id], severity)]
+
+    if room is None:
+        return fail(f"room_id {hub.room_id} isn't a room of the plan")
+    if not room.eligible:
+        return fail(f"{room.id} ({room.label}) is an excluded {room.type}")
+    if hub.room_id not in hub.assigned_rooms:
+        return fail(f"{room.id} isn't one of {hub.hub_id}'s assigned rooms")
+    if not room.polygon.buffer(tol).covers(p):
+        return fail(f"the location isn't inside {room.id} ({room.label})")
+    d_wall = p.distance(ctx.hub_walls)
+    if d_wall < clearance - tol:
+        return fail(
+            f"{d_wall:.3f} m from walls, windows or the outside (clearance {clearance:g} m)"
+        )
+    d_edge = p.distance(room.polygon.exterior)
+    if d_edge < clearance - tol:
+        msg = f"{d_edge:.3f} m from {room.id}'s edge, a door or open passage (clearance {clearance:g} m, #46 Q3)"
+        return fail(msg, "strict")
+    return []
+
+
+def check_rules(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> list[Violation]:
+    """Slide 3's six hard rules on a submission and its plan (C39).
+
+    Never raises: anything that passed validation comes back as violations. Reported lengths
+    (`length_m`, `ring_length_m`, `reported_metrics`) are never read (C42), so wrong or negative
+    ones break nothing. A hub whose ring shape is broken (`_ring_shape`) gets one rule-4 error
+    and skips the rest of rules 4-6 (no cascades); rules 1-3 don't depend on the ring. `error`
+    is a certain slide break; `strict` a conservative reading (#46 Q3, Q5).
+    """
+    graph = build_graph(plan, c)  # also fills plan.openings, which rule 5 needs
+    ctx = _Context(
+        plan=plan,
+        c=c,
+        rooms={r.id: r for r in plan.rooms},
+        nodes={n.id: n for n in plan.nodes},
+        graph=graph,
+        eligible=eligible_graph(graph),
+        hub_walls=wall_geometry(plan),
+    )
+    out = _rule1_coverage(submission, ctx)
+    space: _FreeSpace | None = None
+    for hub in submission.hubs:
+        out += _rule2_capacity(hub, ctx) + _rule3_zone(hub, ctx)
+        if broken := _ring_shape(hub, ctx):
+            out.append(broken)
+            continue
+        space = space or _free_space(plan, c)
+        out += _rule4_endpoints(hub, ctx) + _rule4_retraces(hub, ctx)
+        for s in hub.route_segments:
+            out += _rule5_leg(s.polyline, space, c, hub.hub_id, f"{s.from_}→{s.to}")
+        out += _rule6_hub_point(hub, ctx)
+    return sorted(out, key=lambda v: (v.rule, v.hub_id or "", v.message))
+
+
+# --------------------------------------------------------------------------- checklist and CLI
+
+_CHECKLIST = (
+    ((COVERAGE, RING), "each node once, ring ends at its own hub"),
+    ((CAPACITY,), "≤ {area:g} m² and ≤ {nodes} nodes per hub"),
+    ((ZONE,), "each zone connected through doors and open passages only"),
+    ((FREE_SPACE,), "axis-aligned, no wall or window crossed"),
+)
+# not on slide 5's list, so shown only when rule 6 has a violation: no error hides behind 5 ✓
+_HUB_LINE = ((HUB_POINT,), "each hub in an assigned eligible room, ≥ {clearance:g} m from walls")
+
+
+def _check_line(
+    rules: tuple[int, ...], text: str, violations: Sequence[Violation], c: Constraints
+) -> str:
+    errors = sum(v.rule in rules and v.severity == "error" for v in violations)
+    strict = sum(v.rule in rules and v.severity == "strict" for v in violations)
+    text = text.format(area=c.max_area_m2, nodes=c.max_nodes, clearance=c.hub_wall_clearance_m)
+    return (
+        ("✗ " if errors else "✓ ")
+        + text
+        + (f" (strict: {strict})" if strict and not errors else "")
+    )
+
+
+def checklist(
+    violations: Sequence[Violation],
+    metrics: Metrics | None,
+    lower_bound: int,
+    area_m2: float,
+    n_nodes: int,
+    c: Constraints = _DEFAULT,
+) -> list[str]:
+    """Slide 5's "What a reviewer confirms": 5 lines, each starting ✓ or ✗ (C26).
+
+    A line is ✗ only for an `error` among its rules; with only `strict` ones it stays ✓ and says
+    how many. Line 5 compares H with the lower bound (a ranking fact, not a violation);
+    `metrics` is None when they couldn't be computed. Rule 6 isn't on slide 5's list, so a sixth
+    line appears only when it has a violation (#68 review): no error hides behind 5 ✓.
+    """
+    out = [_check_line(rules, text, violations, c) for rules, text in _CHECKLIST]
+    facts = f"({area_m2:.1f} m², {n_nodes} nodes)"
+    if metrics is None:
+        out.append(f"✗ hubs vs lower bound {lower_bound} {facts}: not computed")
+    else:
+        h = metrics.H
+        op = "=" if h == lower_bound else (">" if h > lower_bound else "<")
+        tick = "✓" if h == lower_bound else "✗"
+        out.append(f"{tick} {h} hub{'' if h == 1 else 's'} {op} lower bound {lower_bound} {facts}")
+    rules, text = _HUB_LINE
+    if any(v.rule in rules for v in violations):
+        out.append(_check_line(rules, text, violations, c))
+    return out
+
+
+def verdict(violations: Sequence[Violation]) -> str:
+    """`invalid` on any error, `valid (strict only)` with only strict ones (#16's
+    `submitted_strict_only`), else `valid`."""
+    if any(v.severity == "error" for v in violations):
+        return "invalid"
+    return "valid (strict only)" if violations else "valid"
+
+
+@dataclass(frozen=True)
+class Report:
+    """Everything a reviewer sees: what the CLI prints and the app's panel renders (#12)."""
+
+    violations: list[Violation]
+    metrics: Metrics | None  # None when a coordinate isn't finite (rule 4 reports it)
+    lower_bound: int
+    lines: list[str]  # `checklist`
+    verdict: str
+
+
+def report(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> Report:
+    """The rules, the metrics, the checklist and the verdict for one submission."""
+    violations = check_rules(plan, submission, c)
+    rooms = {r.id: r for r in plan.rooms}
+    hub_areas = {
+        h.hub_id: sum(
+            rooms[r].area_m2 for r in set(h.assigned_rooms) if r in rooms and rooms[r].eligible
+        )
+        for h in submission.hubs
+    }
+    try:
+        m = metrics(submission.hubs, c, hub_areas=hub_areas)
+    except ValueError:  # a non-finite coordinate: rule 4 reports it
+        m = None
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    lb = lower_bound(area, len(plan.nodes), c)
+    return Report(
+        violations=violations,
+        metrics=m,
+        lower_bound=lb,
+        lines=checklist(violations, m, lb, area, len(plan.nodes), c),
+        verdict=verdict(violations),
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    """`python -m hackhive.checker <plan.json> <submission.json>`: the checklist, every violation
+    and the verdict. Exit 0 if valid (strict-only too), 1 if invalid, 2 if an input can't be read."""
+    for stream in (sys.stdout, sys.stderr):  # "✓", "✗", "²" and "·" would break cp1252 on Windows
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    p = argparse.ArgumentParser(
+        prog="python -m hackhive.checker", description="Check a submission."
+    )
+    p.add_argument("plan", type=Path, help="the plan JSON file")
+    p.add_argument("submission", type=Path, help="the slide-8 submission JSON file")
+    args = p.parse_args(argv)
+    c = _DEFAULT
+    try:
+        plan = load_plan(args.plan, c)
+        sub = Submission.model_validate_json(args.submission.read_text(encoding="utf-8"))
+    except (OSError, ValueError, ValidationError) as e:
+        print(f"{type(e).__name__}: {str(e).splitlines()[0] if str(e) else ''}", file=sys.stderr)
+        return 2
+    if sub.plan_id != plan.plan_id:
+        print(
+            f"warning: the submission is for {sub.plan_id}, the plan is {plan.plan_id}",
+            file=sys.stderr,
+        )
+    r = report(plan, sub, c)
+    for line in r.lines:
+        print(line)
+    m = r.metrics
+    if m is None:
+        print("metrics: not computed (non-finite coordinates)")
+    else:
+        print(f"metrics: H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}")
+    for v in r.violations:
+        print(f"rule {v.rule} [{v.severity}] {v.hub_id or 'plan'}: {v.message}")
+    print(r.verdict)
+    return 1 if r.verdict == "invalid" else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
