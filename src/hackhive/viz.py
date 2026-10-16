@@ -540,6 +540,11 @@ _ORDER_R = 9  # px: half the side of a number's circle, for the overlap test
 _MARK_R = 7  # px: half the side of a ✗ violation marker's box
 
 
+def segment_count(solution: Submission) -> int:
+    """How many steps `draw_solution`'s step-through has: every ring's segments (#25)."""
+    return sum(len(h.route_segments) for h in solution.hubs)
+
+
 def draw_solution(
     plan: Plan,
     solution: Submission,
@@ -559,7 +564,10 @@ def draw_solution(
       and a hub-point violation turns that hub's square red;
     - a "How to read" legend with only what is drawn.
 
-    `step` draws only the first `step` legs of each ring (#25's step-through).
+    `step` (#25's step-through) counts segments across every ring, in hub order then visit
+    order: step 0 shows only the hubs, nodes and zones; each step adds one segment and
+    highlights it (labelled "↩ back to H1" when it closes a ring); step N, or None, is the full
+    overlay. Violations belong to the whole design, so they appear only at the full step.
     """
     fig = draw_layers(plan, ax)
     ax = fig.axes[0] if ax is None else ax
@@ -567,6 +575,12 @@ def draw_solution(
     rooms = {r.id: r for r in plan.rooms}
     hubs = list(solution.hubs)
     colour = {h.hub_id: _zone_style(i) for i, h in enumerate(hubs)}
+    order = [(h.hub_id, j, s) for h in hubs for j, s in enumerate(h.route_segments, start=1)]
+    full = step is None or step >= len(order)
+    shown = order if full else order[: max(step, 0)]
+    newest = None if full or not shown else shown[-1]
+    if not full:  # a violation is about the whole design: none until every segment is drawn
+        violations = ()
 
     # zones
     for h in hubs:
@@ -587,12 +601,23 @@ def draw_solution(
 
     # legs, and the same-line stretches they share
     legs: list[tuple[str, int, list[tuple[float, float]]]] = []
-    for h in hubs:
-        segments = h.route_segments if step is None else h.route_segments[: max(step, 0)]
-        for j, s in enumerate(segments, start=1):
-            pts = checker.clean_polyline(s.polyline)
-            if len(pts) >= 2:
-                legs.append((h.hub_id, j, pts))
+    for hub_id, j, s in shown:
+        pts = checker.clean_polyline(s.polyline)
+        if len(pts) >= 2:
+            legs.append((hub_id, j, pts))
+    if newest is not None:  # the step's new segment: a wide halo under it, same coordinates
+        hub_id, j, seg = newest
+        pts = checker.clean_polyline(seg.polyline)
+        ax.plot(
+            [p[0] for p in pts],
+            [p[1] for p in pts],
+            color=colour[hub_id][0],
+            lw=RING_LW * 4,
+            alpha=0.3,
+            solid_capstyle="round",
+            zorder=4.8,
+            gid=f"current:{hub_id}:{j}",
+        )
     stretches = checker.overlap_stretches([p for _, _, p in legs], [o for o, _, _ in legs])
     tol = checker.TOL
     cut = unary_union([LineString(st.ends).buffer(tol, cap_style="flat") for st in stretches])
@@ -678,6 +703,28 @@ def draw_solution(
             bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.9},
         )
 
+    # the step closed a ring: say so at its hub
+    if newest is not None and newest[2].to == newest[0]:
+        h = next(h for h in hubs if h.hub_id == newest[0])
+        _place_label(
+            ax,
+            (h.location.x, h.location.y),
+            f"↩ back to {h.hub_id}",
+            taken,
+            renderer,
+            fontsize=_LABEL_PT,
+            fontweight="bold",
+            color=INK,
+            zorder=9,
+            gid=f"return-label:{h.hub_id}",
+            bbox={
+                "boxstyle": "round,pad=0.2",
+                "fc": SURFACE,
+                "ec": colour[h.hub_id][0],
+                "lw": 1.2,
+            },
+        )
+
     # violations, at their `where`, before the numbers so the numbers move clear of them
     labelled: dict[tuple[float, float], list[Violation]] = {}
     for i, v in enumerate(violations):
@@ -760,18 +807,25 @@ def draw_solution(
         ),
         Line2D([], [], marker="s", ms=8, mfc=first, mec=INK, ls="none", label="hub H1…"),
         Line2D([], [], marker="o", ms=5, mfc=INK, mec=SURFACE, ls="none", label="node N1…"),
-        Line2D([], [], color=first, lw=RING_LW, label="ring, in its zone's colour"),
-        Line2D(
-            [],
-            [],
-            marker="o",
-            ms=8,
-            mfc=SURFACE,
-            mec=first,
-            ls="none",
-            label="visit order (last = the return leg)",
-        ),
     ]
+    if legs:
+        handles += [
+            Line2D([], [], color=first, lw=RING_LW, label="ring, in its zone's colour"),
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ms=8,
+                mfc=SURFACE,
+                mec=first,
+                ls="none",
+                label="visit order (last = the return leg)",
+            ),
+        ]
+    if newest is not None:
+        handles.append(
+            Line2D([], [], color=first, lw=RING_LW * 4, alpha=0.3, label="this step's segment")
+        )
     if stretches:
         handles.append(
             Line2D([], [], color=INK, lw=RING_LW, ls="--", label="same line, ×k legs (overlap)")

@@ -223,6 +223,112 @@ def test_step_draws_only_the_first_legs(plan_5088):
     assert marks == [1, 2]
 
 
+# --------------------------------------------------------------------------- #25 step-through
+
+
+def _n_segments(sub) -> int:
+    return sum(len(h.route_segments) for h in sub.hubs)
+
+
+@pytest.mark.parametrize("name", ["5088-valid", "5088-two-hubs-valid", "5088-hub-0.3m-from-wall"])
+def test_step_zero_draws_only_hubs_and_nodes(plan_5088, name):
+    """#25: step 0 is the empty board: hubs, nodes (and the zone tints that say which is
+    whose), no cable, no numbers, no ×k, no violation marks yet."""
+    _, ax, sub = _draw(plan_5088, name, step=0)
+    for prefix in ("ring:", "overlap:", "order:", "violation:", "current:"):
+        assert not _gids(ax, prefix), prefix
+    assert len(_gids(ax, "hub:")) == len(sub.hubs)
+    assert len(_gids(ax, "node:")) == len(plan_5088.nodes)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "5088-valid",
+        "5088-two-hubs-valid",
+        "5088-retrace-single-door",
+        "5088-hub-0.3m-from-wall",
+    ],
+)
+def test_step_n_equals_the_full_overlay(plan_5088, name):
+    """#25: the last step is the full overlay, pixel for pixel (violations included)."""
+    sub = _sub(name)
+    violations = checker.check_rules(plan_5088, sub, C)
+    full = to_png(draw_solution(plan_5088, sub, violations=violations))
+    last = to_png(draw_solution(plan_5088, sub, violations=violations, step=_n_segments(sub)))
+    assert last == full
+
+
+def test_step_counts_segments_across_rings_in_hub_order(plan_5088):
+    """#25: one slider over every segment: H1's ring first, then H2's."""
+    sub = _sub("5088-two-hubs-valid")
+    k1 = len(sub.hubs[0].route_segments)
+    _, ax, _ = _draw(plan_5088, "5088-two-hubs-valid", step=k1 + 1)
+    assert len(_gids(ax, "order:H1:")) == k1
+    assert [t.get_gid() for t in _gids(ax, "order:H2:")] == ["order:H2:1"]
+
+
+def test_the_newest_leg_is_highlighted(plan_5088):
+    _, ax, sub = _draw(plan_5088, "5088-valid", step=2)
+    (current,) = _gids(ax, "current:")
+    assert current.get_gid() == "current:H1:2"
+    seg = sub.hubs[0].route_segments[1]
+    pts = list(zip(current.get_xdata(), current.get_ydata(), strict=True))
+    assert pts[0] == pytest.approx(tuple(seg.polyline[0])) and pts[-1] == pytest.approx(
+        tuple(seg.polyline[-1])
+    )
+
+
+def test_the_last_step_of_each_ring_returns_to_its_own_hub(plan_5088):
+    """#25 (C10): at the step that closes a ring, the newest leg ends at that ring's own hub and
+    is labelled as the return; at the final step the overlay is complete."""
+    sub = _sub("5088-two-hubs-valid")
+    total = _n_segments(sub)
+    done = 0
+    for h in sub.hubs:
+        done += len(h.route_segments)
+        last = h.route_segments[-1]
+        assert last.to == h.hub_id
+        assert tuple(last.polyline[-1]) == pytest.approx((h.location.x, h.location.y))
+        if done == total:  # the final step is the plain full overlay
+            continue
+        _, ax, _ = _draw(plan_5088, "5088-two-hubs-valid", step=done)
+        (current,) = _gids(ax, "current:")
+        assert current.get_gid() == f"current:{h.hub_id}:{len(h.route_segments)}"
+        end = (current.get_xdata()[-1], current.get_ydata()[-1])
+        assert end == pytest.approx((h.location.x, h.location.y))
+        labels = [t.get_text() for t in _gids(ax, "return-label:")]
+        assert labels == [f"↩ back to {h.hub_id}"]
+
+
+def test_step_captions():
+    from hackhive.ui import step_caption
+
+    sub = _sub("5088-two-hubs-valid")
+    total = _n_segments(sub)
+    k1 = len(sub.hubs[0].route_segments)
+    assert step_caption(sub, 0) == f"Step 0 of {total} · hubs and nodes only"
+    first = sub.hubs[0].route_segments[0]
+    assert step_caption(sub, 1) == f"Step 1 of {total} · H1: {first.from_} → {first.to}"
+    back = sub.hubs[0].route_segments[-1]
+    assert step_caption(sub, k1) == (
+        f"Step {k1} of {total} · H1: {back.from_} → {back.to}, back to its hub"
+    )
+    assert step_caption(sub, total) == f"Step {total} of {total} · the full design"
+
+
+def test_step_caption_with_no_segments():
+    """#88 review: a design with no cable says so, never "Step 0 of 0 · the full design"."""
+    from hackhive.ui import step_caption
+
+    sub = _sub("5088-two-hubs-valid")
+    empty = sub.model_copy(
+        update={"hubs": [h.model_copy(update={"route_segments": []}) for h in sub.hubs]}
+    )
+    for step in (0, 1):  # the disabled slider sits at 1 (its max) when there is nothing to step
+        assert step_caption(empty, step) == "No cable to step through"
+
+
 def test_png_and_no_pyplot(plan_5088):
     import matplotlib.pyplot as plt
 
@@ -326,6 +432,23 @@ def test_best_tab_shows_the_overlay_and_the_per_hub_summary():
     assert df.loc[0, "Nodes"] == 3 and df.loc[0, "Bends"] == 12
     assert df.loc[0, "L (m)"] == pytest.approx(24.331, abs=1e-3)
     assert any("Reviewer checklist" in h.value for h in best.subheader)
+
+
+def test_best_tab_step_slider_walks_the_rings():
+    """#25: a slider under the overlay, from 0 (hubs and nodes) to every segment (the full
+    design, its default)."""
+    at = _app("5088")
+    best = at.tabs[0]
+    slider = best.slider(key="step")
+    total = int(slider.max)  # AppTest reports a slider's bounds as floats
+    assert slider.min == 0 and slider.value == total >= 1
+    assert any(f"Step {total} of {total} · the full design" in c.value for c in best.caption)
+    slider.set_value(0)
+    at.run()
+    assert not at.exception
+    best = at.tabs[0]
+    assert len(best.image) == 1
+    assert any(f"Step 0 of {total} · hubs and nodes only" in c.value for c in best.caption)
 
 
 def test_best_tab_follows_the_solution_picker():
