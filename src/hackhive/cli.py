@@ -1,5 +1,5 @@
-"""The `hackhive` command (#16): `solve` a plan through the submit gate, `check` a submission.
-`batch` arrives with #32."""
+"""The `hackhive` command (#16): `solve` a plan through the submit gate, `check` a submission,
+`batch` a split into a CSV report (#32)."""
 
 from __future__ import annotations
 
@@ -118,6 +118,22 @@ def _check(args: argparse.Namespace) -> int:
     return STRICT_EXIT if r.violations and args.fail_on_strict else 0
 
 
+def _batch(args: argparse.Namespace) -> int:
+    from hackhive.batch import default_source, run, summary
+
+    source = args.plans or default_source()
+    if source is None or not source.exists():
+        print(
+            f"no plans: {args.plans or 'data/sample/test-100.jsonl.gz or data/resplan/plans.jsonl'}",
+            file=sys.stderr,
+        )
+        return 3
+    rows = run(source, args.split, args.n, args.out, Constraints())
+    print(summary(rows))
+    print(f"wrote {args.out}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """`hackhive solve <plan.json> --out <dir>` and `hackhive check <plan.json> <submission.json>`.
 
@@ -156,6 +172,14 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-strict", action="store_true", help="exit 4 when only strict violations exist"
     )
     k.set_defaults(run=_check)
+    b = sub.add_parser("batch", help="solve a split with the preset and write a CSV report")
+    b.add_argument("--split", default="test", help="split.json key (default test)")
+    b.add_argument("--n", type=int, default=100, help="at most this many plans (default 100)")
+    b.add_argument("--out", type=Path, required=True, help="the CSV file; designs go beside it")
+    b.add_argument(
+        "--plans", type=Path, help="a .jsonl(.gz) of plans or a directory of plan JSON files"
+    )
+    b.set_defaults(run=_batch)
     args = p.parse_args(argv)
     return args.run(args)
 
