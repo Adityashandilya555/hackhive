@@ -227,6 +227,22 @@ def test_cache_is_built_once_per_plan_grid_and_weights(monkeypatch):
     assert len(calls) >= 3 * len(nodes)
 
 
+def test_a_build_keeps_4_bytes_per_searched_state():
+    """After the build, a source keeps int32 parents only (no float dist arrays), so a batch
+    holding `CACHE_BUILDS_KEPT` builds stays small; paths still come out the same."""
+    grid = _grid("576")
+    plan = load_plan(FIXTURES / "plans" / "plan-576.json")
+    nodes, _ = plan_points(grid, plan, C)
+    pc = PathCache.build(grid, nodes, C)
+    assert pc.nbytes <= len(nodes) * grid.labels.size * 4 * 4
+    a, b = "N1", "N3"
+    cells = pc.path(a, b).cells
+    direct = search(grid.labels, grid.door_rooms, [nodes[a]], _w(grid)).cost(nodes[b])
+    assert cells[0] == nodes[a] and cells[-1] == nodes[b]
+    assert path_length(cells) + _w(grid) * bends(cells) == pytest.approx(direct)
+    assert route.CACHE_BUILDS_KEPT <= 8
+
+
 # --------------------------------------------------------------------------- benchmark (C22)
 
 

@@ -161,14 +161,19 @@ def path_to(result: SearchResult, target: Cell) -> list[Cell]:
     h = int(np.argmin(states))
     if math.isinf(states[h]):
         return []
-    cols = result.dist.shape[1]
+    return _trace(result.parent, target, h)
+
+
+def _trace(parent: np.ndarray, target: Cell, h: int) -> list[Cell]:
+    """Corner points from the source to ``target``, arriving with heading ``h``."""
+    cols = parent.shape[1]
     cells = [target]
-    state = int(result.parent[target][h])
+    state = int(parent[target][h])
     while state >= 0:
         cell_index, _ = divmod(state, 4)
         r, c = divmod(cell_index, cols)
         cells.append((r, c))
-        state = int(result.parent[r, c, state % 4])
+        state = int(parent[r, c, state % 4])
     cells.reverse()
     return simplify(cells)
 
@@ -219,7 +224,7 @@ def _heading(a: Cell, b: Cell) -> Cell:
 # --------------------------------------------------------------------------- path cache (#19)
 
 ROI_MARGIN_ROOMS = 1  # rooms added around the door-graph shortest paths (#19)
-CACHE_BUILDS_KEPT = 16  # PathCache.cached keeps this many builds (plans × settings)
+CACHE_BUILDS_KEPT = 8  # PathCache.cached keeps this many builds (plans × settings)
 _EPS = 1e-9
 
 
@@ -244,6 +249,16 @@ class CacheStats:
 class _Searched:
     result: SearchResult
     offset: Cell  # (row, col) of result's [0, 0] in the full raster
+
+
+@dataclass(frozen=True)
+class _Kept:
+    """What a source keeps after the build: parents only (int32, a quarter of the search's
+    dist + parent arrays), and each point's cheapest arrival heading."""
+
+    parent: np.ndarray  # (rows, cols, 4) int32, the crop's flat state index, −1 at the source
+    offset: Cell
+    heading: dict[Hashable, int]  # per point; −1 where unreachable
 
 
 def _rooms_of(label: int, door_rooms: Mapping[int, tuple[int, int]]) -> tuple[int, ...]:
@@ -307,7 +322,7 @@ class PathCache:
     def __init__(
         self,
         points: dict[Hashable, Cell],
-        searched: dict[Hashable, _Searched],
+        searched: dict[Hashable, _Kept],
         dist: dict[Hashable, dict[Hashable, float]],
         to_xy: Callable[[Cell], Point2],
         metres_per_cell: float,
@@ -394,7 +409,7 @@ class PathCache:
         cells = np.array(list(points.values()), dtype=np.int64).reshape(-1, 2)
         point_rooms = {k: _rooms_of(int(labels[cell]), door_rooms) for k, cell in points.items()}
         stats = CacheStats(free_cells=int((labels != BLOCKED).sum()))
-        searched: dict[Hashable, _Searched] = {}
+        searched: dict[Hashable, _Kept] = {}
         dist: dict[Hashable, dict[Hashable, float]] = {}
         for s in sources:
             s_cell = points[s]
@@ -414,8 +429,9 @@ class PathCache:
                 run = (_Searched(res, (0, 0)), None, stats.free_cells)
                 stats.roi_cells.setdefault(s, stats.free_cells)
             stats.searches += 1
-            searched[s] = run[0]
-            dist[s] = cls._costs(run[0], list(points), cells)
+            dist[s], heading = cls._costs(run[0], list(points), cells)
+            found = run[0]
+            searched[s] = _Kept(found.result.parent.astype(np.int32), found.offset, heading)
         stats.ms = (time.perf_counter() - t0) * 1000
         return cls(points, searched, dist, to_xy, metres_per_cell, stats)
 
@@ -483,15 +499,24 @@ class PathCache:
         return True
 
     @staticmethod
-    def _costs(found: _Searched, keys: Sequence[Hashable], cells: np.ndarray) -> dict:
-        """Every point's cheapest arrival cost (inf outside the searched crop)."""
+    def _costs(
+        found: _Searched, keys: Sequence[Hashable], cells: np.ndarray
+    ) -> tuple[dict[Hashable, float], dict[Hashable, int]]:
+        """Every point's cheapest arrival cost and heading (inf / −1 where unreachable)."""
         res, (r0, c0) = found.result, found.offset
         rows, cols, _ = res.dist.shape
         r, c = cells[:, 0] - r0, cells[:, 1] - c0
         inside = (r >= 0) & (r < rows) & (c >= 0) & (c < cols)
         cost = np.full(len(keys), math.inf)
-        cost[inside] = res.dist[r[inside], c[inside]].min(axis=1)
-        return dict(zip(keys, cost.tolist(), strict=True))
+        heading = np.full(len(keys), -1, dtype=np.int64)
+        states = res.dist[r[inside], c[inside]]
+        cost[inside] = states.min(axis=1)
+        heading[inside] = states.argmin(axis=1)
+        heading[np.isinf(cost)] = -1
+        return (
+            dict(zip(keys, cost.tolist(), strict=True)),
+            dict(zip(keys, heading.tolist(), strict=True)),
+        )
 
     # ----------------------------------------------------------------------- reuse (C29)
 
@@ -540,6 +565,11 @@ class PathCache:
             return self._dist[b][a]
         raise KeyError(f"neither {a!r} nor {b!r} is a searched source")
 
+    @property
+    def nbytes(self) -> int:
+        """Bytes of search state kept for lazy polylines (int32 parents per source)."""
+        return sum(k.parent.nbytes for k in self._searched.values())
+
     def cost_m(self, a: Hashable, b: Hashable) -> float:
         """``dist`` in J metres: length weight · cell size · cells (bends at the ends excluded)."""
         return self.dist(a, b) * self._metres_per_cell
@@ -550,9 +580,9 @@ class PathCache:
             return self._paths[a, b]
         d = self.dist(a, b)
         if a in self._searched:
-            found = self._searched[a]
-            (r0, c0), (r, c) = found.offset, self.points[b]
-            local = path_to(found.result, (r - r0, c - c0)) if not math.isinf(d) else []
+            kept = self._searched[a]
+            (r0, c0), (r, c), h = kept.offset, self.points[b], kept.heading[b]
+            local = _trace(kept.parent, (r - r0, c - c0), h) if h >= 0 else []
             cells = [(lr + r0, lc + c0) for lr, lc in local]
         else:
             cells = self.path(b, a).cells[::-1]
