@@ -937,10 +937,35 @@ def _route_ring(
     free: shapely.Geometry | None,
     occupancy: Occupancy | None,
 ) -> tuple[list[RouteSegment], list[list[Cell]]]:
-    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed)."""
+    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed).
+
+    Where the ring may come back out the way it went in (`_both_layouts`), pass 0 (no
+    `occupancy`) routes it twice: (a) every leg on its own shortest path, so legs may share a
+    line (a retrace, scored as O), and (b) with a fresh `Occupancy` of its own legs, so a leg
+    takes a parallel line a cell away when J's overlap costs more than its bends. The lower J
+    wins; (a) on a tie (decision_conventions §5, #81)."""
     prep = _prepare(grid, stops, c, occupancy)
-    n = len(prep.stops)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
+    j, best = _best_corners(prep, options)
+    if occupancy is None and _both_layouts(stops, retrace_ok):
+        lanes = _prepare(grid, stops, c, Occupancy())
+        lanes_j, lanes_best = _best_corners(lanes, options)
+        if lanes_j < j - _EPS:
+            prep, best = lanes, lanes_best
+    return _segments(prep, best), prep.cells
+
+
+def _both_layouts(stops: Sequence[Stop], retrace_ok: Collection[str]) -> bool:
+    """A one-node ring, or a ring with a node in a single-door room: both may retrace or run
+    parallel, so `_route_ring` tries both (#81)."""
+    return len(stops) == 2 or any(s.id in retrace_ok for s in stops)
+
+
+def _best_corners(
+    prep: _Prepared, options: Sequence[list[tuple[int | None, int | None]]]
+) -> tuple[float, list[tuple[int | None, int | None]]]:
+    """The stub corner choice with the lowest ring J, and that J."""
+    n = len(prep.stops)
     cache: dict[tuple[int, int | None, int | None], list[Point2]] = {}
 
     def legs(choice: Sequence[tuple[int | None, int | None]]) -> list[list[Point2]]:
@@ -961,7 +986,7 @@ def _route_ring(
         best = [o[0] for o in options]
         for i, opts in enumerate(options):
             best = min(([*best[:i], o, *best[i + 1 :]] for o in opts), key=score)
-    return _segments(prep, best), prep.cells
+    return score(best), best
 
 
 def single_door_nodes(plan: Plan, c: Constraints = _DEFAULT) -> frozenset[str]:
