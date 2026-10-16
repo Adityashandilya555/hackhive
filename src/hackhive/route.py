@@ -14,12 +14,18 @@ must be in cells too: use ``bend_weight_cells(c)``, never the raw J weight.
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import heapq
 import itertools
 import math
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
+import sys
+import time
+from collections import OrderedDict
+from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import TYPE_CHECKING, ClassVar
 
 import numpy as np
 import shapely
@@ -28,13 +34,14 @@ from hackhive.contracts import Constraints, HubOut, Location, Plan, RouteSegment
 
 if TYPE_CHECKING:  # grid imports this module, so these are for type hints only
     from hackhive.grid import LabelGrid
-    from hackhive.rings import Hub
+    from hackhive.rings import Candidate, Hub
 
 Cell = tuple[int, int]
 Point2 = tuple[float, float]
 _DEFAULT = Constraints()  # frozen, so safe as a shared default
 
 BLOCKED = -1
+CELL_CENTRE = 0.5  # not-a-weight: a cell centre is half a cell in (rings.CELL_CENTRE_OFFSET)
 # headings: north, east, south, west, as (d_row, d_col)
 DIRS: tuple[Cell, ...] = ((-1, 0), (0, 1), (1, 0), (0, -1))
 
@@ -46,6 +53,7 @@ class SearchResult:
     dist: np.ndarray  # (rows, cols, 4) float64, inf where unreached
     parent: np.ndarray  # (rows, cols, 4) int64 flat state index, −1 at a source
     w_bend: float
+    settled: float = math.inf  # every state below this is final (inf: the search ran out)
 
     def cost(self, target: Cell) -> float:
         """Least cost (steps + w_bend · bends) to reach ``target``; inf if unreachable.
@@ -91,11 +99,16 @@ def search(
     door_rooms: Mapping[int, tuple[int, int]],
     sources: Iterable[Cell],
     w_bend: float,
+    targets: Iterable[Cell] | None = None,
 ) -> SearchResult:
     """Dijkstra over (cell, heading): a straight step costs 1, a 90° turn 1 + ``w_bend``.
 
     180° turns are forbidden. Every source is seeded with all four headings at cost 0,
     so the first step never pays a bend. ``w_bend`` is in cells (``bend_weight_cells``).
+
+    With ``targets``, the search stops once every target's cheapest state is final (#19):
+    ``cost`` and ``path_to`` stay exact for them, other states are final only below
+    ``SearchResult.settled``.
     """
     if w_bend < 0:
         raise ValueError(f"w_bend must be >= 0, got {w_bend}")
@@ -114,11 +127,16 @@ def search(
             dist[r, c, h] = 0.0
             heap.append((0.0, r, c, h))
     heapq.heapify(heap)
+    waiting = None if targets is None else {(int(r), int(c)) for r, c in targets}
 
     while heap:
         d, r, c, h = heapq.heappop(heap)
         if d > dist[r, c, h]:
             continue
+        if waiting is not None:
+            waiting.discard((r, c))  # its first pop is its cheapest heading
+            if not waiting:
+                return SearchResult(dist, parent, float(w_bend), d)
         here = grid[r][c]
         for nh, (dr, dc) in enumerate(DIRS):
             if nh == (h + 2) % 4:
@@ -143,14 +161,19 @@ def path_to(result: SearchResult, target: Cell) -> list[Cell]:
     h = int(np.argmin(states))
     if math.isinf(states[h]):
         return []
-    cols = result.dist.shape[1]
+    return _trace(result.parent, target, h)
+
+
+def _trace(parent: np.ndarray, target: Cell, h: int) -> list[Cell]:
+    """Corner points from the source to ``target``, arriving with heading ``h``."""
+    cols = parent.shape[1]
     cells = [target]
-    state = int(result.parent[target][h])
+    state = int(parent[target][h])
     while state >= 0:
         cell_index, _ = divmod(state, 4)
         r, c = divmod(cell_index, cols)
         cells.append((r, c))
-        state = int(result.parent[r, c, state % 4])
+        state = int(parent[r, c, state % 4])
     cells.reverse()
     return simplify(cells)
 
@@ -196,6 +219,400 @@ def bends(path: list[Cell]) -> int:
 
 def _heading(a: Cell, b: Cell) -> Cell:
     return ((b[0] > a[0]) - (b[0] < a[0]), (b[1] > a[1]) - (b[1] < a[1]))
+
+
+# --------------------------------------------------------------------------- path cache (#19)
+
+ROI_MARGIN_ROOMS = 1  # rooms added around the door-graph shortest paths (#19)
+CACHE_BUILDS_KEPT = 8  # PathCache.cached keeps this many builds (plans × settings)
+_EPS = 1e-9
+
+
+@dataclass(frozen=True)
+class CachedPath:
+    dist: float  # cells: steps + w_bend · bends, the cheapest arrival (SearchResult.cost)
+    cells: list[Cell]  # corner cells, source → target; [] if unreachable
+    polyline: list[Point2]  # the corner cells' centres in metres
+
+
+@dataclass
+class CacheStats:
+    searches: int = 0  # one per source
+    fallbacks: int = 0  # sources searched again on the whole raster (the ROI wasn't provably exact)
+    roi_rooms: dict[Hashable, frozenset[int]] = field(default_factory=dict)  # per source
+    roi_cells: dict[Hashable, int] = field(default_factory=dict)  # free cells in each ROI
+    free_cells: int = 0  # free cells in the whole raster
+    ms: float = 0.0  # build time
+
+
+@dataclass(frozen=True)
+class _Searched:
+    result: SearchResult
+    offset: Cell  # (row, col) of result's [0, 0] in the full raster
+
+
+@dataclass(frozen=True)
+class _Kept:
+    """What a source keeps after the build: parents only (int32, a quarter of the search's
+    dist + parent arrays), and each point's cheapest arrival heading."""
+
+    parent: np.ndarray  # (rows, cols, 4) int32, the crop's flat state index, −1 at the source
+    offset: Cell
+    heading: dict[Hashable, int]  # per point; −1 where unreachable
+
+
+def _rooms_of(label: int, door_rooms: Mapping[int, tuple[int, int]]) -> tuple[int, ...]:
+    """The room(s) a free cell belongs to: its own, or both rooms of its door."""
+    return tuple(door_rooms[label]) if label in door_rooms else (label,)
+
+
+def _hops(adj: Mapping[int, set[int]], starts: Iterable[int]) -> dict[int, int]:
+    """Door hops from the nearest start room (BFS on the door graph)."""
+    seen = dict.fromkeys(starts, 0)
+    frontier = list(seen)
+    while frontier:
+        nxt = []
+        for room in frontier:
+            for nb in adj.get(room, ()):
+                if nb not in seen:
+                    seen[nb] = seen[room] + 1
+                    nxt.append(nb)
+        frontier = nxt
+    return seen
+
+
+def _exits(
+    labels: np.ndarray, mask: np.ndarray, door_rooms: Mapping[int, tuple[int, int]]
+) -> tuple[np.ndarray, np.ndarray]:
+    """Every legal step out of the ROI: (u, x) cell pairs with u inside, x outside, as two (E, 2)
+    arrays."""
+    lab = np.pad(labels, 1, constant_values=BLOCKED)
+    inside = np.pad(mask, 1, constant_values=False)
+    rows, cols = labels.shape
+    us, xs = [], []
+    for dr, dc in DIRS:
+        nb_lab = lab[1 + dr : rows + 1 + dr, 1 + dc : cols + 1 + dc]
+        nb_in = inside[1 + dr : rows + 1 + dr, 1 + dc : cols + 1 + dc]
+        for r, c in np.argwhere(mask & ~nb_in & (nb_lab != BLOCKED)):
+            r, c = int(r), int(c)
+            if _can_step(int(labels[r, c]), int(labels[r + dr, c + dc]), door_rooms):
+                us.append((r, c))
+                xs.append((r + dr, c + dc))
+    return np.array(us, dtype=np.int64).reshape(-1, 2), np.array(xs, dtype=np.int64).reshape(-1, 2)
+
+
+class PathCache:
+    """Routed costs and polylines between every source and every point, built once (#19).
+
+    One one-to-all bend-aware ``search`` per source, with costs exactly as ``search`` gives them
+    (cells: steps + ``w_bend`` · bends, no bend at either end). A path reversed is the same
+    cable at the same cost, so a target needs no search of its own: pass the nodes as
+    ``sources`` and the hub candidates as ``targets``, and every node–node and node–hub pair
+    is answered (one search per hub candidate would be thousands per plan).
+
+    **ROI:** each source searches only the rooms on door-graph shortest paths to its points,
+    plus ``ROI_MARGIN_ROOMS`` around them, cropped to their box. The ROI is a speed-up, never
+    an approximation: a path that leaves it costs at least (its exact cost to the last cell
+    inside) + 1 + (the Manhattan distance on from the first cell outside), and if that bound
+    is below a target's ROI cost the source is searched again on the whole raster.
+
+    ``dist`` is eager for every pair; ``path`` builds the polyline on first use and keeps it.
+    """
+
+    def __init__(
+        self,
+        points: dict[Hashable, Cell],
+        searched: dict[Hashable, _Kept],
+        dist: dict[Hashable, dict[Hashable, float]],
+        to_xy: Callable[[Cell], Point2],
+        metres_per_cell: float,
+        stats: CacheStats,
+    ) -> None:
+        self.points = points
+        self._searched = searched
+        self._dist = dist
+        self._to_xy = to_xy
+        self._metres_per_cell = metres_per_cell
+        self._paths: dict[tuple[Hashable, Hashable], CachedPath] = {}
+        self.stats = stats
+
+    # ----------------------------------------------------------------------- construction
+
+    @classmethod
+    def build(
+        cls,
+        grid: LabelGrid,
+        sources: Mapping[Hashable, Cell],
+        c: Constraints = _DEFAULT,
+        *,
+        targets: Mapping[Hashable, Cell] | None = None,
+        roi: bool = True,
+    ) -> PathCache:
+        """Search from every source to every point (sources and targets) on ``grid``."""
+        return cls._build(
+            grid.labels,
+            grid.door_rooms,
+            sources,
+            bend_weight_cells(c, grid.cell_m),
+            targets or {},
+            grid.to_xy,
+            c.cost_weights.length * grid.cell_m,
+            roi,
+        )
+
+    @classmethod
+    def build_raw(
+        cls,
+        labels: np.ndarray,
+        door_rooms: Mapping[int, tuple[int, int]],
+        sources: Mapping[Hashable, Cell],
+        w_bend: float,
+        *,
+        targets: Mapping[Hashable, Cell] | None = None,
+        roi: bool = True,
+    ) -> PathCache:
+        """``build`` on a bare raster (tests): polylines are (col, row) cell centres, 1 m cells."""
+        return cls._build(
+            labels,
+            door_rooms,
+            sources,
+            w_bend,
+            targets or {},
+            lambda cell: (cell[1] + CELL_CENTRE, cell[0] + CELL_CENTRE),
+            1.0,
+            roi,
+        )
+
+    @classmethod
+    def _build(
+        cls,
+        labels: np.ndarray,
+        door_rooms: Mapping[int, tuple[int, int]],
+        sources: Mapping[Hashable, Cell],
+        w_bend: float,
+        targets: Mapping[Hashable, Cell],
+        to_xy: Callable[[Cell], Point2],
+        metres_per_cell: float,
+        roi: bool,
+    ) -> PathCache:
+        t0 = time.perf_counter()
+        points = {k: (int(r), int(c)) for k, (r, c) in {**targets, **sources}.items()}
+        for k, (r, c) in points.items():
+            if not (0 <= r < labels.shape[0] and 0 <= c < labels.shape[1]):
+                raise ValueError(f"{k}: cell {(r, c)} is outside the {labels.shape} raster")
+            if labels[r, c] == BLOCKED:
+                raise ValueError(f"{k}: cell {(r, c)} is blocked")
+        adj: dict[int, set[int]] = {}
+        for a, b in door_rooms.values():
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+        cells = np.array(list(points.values()), dtype=np.int64).reshape(-1, 2)
+        point_rooms = {k: _rooms_of(int(labels[cell]), door_rooms) for k, cell in points.items()}
+        stats = CacheStats(free_cells=int((labels != BLOCKED).sum()))
+        searched: dict[Hashable, _Kept] = {}
+        dist: dict[Hashable, dict[Hashable, float]] = {}
+        for s in sources:
+            s_cell = points[s]
+            hops = _hops(adj, point_rooms[s])
+            reachable = {k for k, rooms in point_rooms.items() if any(r in hops for r in rooms)}
+            run = None
+            if roi:
+                rooms = cls._roi_rooms(adj, hops, point_rooms, reachable)
+                run = cls._search_roi(labels, door_rooms, s_cell, w_bend, cells, rooms, points)
+                stats.roi_rooms[s] = rooms
+                stats.roi_cells[s] = run[2]
+                if not cls._exact(run, labels, door_rooms, points, reachable):
+                    run = None
+                    stats.fallbacks += 1
+            if run is None:
+                res = search(labels, door_rooms, [s_cell], w_bend, targets=list(points.values()))
+                run = (_Searched(res, (0, 0)), None, stats.free_cells)
+                stats.roi_cells.setdefault(s, stats.free_cells)
+            stats.searches += 1
+            dist[s], heading = cls._costs(run[0], list(points), cells)
+            found = run[0]
+            searched[s] = _Kept(found.result.parent.astype(np.int32), found.offset, heading)
+        stats.ms = (time.perf_counter() - t0) * 1000
+        return cls(points, searched, dist, to_xy, metres_per_cell, stats)
+
+    @staticmethod
+    def _roi_rooms(
+        adj: Mapping[int, set[int]],
+        hops: Mapping[int, int],
+        point_rooms: Mapping[Hashable, tuple[int, ...]],
+        reachable: Collection[Hashable],
+    ) -> frozenset[int]:
+        """Rooms on any fewest-door path from the source to a reachable point, plus margin."""
+        keep = {r for r, h in hops.items() if h == 0}
+        for target_rooms in {point_rooms[k] for k in reachable}:
+            best = min(hops[r] for r in target_rooms if r in hops)
+            back = _hops(adj, target_rooms)
+            keep |= {r for r, h in hops.items() if r in back and h + back[r] == best}
+        for _ in range(ROI_MARGIN_ROOMS):
+            keep |= {nb for r in keep for nb in adj.get(r, ())}
+        return frozenset(keep)
+
+    @staticmethod
+    def _search_roi(
+        labels: np.ndarray,
+        door_rooms: Mapping[int, tuple[int, int]],
+        s_cell: Cell,
+        w_bend: float,
+        cells: np.ndarray,
+        rooms: frozenset[int],
+        points: Mapping[Hashable, Cell],
+    ) -> tuple[_Searched, np.ndarray, int]:
+        """Search the ROI's rooms, the doors between them and the points' own cells, cropped."""
+        allowed = set(rooms) | {d for d, (a, b) in door_rooms.items() if a in rooms and b in rooms}
+        allowed |= {int(labels[cell]) for cell in points.values()}
+        mask = np.isin(labels, list(allowed)) & (labels != BLOCKED)
+        rows, cols = np.nonzero(mask.any(axis=1))[0], np.nonzero(mask.any(axis=0))[0]
+        r0, r1, c0, c1 = rows[0], rows[-1] + 1, cols[0], cols[-1] + 1
+        crop = np.where(mask, labels, BLOCKED)[r0:r1, c0:c1]
+        local = [(r - r0, c - c0) for r, c in cells.tolist()]
+        res = search(crop, door_rooms, [(s_cell[0] - r0, s_cell[1] - c0)], w_bend, targets=local)
+        return _Searched(res, (int(r0), int(c0))), mask, int(mask.sum())
+
+    @staticmethod
+    def _exact(
+        run: tuple[_Searched, np.ndarray, int],
+        labels: np.ndarray,
+        door_rooms: Mapping[int, tuple[int, int]],
+        points: Mapping[Hashable, Cell],
+        reachable: Collection[Hashable],
+    ) -> bool:
+        """Whether no path leaving the ROI can beat any reachable point's ROI cost."""
+        found, mask, _ = run
+        us, xs = _exits(labels, mask, door_rooms)
+        if not len(us):
+            return True
+        res, (r0, c0) = found.result, found.offset
+        inside = np.minimum(res.dist[us[:, 0] - r0, us[:, 1] - c0].min(axis=1), res.settled)
+        ts = np.array([points[k] for k in reachable], dtype=np.int64).reshape(-1, 2)
+        roi_cost = res.dist[ts[:, 0] - r0, ts[:, 1] - c0].min(axis=1)
+        for chunk in range(0, len(ts), 4096):  # (exits × targets) in bounded slices
+            t = ts[chunk : chunk + 4096]
+            away = np.abs(xs[:, None, 0] - t[None, :, 0]) + np.abs(xs[:, None, 1] - t[None, :, 1])
+            bound = (inside[:, None] + 1 + away).min(axis=0)
+            if (roi_cost[chunk : chunk + 4096] > bound + _EPS).any():
+                return False
+        return True
+
+    @staticmethod
+    def _costs(
+        found: _Searched, keys: Sequence[Hashable], cells: np.ndarray
+    ) -> tuple[dict[Hashable, float], dict[Hashable, int]]:
+        """Every point's cheapest arrival cost and heading (inf / −1 where unreachable)."""
+        res, (r0, c0) = found.result, found.offset
+        rows, cols, _ = res.dist.shape
+        r, c = cells[:, 0] - r0, cells[:, 1] - c0
+        inside = (r >= 0) & (r < rows) & (c >= 0) & (c < cols)
+        cost = np.full(len(keys), math.inf)
+        heading = np.full(len(keys), -1, dtype=np.int64)
+        states = res.dist[r[inside], c[inside]]
+        cost[inside] = states.min(axis=1)
+        heading[inside] = states.argmin(axis=1)
+        heading[np.isinf(cost)] = -1
+        return (
+            dict(zip(keys, cost.tolist(), strict=True)),
+            dict(zip(keys, heading.tolist(), strict=True)),
+        )
+
+    # ----------------------------------------------------------------------- reuse (C29)
+
+    _built: ClassVar[OrderedDict[tuple, PathCache]] = OrderedDict()
+
+    @classmethod
+    def cached(
+        cls,
+        grid: LabelGrid,
+        sources: Mapping[Hashable, Cell],
+        c: Constraints = _DEFAULT,
+        *,
+        targets: Mapping[Hashable, Cell] | None = None,
+    ) -> PathCache:
+        """``build``, once per (plan, grid_m, cost_weights) and points: the plan is the raster's
+        content, so the same plan loaded twice reuses one build, and a what-if raster doesn't."""
+        key = (
+            hashlib.blake2b(grid.labels.tobytes(), digest_size=16).hexdigest(),
+            grid.labels.shape,
+            tuple(sorted(grid.door_rooms.items())),
+            grid.cell_m,
+            c.cost_weights,
+            frozenset((k, (int(r), int(cc))) for k, (r, cc) in sources.items()),
+            frozenset((k, (int(r), int(cc))) for k, (r, cc) in (targets or {}).items()),
+        )
+        if key in cls._built:
+            cls._built.move_to_end(key)
+            return cls._built[key]
+        built = cls.build(grid, sources, c, targets=targets)
+        cls._built[key] = built
+        while len(cls._built) > CACHE_BUILDS_KEPT:
+            cls._built.popitem(last=False)
+        return built
+
+    @classmethod
+    def clear(cls) -> None:
+        cls._built.clear()
+
+    # ----------------------------------------------------------------------- lookups
+
+    def dist(self, a: Hashable, b: Hashable) -> float:
+        """Cost a → b in cells (as ``SearchResult.cost``); either end must be a source."""
+        if a in self._dist:
+            return self._dist[a][b]
+        if b in self._dist:
+            return self._dist[b][a]
+        raise KeyError(f"neither {a!r} nor {b!r} is a searched source")
+
+    @property
+    def nbytes(self) -> int:
+        """Bytes of search state kept for lazy polylines (int32 parents per source)."""
+        return sum(k.parent.nbytes for k in self._searched.values())
+
+    def cost_m(self, a: Hashable, b: Hashable) -> float:
+        """``dist`` in J metres: length weight · cell size · cells (bends at the ends excluded)."""
+        return self.dist(a, b) * self._metres_per_cell
+
+    def path(self, a: Hashable, b: Hashable) -> CachedPath:
+        """The cached cable a → b: its cost, corner cells and polyline."""
+        if (a, b) in self._paths:
+            return self._paths[a, b]
+        d = self.dist(a, b)
+        if a in self._searched:
+            kept = self._searched[a]
+            (r0, c0), (r, c), h = kept.offset, self.points[b], kept.heading[b]
+            local = _trace(kept.parent, (r - r0, c - c0), h) if h >= 0 else []
+            cells = [(lr + r0, lc + c0) for lr, lc in local]
+        else:
+            cells = self.path(b, a).cells[::-1]
+        p = CachedPath(d, cells, [self._to_xy(cell) for cell in cells])
+        self._paths[a, b] = p
+        return p
+
+
+def plan_points(
+    grid: LabelGrid, plan: Plan, c: Constraints = _DEFAULT
+) -> tuple[dict[str, Cell], dict[Candidate, Cell]]:
+    """The cache's points for one plan: every node's snapped cell, and every eligible room's hub
+    candidates (``rings.hub_candidates``, room by room, so each room keeps its own spots or its
+    ``wall_clearance_only`` fallback). Candidates that can't snap are left out."""
+    from hackhive.rings import hub_candidates  # grid imports rings, which this module serves
+
+    nodes = {}
+    for n in plan.nodes:
+        try:
+            nodes[n.id] = grid.snap(n.xy, n.room_id)[0]
+        except ValueError as e:
+            raise ValueError(f"{n.id}: {e}") from e
+    cands: dict[Candidate, Cell] = {}
+    for room in (r for r in plan.rooms if r.eligible):
+        for cand in hub_candidates({room.id}, plan, c):
+            try:
+                cands[cand] = grid.snap(cand.xy, cand.room_id)[0]
+            except ValueError:
+                continue
+    return nodes, cands
 
 
 # --------------------------------------------------------------------------- rings (#15)
@@ -526,3 +943,81 @@ def route_rings(
         per_hub = metrics([hub_out], c).per_hub[hub.hub_id]
         out.append(RoutedRing(hub.hub_id, segments, per_hub.L, per_hub.B))
     return out
+
+
+# --------------------------------------------------------------------------- benchmark (#19)
+
+BUDGET_MS = 5000  # ADR-003: past this p95 per plan, take the ladder (20 cm cost grid first)
+
+
+def _bench_one(path: Path, c: Constraints) -> dict[str, float | int | str]:
+    """Load → raster → points → cache for one plan file, timed in ms."""
+    from hackhive.graph import build_graph  # these import this module
+    from hackhive.grid import LabelGrid
+    from hackhive.io import load_plan
+
+    plan = load_plan(path, c)
+    build_graph(plan, c)  # fills Door.rooms and plan.openings (#9)
+    t0 = time.perf_counter()
+    grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
+    t1 = time.perf_counter()
+    nodes, cands = plan_points(grid, plan, c)
+    t2 = time.perf_counter()
+    pc = PathCache.build(grid, nodes, c, targets=cands)
+    s = pc.stats
+    roi = sum(s.roi_cells.values()) / max(1, len(s.roi_cells) * s.free_cells)
+    return {
+        "plan": plan.plan_id,
+        "cells": s.free_cells,
+        "nodes": len(nodes),
+        "hub_cands": len(cands),
+        "fallbacks": s.fallbacks,
+        "roi_pct": 100 * roi,
+        "grid_ms": (t1 - t0) * 1000,
+        "points_ms": (t2 - t1) * 1000,
+        "cache_ms": s.ms,
+        "total_ms": (t1 - t0) * 1000 + (t2 - t1) * 1000 + s.ms,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m hackhive.route --bench <dir>…``: routing ms per plan, then p50 and p95.
+
+    Per plan: the 10 cm raster, the cache's points (nodes and every eligible room's hub
+    candidates) and the path cache (one search per node; node–hub pairs by symmetry). ``total``
+    is their sum; the ADR-003 budget is p95 ≤ 5 s per plan."""
+    p = argparse.ArgumentParser(prog="python -m hackhive.route")
+    p.add_argument("--bench", type=Path, nargs="+", required=True, metavar="DIR")
+    args = p.parse_args(argv)
+    c = Constraints()
+    files = sorted(f for d in args.bench for f in d.glob("*.json"))
+    cols = "plan cells nodes hub_cands fallbacks roi_pct grid_ms points_ms cache_ms total_ms"
+    print(f"{'plan':<10}" + "".join(f"{h:>11}" for h in cols.split()[1:]))
+    rows = []
+    for f in files:
+        try:
+            row = _bench_one(f, c)
+        except Exception as e:  # a plan that can't be routed is reported, not fatal
+            print(f"{f.stem:<10} skipped: {type(e).__name__}: {e}")
+            continue
+        rows.append(row)
+        cells = [
+            f"{row[h]:>11.1f}" if isinstance(row[h], float) else f"{row[h]:>11}"
+            for h in cols.split()[1:]
+        ]
+        print(f"{row['plan']!s:<10}" + "".join(cells))
+    if not rows:
+        print("no plans")
+        return 1
+    for h in ("cache_ms", "total_ms"):
+        v = np.array([r[h] for r in rows], dtype=float)
+        p50, p95 = np.percentile(v, 50), np.percentile(v, 95)
+        print(f"{h}: p50 {p50:.0f} ms, p95 {p95:.0f} ms, max {v.max():.0f} ms over {len(v)} plans")
+    p95 = float(np.percentile([r["total_ms"] for r in rows], 95))
+    verdict = "within" if p95 <= BUDGET_MS else "OVER: apply the ADR-003 ladder (20 cm cost grid)"
+    print(f"ADR-003 budget {BUDGET_MS} ms per plan at p95: {verdict}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
