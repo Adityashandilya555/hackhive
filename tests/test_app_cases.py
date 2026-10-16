@@ -12,7 +12,12 @@ from hackhive import ui
 from hackhive.contracts import Bounds, Sidecar
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
-TIMEOUT = 240  # strict-only's plan (15333) solves in 60-90 s alone, more on a busy runner
+TIMEOUT = 240
+# strict-only's plan (15333) is the library's heaviest: 60-90 s with solve()'s zone pool, but under
+# pytest -n on Linux the solver runs on one core (tests/conftest.py) and took over 240 s in the app
+# on a busy CI runner (#115). Only that row waits longer.
+SLOW_PLAN_TIMEOUT = 900
+SLOW_PLANS = {"case-strict-only-15333.json"}
 ROWS = ui.case_rows()
 ROW = {r["case"]: r for r in ROWS}
 
@@ -54,15 +59,16 @@ def test_check_without_a_design_compares_the_status_only():
 # --------------------------------------------------------------------------- the app
 
 
-def _run(at: AppTest | None = None) -> AppTest:
-    at = at or AppTest.from_file(APP, default_timeout=TIMEOUT)
+def _run(at: AppTest | None = None, timeout: float = TIMEOUT) -> AppTest:
+    at = at or AppTest.from_file(APP, default_timeout=timeout)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     return at
 
 
 def _open(case: str) -> AppTest:
-    at = _run()
+    timeout = SLOW_PLAN_TIMEOUT if ROW[case]["plan"] in SLOW_PLANS else TIMEOUT
+    at = _run(timeout=timeout)
     at.sidebar.radio(key="source").set_value(ui.CASES_SOURCE)
     _run(at)
     at.sidebar.selectbox(key="case").set_value(case)
