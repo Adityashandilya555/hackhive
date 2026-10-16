@@ -8,11 +8,10 @@ inside one ring, and a turn at a node or the hub is no bend. Same design, two nu
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 
 from hackhive.checker import metrics
 from hackhive.contracts import Constraints, HubOut, Submission
-from hackhive.io import load_plan
-from hackhive.solve import solve
 
 PLANS = Path(__file__).resolve().parent / "fixtures" / "plans"
 C = Constraints()
@@ -109,7 +108,7 @@ def test_j_follows_the_weights_under_both():
 @pytest.mark.parametrize("plan_id", ["576", "5924", "13344"])
 def test_lenient_never_costs_more_on_a_fixture(plan_id):
     """Every lenient term is a subset of the strict one, so its J is never higher."""
-    sub: Submission = solve(load_plan(PLANS / f"plan-{plan_id}.json"), C).submission
+    sub: Submission = solved(plan_id).submission
     strict, lenient = both(sub.hubs)
     assert lenient.L == approx(strict.L)
     assert lenient.X <= strict.X and lenient.O <= strict.O + 1e-9 and lenient.B <= strict.B

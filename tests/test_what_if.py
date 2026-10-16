@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 from shapely.geometry import MultiPolygon, box, mapping
 
 from hackhive import cli
@@ -90,7 +91,7 @@ def test_any_what_if_writes_no_submission(change, tmp_path):
 
 
 def test_the_preset_still_writes_its_submission(tmp_path):
-    result = solve_file(PLANS / "plan-5924.json", C)
+    result = solved("5924")
     assert result.submittable
     assert tmp_path / "PLAN_5924.json" in submit(result, tmp_path)
     assert not [w for w in result.sidecar.warnings if w.startswith("WHAT-IF")]
@@ -149,7 +150,7 @@ def test_label_what_if_marks_the_figure():
 
 
 def test_label_what_if_does_nothing_for_the_preset():
-    plan = load_plan(PLANS / "plan-5924.json")
-    fig = draw_solution(plan, solve(plan, C).submission)
+    result = solved("5924")
+    fig = draw_solution(result.plan, result.submission)
     label_what_if(fig, [])
     assert not [t for t in fig.findobj() if getattr(t, "get_gid", lambda: None)() == WHAT_IF_GID]
