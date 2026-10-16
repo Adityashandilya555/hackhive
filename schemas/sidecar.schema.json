@@ -102,6 +102,11 @@
           "title": "Origin Shift",
           "type": "array"
         },
+        "route_through_other_rooms": {
+          "default": false,
+          "title": "Route Through Other Rooms",
+          "type": "boolean"
+        },
         "tolerance_m": {
           "default": 0.001,
           "exclusiveMinimum": 0,
@@ -470,6 +475,7 @@
           0.0,
           0.0
         ],
+        "route_through_other_rooms": false,
         "tolerance_m": 0.001,
         "zone_links_via_excluded": false
       }

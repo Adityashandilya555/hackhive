@@ -85,6 +85,7 @@ def test_problem_statement_preset():
         {"origin_shift": (1.0, 0.0)},
         {"interior_windows_as_doors": True},
         {"zone_links_via_excluded": True},
+        {"route_through_other_rooms": True},
         {"cost_weights": CostWeights(1.0, 10.0, 1.0, 0.5)},
     ],
 )
