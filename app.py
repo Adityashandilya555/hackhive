@@ -10,8 +10,6 @@ batch leaderboard.
 from __future__ import annotations
 
 import hashlib
-import multiprocessing
-import sys
 import tempfile
 from pathlib import Path
 
@@ -85,9 +83,9 @@ FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
 BEST = "best design (solve)"
 BEST_WHAT_IF = "what-if design (solve)"
 SOLVED_DIR = Path(tempfile.gettempdir()) / "hackhive-app"  # solve()'s files, a folder per input
-WHAT_IF_COPY = ".what-if.json"
+WHAT_IF_COPY = ".what-if.json"  # a what-if design, kept only so the app can draw it (#30)
 TILE_DPI = 130  # a gallery tile fills a quarter of the tab without blurring (#26)
-ARRANGEMENT_COPY = ".arrangement-"  # a gallery arrangement, routed for the Best tab (#26)  # a what-if design, kept only so the app can draw it (#30)
+ARRANGEMENT_COPY = ".arrangement-"  # a gallery arrangement, routed for the Best tab (#26)
 # the What-if expander's widgets (#30), each starting at the problem statement's value
 WHAT_IF_DEFAULTS = {
     "wi_max_area_m2": float(PRESET.max_area_m2),
@@ -137,8 +135,7 @@ def solved(source: str, key: str, content: bytes | None, settings: str) -> tuple
     `*.what-if.json` display copy in a `what-if` folder, only to draw it."""
     plan, _ = load(source, key, content)
     result = solve(plan, Constraints.model_validate_json(settings))
-    raw = f"{source}\0{key}\0{settings}\0".encode() + (content or b"")
-    out = SOLVED_DIR / hashlib.sha256(raw).hexdigest()[:16]
+    out = SOLVED_DIR / _ident(source, key, content, settings)
     written = submit(result, out)
     sub = next((p for p in written if not p.name.endswith(".sidecar.json")), None)
     if result.what_if and result.submission is not None:
@@ -223,7 +220,8 @@ def opened(source: str, key: str, content: bytes | None, settings: str, rank: in
 
 
 def _ident(source: str, key: str, content: bytes | None, settings: str) -> str:
-    """One plan under one set of settings: what the gallery's state is keyed on."""
+    """One plan under one set of settings: solve()'s folder for it (`solved`, with the gallery's
+    `arrangements/` inside) and what the gallery's state is keyed on."""
     raw = f"{source}\0{key}\0{settings}\0".encode() + (content or b"")
     return hashlib.sha256(raw).hexdigest()[:16]
 
@@ -573,13 +571,8 @@ def arrangements_tab(
 def page() -> None:
     """The page. Only Streamlit's run of this script calls it (`__name__ == "__main__"`): a
     worker process of #22's pool imports this file as `__mp_main__` (macOS and Windows spawn,
-    and the fork server below does too), and must then define functions only, never re-run the
-    app and its solve (#26)."""
-    # Streamlit runs scripts on threads, and forking a threaded process can deadlock, so the
-    # pool's workers start from a fork server (#26); Windows always spawns
-    if sys.platform != "win32":
-        multiprocessing.set_start_method("forkserver", force=True)
-
+    and `parallel`'s fork server does too), and must then define functions only, never re-run
+    the app and its solve (#26)."""
     st.set_page_config(page_title="HackHive · hub planner", layout="wide")
 
     with st.sidebar:
@@ -609,9 +602,8 @@ def page() -> None:
     try:
         best_path, side_json = solved(source, key, content, settings_c.model_dump_json())
         side = Sidecar.model_validate_json(side_json)
-    except (
-        Exception
-    ) as e:  # solve() never raises for a loaded plan; the landing tab never tracebacks
+    # solve() never raises for a loaded plan; the landing tab never tracebacks
+    except Exception as e:
         best_path = None
         side = Sidecar(
             plan_id=plan.plan_id,

@@ -12,7 +12,14 @@ from hackhive.checker import check_rules, metrics
 from hackhive.contracts import Constraints
 from hackhive.io import load_plan
 from hackhive.rings import first_ring
-from hackhive.solve import arrangement_submission, enumerate, rank_key, routed_submission, solve
+from hackhive.solve import (
+    arrangement_submission,
+    enumerate,
+    rank_key,
+    routed_submission,
+    solve,
+    zoning_count,
+)
 from hackhive.ui import (
     ARRANGEMENTS_PER_PAGE,
     best_by_hub_count,
@@ -49,6 +56,12 @@ def _fast_zone_ring(zone, plan, g, grid, c):
 
 
 # --------------------------------------------------------------------------- the list
+
+
+def test_zoning_count_is_what_the_tab_says_before_ranking():
+    """The number the tab shows before ranking, with no routing: 13344's real 57 (#26 review)."""
+    assert zoning_count(load_plan(PLANS / "plan-13344.json"), C) == 57
+    assert zoning_count(load_plan(PLANS / "plan-5088.json"), C) == 4
 
 
 def test_13344_lists_57_arrangements_and_filters_to_three_hubs(monkeypatch):
@@ -116,10 +129,13 @@ def test_tile_verdict_reads_the_checker():
 
 
 def test_draw_tile_is_the_overlay_without_its_legend(plan_5088, arr_5088):
-    fig = draw_tile(plan_5088, arr_5088[0], C)
+    a = arr_5088[0]
+    fig = draw_tile(plan_5088, a, C)
     ax = fig.axes[0]
     assert ax.get_legend() is None
-    assert any((ln.get_gid() or "").startswith("leg:") for ln in ax.lines) or ax.lines
+    assert ax.lines  # its rings are drawn
+    gids = {o.get_gid() for o in ax.findobj() if o.get_gid()}
+    assert {f"hub-label:{h.hub_id}" for h in a.hubs} <= gids  # and every hub is labelled
 
 
 def test_arrangement_submission_is_the_cached_rings(plan_5088, arr_5088):
