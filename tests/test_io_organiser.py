@@ -325,6 +325,7 @@ def test_an_unreadable_organiser_plan_is_an_input_error_sidecar(break_it, says, 
     side = result.sidecar
     assert side.status == "input_error" and result.submission is None
     assert side.reason.startswith("input_error: ") and says in side.reason
+    assert side.frame is None  # no plan loaded, so no frame was detected (#73 review)
 
 
 def test_a_node_a_centimetre_outside_is_kept_and_the_sidecar_warns(tmp_path):
@@ -341,6 +342,11 @@ def test_a_node_a_centimetre_outside_is_kept_and_the_sidecar_warns(tmp_path):
     assert got.xy == pytest.approx((node["x"] * m, node["y"] * m), abs=1e-9)
     assert got.room_id == node["room_id"]
     assert any(node["id"] in w and "outside" in w for w in result.sidecar.warnings)
+    # Known gap (#73, decision_conventions ⚠ #46): this node sits in the wall band, more than one
+    # grid cell from R01's free cells, so it can't be routed yet. Pinned so a change to grid.snap
+    # or a #46 answer shows up here.
+    assert result.sidecar.status == "infeasible" and result.submission is None
+    assert "no free cell" in result.sidecar.reason and node["id"] in result.sidecar.reason
 
 
 def test_cli_solves_the_guess_and_reports_an_input_error(tmp_path, capsys):
@@ -359,3 +365,16 @@ def test_cli_solves_the_guess_and_reports_an_input_error(tmp_path, capsys):
     assert cli.main(["solve", str(bad), "--out", str(tmp_path / "bad")]) == 1
     assert [p.name for p in (tmp_path / "bad").iterdir()] == ["PLAN_5924.sidecar.json"]
     assert "input_error" in capsys.readouterr().out
+
+
+def test_the_frame_type_is_defined_once():
+    """#73 review: Plan, Sidecar and the loader share one `Frame` literal from contracts."""
+    import typing
+
+    from hackhive import contracts
+    from hackhive.contracts import Plan, Sidecar
+
+    assert io.Frame is contracts.Frame
+    assert typing.get_args(contracts.Frame) == ("identity", "flip_y", "origin_shift")
+    assert Plan.model_fields["frame"].annotation is contracts.Frame
+    assert Sidecar.model_fields["frame"].annotation == contracts.Frame | None
