@@ -347,3 +347,92 @@ def test_3086_rooms_meet_through_build_graphs_opening():
     only = np.where(np.isin(grid.labels, [la, lb, op_label]), grid.labels, BLOCKED)
     src, dst = tuple(np.argwhere(only == la)[0]), tuple(np.argwhere(only == lb)[0])
     assert path_to(search(only, {op_label: (la, lb)}, [src], 1.0), dst)
+
+
+# --------------------------------------------------------------------------- thin and outside (#78)
+
+
+def _two_rooms(**extra) -> dict:
+    """A living room under a bedroom (1 unit = 0.1 m), meeting at y = 5 m, walled off except
+    for x in 4-6 m."""
+    return {
+        "id": "THIN",
+        "area": 100.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 100)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "bedroom": mapping(box(0, 50, 100, 100)),
+        "wall": mapping(MultiPolygon([box(0, 49, 40, 51), box(60, 49, 100, 51)])),
+        **extra,
+    }
+
+
+def test_thin_opening_paints_the_cells_it_crosses_and_passes_rule_5():
+    """A 3 cm passage on the shared edge covers no cell centre: the cells it crosses are
+    painted, never past its ends, and the route through them passes rule 5 (C13, C14)."""
+    from hackhive.checker import _free_space, _rule5_leg, clean_polyline
+
+    plan = load_plan(_two_rooms())
+    living, bedroom = (room_by_label(plan, x).id for x in ("living_0", "bedroom_0"))
+    strip = box(4.0, 4.985, 6.0, 5.015)
+    plan.openings = [Opening(id="opening_0", polygon=strip, rooms=(living, bedroom))]
+    grid = LabelGrid.from_plan(plan)
+    (label,) = grid.door_rooms
+    xs, ys = grid.centres()
+    here = grid.labels == label
+    assert here.sum() == 2 * 20  # the two rows it crosses, 2 m of them
+    assert (xs[here] > 4.0).all() and (xs[here] < 6.0).all()  # never along, into the wall
+    assert set(np.round(ys[here], 2)) == {4.95, 5.05}
+
+    src, dst = grid.cell_of((2.0, 2.0)), grid.cell_of((8.0, 8.0))
+    path = path_to(search(grid.labels, grid.door_rooms, [src], 1.0), dst)
+    assert path
+    pts = clean_polyline([grid.to_xy(cell) for cell in expand(path)])
+    c = Constraints()
+    assert _rule5_leg(pts, _free_space(plan, c), c, None, "leg") == []
+
+
+def _house_and_balconies() -> dict:
+    """A house (`inner`) with two balconies 0.3 m beyond it, one wall depth apart: #9's graph
+    finds a 2 cm open strip between them, wholly outside `inner` (366, 5676, … in ResPlan)."""
+    return {
+        "id": "BALC",
+        "area": 50.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 50)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "balcony": mapping(MultiPolygon([box(0, 53, 49, 70), box(51, 53, 100, 70)])),
+    }
+
+
+def test_a_passage_wholly_outside_inner_is_exterior():
+    plan = _graph_plan_from(_house_and_balconies())
+    (opening,) = plan.openings
+    assert opening.polygon.intersection(plan.inner).area == 0
+    grid = LabelGrid.from_plan(plan)
+    assert grid.exterior_doors == [opening.id]
+    assert not grid.door_rooms
+
+
+def test_a_passage_outside_inner_between_rooms_inside_it_is_an_error():
+    """Never drop a real link: both rooms lie inside `inner`, so a door outside it is wrong."""
+    raw = _two_rooms(door=mapping(box(40, 105, 60, 107)))
+    plan = load_plan({**raw, "inner": mapping(box(0, 0, 100, 100))})
+    plan.doors[0].rooms = tuple(r.id for r in plan.rooms[:2])
+    with pytest.raises(
+        ValueError, match=r"door_0 lies outside inner, but both its rooms \(R01, R02\)"
+    ):
+        LabelGrid.from_plan(plan)
+
+
+def test_a_door_drawn_twice_names_the_door_over_it():
+    door = box(40, 49, 60, 51)
+    plan = _graph_plan_from(_two_rooms(door=mapping(MultiPolygon([door, door.buffer(-0.01)]))))
+    with pytest.raises(ValueError, match=r"door_0 has no cells of its own \(door_1 over it\)"):
+        LabelGrid.from_plan(plan)
+
+
+def _graph_plan_from(raw: dict):
+    plan = load_plan(raw)
+    build_graph(plan)
+    return plan

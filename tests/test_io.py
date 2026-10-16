@@ -508,3 +508,25 @@ def test_nodes_facts_cli_5924(capsys):
     out = capsys.readouterr().out
     assert out.startswith("5924 · 0.0719 m/unit · ")
     assert all(piece in out for piece in ("150.0 m²", "5 nodes", "LB 2"))
+
+
+# --------------------------------------------------------------------------- inner vs rooms (#78)
+
+
+def _house(bedroom: Polygon) -> dict:
+    return {
+        "id": "OUT",
+        "area": 100.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 100)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "bedroom": mapping(bedroom),
+    }
+
+
+def test_a_room_mostly_outside_inner_is_an_input_error():
+    """ResPlan's augmented plans move the rooms but not `inner` (742848's bedroom lies 84%
+    outside it): the plan is wrong, so it's rejected, saying which room and how much."""
+    with pytest.raises(ValueError, match=r"R02 \(bedroom_0\) lies 40% outside inner"):
+        load_plan(_house(box(0, 50, 100, 133.3)))
+    load_plan(_house(box(0, 50, 100, 105)))  # a corner 9% past `inner` (5114 is 12%) is fine
