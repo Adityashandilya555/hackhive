@@ -45,9 +45,10 @@ uv run hackhive batch --plans tests/fixtures/plans --n 3 --out out/batch.csv
 ```
 
 Without `--plans`, `batch` reads `data/sample/test-100.jsonl.gz`, else `data/resplan/plans.jsonl`,
-and keeps the `--split` (default `test`) listed in a `split.json` beside it. `data/` is not committed:
-for a full run, put ResPlan (below) there as `data/resplan/plans.jsonl`, one plan per line, with its
-`split.json` beside it ([how](docs/dataset/README.md#getting-the-plans)).
+and keeps the `--split` (default `test`) listed in a `split.json` beside it. All 17,000 ResPlan plans
+are committed one per file in `data/resplan/plans/`, with their `split.json`; for a full run,
+`uv run hackhive batch --plans data/resplan/plans --out out/batch.csv`
+([more](docs/dataset/README.md#in-this-repo)).
 
 Every arrangement of a plan, ranked (#22: fewest hubs, then the worse J of the two counting
 readings, then the area gap). J here is pass 0's, each ring routed alone; `solve` submits the first

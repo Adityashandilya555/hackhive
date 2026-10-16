@@ -32,17 +32,34 @@ Everything we know about the dataset hackhive is developed and tested on. Number
   - JSONL against the pickle, every field of every plan: **0 mismatches**.
 - Size per plan: median 34 KB, p99 100 KB, max 565 KB.
 
-### Getting the plans
+### In this repo
+`data/resplan/plans/plan-<id>.json`: **all 17,000 plans**, one per file, each a verbatim line of
+`plans.jsonl` (compact JSON on one line), with ResPlan's `split.json` beside them. Rejoined in
+`index` order they give back `plans.jsonl` byte for byte (same SHA-256). `hackhive` reads them
+as they are:
+
+```sh
+uv run hackhive solve data/resplan/plans/plan-5924.json --out out/
+uv run hackhive batch --plans data/resplan/plans --split test --out out/batch.csv
+```
+
+GitHub's web view lists only the first 1,000 files of a folder: open a plan by its path, or clone.
+Tools that want the single file (`scripts/make_cases.py`, `batch`'s default source) can rebuild it:
+
+```sh
+python3 -c "import glob, json; ls = sorted((open(p, 'rb').read() for p in glob.glob('data/resplan/plans/plan-*.json')), key=lambda b: json.loads(b)['index']); open('data/resplan/plans.jsonl', 'wb').write(b''.join(ls))"
+cp data/resplan/plans/split.json data/resplan/
+```
+
+### Rebuilding from upstream
 ```sh
 # ResPlan.zip from github.com/m-agour/ResPlan @ e2b78fe, unzipped into data/resplan/
 uv run --no-project --with shapely --with numpy python -I scripts/resplan_to_jsonl.py \
     data/resplan/ResPlan.pkl data/resplan/plans.jsonl
 curl -L -o data/resplan/split.json https://raw.githubusercontent.com/m-agour/ResPlan/e2b78fe/split.json
 ```
-`data/` is git-ignored. With `data/resplan/plans.jsonl` and its `split.json` in place,
-`uv run hackhive batch --out out/batch.csv` runs the `test` split. `hackhive solve` takes one plan
-per file: any single line of `plans.jsonl` saved as `<name>.json` works (the fixtures in
-`tests/fixtures/plans/` are such lines, pretty-printed).
+Both files are git-ignored. With them in place, `uv run hackhive batch --out out/batch.csv` runs
+the `test` split. The fixtures in `tests/fixtures/plans/` are lines of `plans.jsonl`, pretty-printed.
 
 ## Licence and attribution
 ResPlan's `LICENSE` puts the data (`ResPlan.pkl`, `split.json`, `croissant.json`) under
