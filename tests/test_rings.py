@@ -5,15 +5,25 @@ Fixtures load through `io.load_plan` (one node per eligible room, #6) and #9's `
 
 import itertools
 from pathlib import Path
+from types import SimpleNamespace
 
 import networkx as nx
 import pytest
 from shapely.geometry import Point, box
 
+from hackhive import rings
 from hackhive.contracts import Constraints, Node, Plan, Room
 from hackhive.graph import build_graph, eligible_graph
+from hackhive.grid import LabelGrid
 from hackhive.io import load_plan
-from hackhive.rings import first_ring, hub_candidates, manhattan, order_ring
+from hackhive.rings import (
+    best_ring,
+    first_ring,
+    hub_candidates,
+    manhattan,
+    order_ring,
+    ring_cost,
+)
 from hackhive.zoning import eligible_area_and_nodes, enumerate_zonings, min_hubs, wall_geometry
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -189,3 +199,98 @@ def test_narrow_room_open_to_a_passage_gets_a_wall_clearance_only_candidate():
     single.add_node("R01")
     hub = first_ring(frozenset({"R01"}), plan, single, C)
     assert "wall_clearance_only" in hub.warnings
+
+
+# --------------------------------------------------------------------------- best_ring (#20)
+
+
+@pytest.fixture(scope="module")
+def exact_cases():
+    """Every zone of every fixture's fewest-hubs zoning: first_ring's hub, best_ring's hub and
+    each one's routed cost (rings.ring_cost: rule-4-6 flags, then J)."""
+    out = []
+    for pid in PLAN_IDS:
+        plan, g = _fixture(pid)
+        grid = LabelGrid.from_plan(plan)
+        for i, zone in enumerate(sorted(_min_zoning(plan, g), key=min), 1):
+            first = first_ring(zone, plan, g, C, hub_id=f"H{i}")
+            best = best_ring(zone, plan, g, grid, C, hub_id=f"H{i}")
+            out.append(
+                SimpleNamespace(
+                    pid=pid,
+                    plan=plan,
+                    grid=grid,
+                    zone=zone,
+                    first=first,
+                    best=best,
+                    first_cost=ring_cost(first, plan, grid, C),
+                    best_cost=ring_cost(best, plan, grid, C),
+                )
+            )
+    return out
+
+
+def test_exact_best_ring_never_costs_more_than_first_ring(exact_cases):
+    """C17, C40: on every zone, best_ring's routed cost ≤ first_ring's: validity first (rule-4-6
+    flags), then J from checker.metrics; J itself ≤ first_ring's whenever the flags tie."""
+    for case in exact_cases:
+        b, f = case.best_cost, case.first_cost
+        assert b <= f, (case.pid, case.zone, b, f)
+        if (b.errors, b.strict) == (f.errors, f.strict):
+            assert b.J <= f.J + 1e-9, (case.pid, case.zone, b, f)
+
+
+def test_exact_best_ring_is_a_closed_ring_over_the_zone_with_a_rule_6_hub(exact_cases):
+    """C10, C18: [hub, every zone node once, hub]; the hub in an assigned eligible room, ≥ 0.5 m
+    from walls (checker rule 6 passes), on a hub_candidates spot; never a wall_clearance_only
+    spot when the zone has a spot clear of the whole room outline."""
+    for case in exact_cases:
+        hub, plan = case.best, case.plan
+        zone_nodes = sorted(n.id for n in plan.nodes if n.room_id in case.zone)
+        assert hub.ring[0] == hub.ring[-1] == hub.hub_id
+        assert sorted(hub.ring[1:-1]) == zone_nodes
+        assert hub.assigned_rooms[0] == hub.room_id and set(hub.assigned_rooms) == set(case.zone)
+        cands = hub_candidates(case.zone, plan, C)
+        assert (hub.room_id, hub.location) in {(x.room_id, x.xy) for x in cands}
+        assert ("wall_clearance_only" in hub.warnings) == cands[0].wall_clearance_only
+        assert Point(hub.location).distance(wall_geometry(plan)) >= C.hub_wall_clearance_m
+        assert case.best_cost.errors == 0, (case.pid, case.zone)
+
+
+def test_exact_3086_pruning_changes_nothing():
+    """C16: on 3086, best_ring with lower-bound pruning picks what it picks when every shortlisted
+    (spot, order) pair is routed (prune=False)."""
+    plan, g = _fixture("3086")
+    grid = LabelGrid.from_plan(plan)
+    for zone in _min_zoning(plan, g):
+        pruned = best_ring(zone, plan, g, grid, C)
+        full = best_ring(zone, plan, g, grid, C, prune=False)
+        assert (pruned.room_id, pruned.location, pruned.ring) == (
+            full.room_id,
+            full.location,
+            full.ring,
+        )
+
+
+def test_exact_lower_bound_never_exceeds_the_routed_j():
+    """The pruning is sound: on 5924's zones, every shortlisted pair's lower bound (cached leg
+    costs, less each end's stub slack) ≤ the J of the ring routed through it."""
+    plan, g = _fixture("5924")
+    grid = LabelGrid.from_plan(plan)
+    for zone in _min_zoning(plan, g):
+        for lb, hub in rings.shortlist(zone, plan, g, grid, C):
+            assert lb <= ring_cost(hub, plan, grid, C).J + 1e-9, (zone, hub)
+
+
+def test_exact_shortlist_holds_first_ring_and_each_rooms_best_spot():
+    """The shortlist routes first_ring's own pair, so best_ring can't lose to it, and spots from
+    more than one room when the zone has several (the cheapest bound per room, per order)."""
+    plan, g = _fixture("3086")
+    grid = LabelGrid.from_plan(plan)
+    (zone,) = [z for z in _min_zoning(plan, g) if len(z) > 1]
+    first = first_ring(zone, plan, g, C, hub_id="H1")
+    hubs = [hub for _, hub in rings.shortlist(zone, plan, g, grid, C)]
+    assert (first.location, first.ring) in [(h.location, h.ring) for h in hubs]
+    assert len({h.room_id for h in hubs}) > 1
+    bounds = [lb for lb, _ in rings.shortlist(zone, plan, g, grid, C)]
+    assert bounds == sorted(bounds)

@@ -80,6 +80,12 @@ def overlap_weight_cells(c: Constraints) -> float:
     return c.cost_weights.overlap / c.cost_weights.length
 
 
+def crossing_weight_cells(c: Constraints, cell_m: float | None = None) -> float:
+    """The J crossing weight in step units (#82): a step costs ``length · cell`` in J, a crossing
+    ``cross``. Pass the grid's own ``cell_m``, as for ``bend_weight_cells``."""
+    return c.cost_weights.cross / (c.cost_weights.length * (cell_m or c.grid_m))
+
+
 def _check_ids(labels: np.ndarray, door_rooms: Mapping[int, tuple[int, int]]) -> None:
     if not door_rooms:
         return
@@ -250,10 +256,30 @@ class Occupancy:
     it to rip its ring up; ``step_costs`` turns the counts into ``search``'s ``penalty``.
 
     Two legs on one cell edge are on the same line, so they overlap (slide 7's O); neighbouring
-    rows are a cell apart, far more than the 1 mm tolerance, so they never do."""
+    rows are a cell apart, far more than the 1 mm tolerance, so they never do.
+
+    ``marks`` keeps each cell a leg passes straight through with its axis (0 north-south,
+    1 east-west), and each cell where it ends or bends with axis −1 (#82): entering a cell
+    across another cable's axis, or where it ends or bends (a T-touch, #43's strict X), is a
+    crossing."""
 
     def __init__(self) -> None:
         self.count: Counter[Edge] = Counter()
+        self.marks: Counter[tuple[Cell, int]] = Counter()
+
+    @staticmethod
+    def cell_marks(path: Sequence[Cell]) -> list[tuple[Cell, int]]:
+        """(cell, axis) along a corner-point path: −1 at its ends and bends."""
+        cells = expand([(int(r), int(c)) for r, c in path])
+        out = []
+        for i, cell in enumerate(cells):
+            if i in (0, len(cells) - 1):
+                out.append((cell, -1))
+                continue
+            h_in = DIRS.index(_heading(cells[i - 1], cell))
+            h_out = DIRS.index(_heading(cell, cells[i + 1]))
+            out.append((cell, h_in % 2 if h_in == h_out else -1))
+        return out
 
     @staticmethod
     def edges(path: Sequence[Cell]) -> list[Edge]:
@@ -263,20 +289,40 @@ class Occupancy:
 
     def commit(self, path: Sequence[Cell]) -> None:
         self.count.update(self.edges(path))
+        self.marks.update(self.cell_marks(path))
 
     def clear(self, path: Sequence[Cell]) -> None:
-        for e in self.edges(path):
-            self.count[e] -= 1
-            if self.count[e] <= 0:
-                del self.count[e]
+        for counter, keys in ((self.count, self.edges(path)), (self.marks, self.cell_marks(path))):
+            for key in keys:
+                counter[key] -= 1
+                if counter[key] <= 0:
+                    del counter[key]
 
-    def step_costs(self, w_overlap: float, cols: int) -> dict[int, float]:
-        """``search``'s penalty: ``w_overlap`` · uses for a step along a used edge, both ways."""
+    def step_costs(
+        self,
+        w_overlap: float,
+        cols: int,
+        w_cross: float = 0.0,
+        exempt: Collection[Cell] = (),
+    ) -> dict[int, float]:
+        """``search``'s penalty: ``w_overlap`` · uses for a step along a used edge, both ways, and
+        ``w_cross`` · cables for a step into a cell that a cable crosses or touches (#82), except
+        into an ``exempt`` cell (the leg's own endpoint)."""
         out: dict[int, float] = {}
         for (a, b), k in self.count.items():
             h = DIRS.index(_heading(a, b))
             out[(a[0] * cols + a[1]) * 4 + h] = w_overlap * k
             out[(b[0] * cols + b[1]) * 4 + (h + 2) % 4] = w_overlap * k
+        if not w_cross:
+            return out
+        for ((r, c), axis), k in self.marks.items():
+            if (r, c) in exempt:
+                continue
+            for h, (dr, dc) in enumerate(DIRS):
+                pr, pc = r - dr, c - dc  # the cell the step into (r, c) leaves
+                if h % 2 != axis and pr >= 0 and 0 <= pc < cols:
+                    key = (pr * cols + pc) * 4 + h
+                    out[key] = out.get(key, 0.0) + w_cross * k
         return out
 
 
@@ -716,12 +762,19 @@ class _Prepared:
 
 
 def _prepare(
-    grid: LabelGrid, stops: Sequence[Stop], c: Constraints, occupancy: Occupancy | None = None
+    grid: LabelGrid,
+    stops: Sequence[Stop],
+    c: Constraints,
+    occupancy: Occupancy | None = None,
+    memo: dict[tuple[Cell, Cell], list[Cell]] | None = None,
 ) -> _Prepared:
     """Snap every stop to its cell and route every leg on the grid (one search per stop).
 
     With ``occupancy``, each leg pays ``overlap_weight_cells(c)`` per use of an occupied cell edge
-    and is committed once routed, so later legs, this ring's own included, see it (#80)."""
+    and ``crossing_weight_cells`` per cable it crosses or T-touches (#82), and is committed once
+    routed, so later legs, this ring's own included, see it (#80). Without it, ``memo`` keeps each
+    leg's path by its (from, to) cells for the next ring on the same grid: the search is
+    deterministic, so a kept path is the one it would find (#20)."""
     if len(stops) < 2:
         raise ValueError(f"a ring needs at least 2 stops, got {len(stops)}")
     tol = c.tolerance_m
@@ -738,12 +791,19 @@ def _prepare(
         snapped.append(_Snapped(s, cell, centre, corners, kind))
     w_bend = bend_weight_cells(c, grid.cell_m)
     w_overlap = overlap_weight_cells(c)
+    w_cross = crossing_weight_cells(c, grid.cell_m)
     cols = grid.labels.shape[1]
     paths, routed = [], []
     for a, b in zip(snapped, [*snapped[1:], snapped[0]], strict=True):
-        pen = occupancy.step_costs(w_overlap, cols) if occupancy else None
-        found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
-        cells = path_to(found, b.cell)
+        kept = memo is not None and occupancy is None
+        if kept and (a.cell, b.cell) in memo:
+            cells = memo[a.cell, b.cell]
+        else:
+            pen = occupancy.step_costs(w_overlap, cols, w_cross, {b.cell}) if occupancy else None
+            found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
+            cells = path_to(found, b.cell)
+            if kept:
+                memo[a.cell, b.cell] = cells
         if not cells:
             raise ValueError(f"{a.stop.id}→{b.stop.id} unreachable")
         if occupancy is not None:
@@ -936,9 +996,11 @@ def _route_ring(
     retrace_ok: Collection[str],
     free: shapely.Geometry | None,
     occupancy: Occupancy | None,
+    memo: dict[tuple[Cell, Cell], list[Cell]] | None = None,
 ) -> tuple[list[RouteSegment], list[list[Cell]]]:
-    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed)."""
-    prep = _prepare(grid, stops, c, occupancy)
+    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed); `memo` as
+    in `_prepare`."""
+    prep = _prepare(grid, stops, c, occupancy, memo)
     n = len(prep.stops)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
     cache: dict[tuple[int, int | None, int | None], list[Point2]] = {}
@@ -1007,6 +1069,24 @@ class Routing:
     best: int  # the index of `rings`' snapshot
 
 
+def zone_grid(
+    grid: LabelGrid, plan: Plan, rooms: Collection[str], c: Constraints = _DEFAULT
+) -> LabelGrid:
+    """The grid one zone's ring is routed on (D7, #79): its own rooms, plus a bathroom or stair
+    that alone joins two of them under the `zone_links_via_excluded` WHAT-IF (#46 Q2); the
+    whole grid under `route_through_other_rooms`."""
+    from hackhive.graph import build_graph
+
+    if c.route_through_other_rooms:
+        return grid
+    zone = set(rooms)
+    if c.zone_links_via_excluded:
+        edges = build_graph(plan, c).edges(data=True)
+        via = [d["via"] for a, b, d in edges if d["kind"] == "via_excluded" and {a, b} <= zone]
+        zone = zone.union(*via)
+    return own_rooms_grid(grid, zone)
+
+
 def route_rings(
     grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
 ) -> list[RoutedRing]:
@@ -1033,14 +1113,9 @@ def route_passes(
     never above pass 0's unless pass 0 has more `error` or `strict` flags.
     """
     from hackhive.checker import _free_space  # checker imports grid, which imports us
-    from hackhive.graph import build_graph
 
     if passes < 0:
         raise ValueError(f"passes must be >= 0, got {passes}")
-    # a zone may be joined only through a bathroom/stair (#46 Q2); its ring needs that room
-    edges = build_graph(plan, c).edges(data=True) if c.zone_links_via_excluded else []
-    via = [(a, b, d["via"]) for a, b, d in edges if d["kind"] == "via_excluded"]
-
     retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings _free_space needs
     free = _free_space(plan, c).free  # rule 5's own geometry, so stubs and checker agree
     nodes = {n.id: n for n in plan.nodes}
@@ -1052,12 +1127,7 @@ def route_passes(
                 *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
             ]
         )
-        if c.route_through_other_rooms:
-            grids.append(grid)
-        else:
-            zone = set(hub.assigned_rooms)
-            rooms = zone.union(*(v for a, b, v in via if a in zone and b in zone))
-            grids.append(own_rooms_grid(grid, rooms))
+        grids.append(zone_grid(grid, plan, hub.assigned_rooms, c))
 
     def route(i: int, occupancy: Occupancy | None) -> tuple[list[RouteSegment], list[list[Cell]]]:
         try:
