@@ -19,39 +19,45 @@ showing its case. Writes `tests/fixtures/cases/cases.json`, one row per case in 
 
 "Smallest" is the plan's file (or JSON line) size, then its id. `expected` is recomputed on
 every run, so running it twice changes nothing. Exit code 1 if a case is left without a plan.
+
+The scan solves its plans on `--workers` processes (default: `hackhive.batch.plan_workers`,
+up to 4; #103), in ordered chunks of 4 × workers, and applies the picks in input order: the same picks as
+one process.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import random
 import sys
 from pathlib import Path
 
-from hackhive import ui
-from hackhive.io import load_plan
-from hackhive.solve import solve
+from hackhive import scans, ui
+from hackhive.batch import plan_workers
+from hackhive.parallel import map_in_order
 
 _SOLVED: dict[Path, ui.CaseFacts | None] = {}
 DATASET_HINT = "uv run scripts/make_cases.py ~/HACKHIVE/data/resplan/plans.jsonl"
 
 
-def _facts(raw_or_path: dict | Path) -> ui.CaseFacts | None:
-    """The plan's case facts, or None when it doesn't load (an `input_error` is no case here).
+def _facts(path: Path) -> ui.CaseFacts | None:
+    """A plan file's case facts, or None when it doesn't load (an `input_error` is no case here).
     A file is solved once per run, however many cases name it."""
-    if isinstance(raw_or_path, Path):
-        key = raw_or_path.resolve()
-        if key not in _SOLVED:
-            _SOLVED[key] = _facts(json.loads(key.read_text(encoding="utf-8")))
-        return _SOLVED[key]
+    key = path.resolve()
+    if key not in _SOLVED:
+        _SOLVED[key] = scans.case_facts(key.read_text(encoding="utf-8"))
+    return _SOLVED[key]
+
+
+def _id(line: str) -> str:
+    """A JSON line's plan id, or "" for a line that isn't a plan (the scan's task skips it)."""
     try:
-        plan = load_plan(ui._unwrap(raw_or_path))
-    except Exception as e:  # malformed dataset plans fail in many ways; skip, don't stop
-        print(f"skip: {type(e).__name__}: {e}", file=sys.stderr)
-        return None
-    return ui.case_facts(plan, solve(plan))
+        return str(ui._unwrap(json.loads(line)).get("id"))
+    except Exception:  # not JSON, or not an object
+        return ""
 
 
 def _rel(path: Path, base: Path) -> str:
@@ -76,7 +82,7 @@ def _scan(plans: Path, n: int, seed: int) -> list[str]:
                 continue
             if i in keep:
                 line = line.strip()
-                picked.append((len(line), str(ui._unwrap(json.loads(line)).get("id")), line))
+                picked.append((len(line), _id(line), line))
             i += 1
     picked.sort(key=lambda t: (t[0], int(t[1]) if t[1].isdigit() else 0, t[1]))
     return [line for *_, line in picked]
@@ -89,6 +95,7 @@ def build(
     fixtures: Path = ui.FIXTURE_DIR,
     n: int = 600,
     seed: int = 5,
+    workers: int | None = None,
 ) -> list[str]:
     """Write `out/cases.json` and the picked case plans; return the cases left without a plan."""
     out.mkdir(parents=True, exist_ok=True)
@@ -117,21 +124,27 @@ def build(
     # 3. the scan, smallest first; each plan picked is written verbatim, named for its first case
     if plans is not None and len(picks) < len(ui.CASES):
         lines = _scan(plans, n, seed)
-        for i, line in enumerate(lines, 1):
-            missing = [c for c in ui.CASES if c.id not in picks]
-            if not missing:
+        size = 4 * plan_workers(workers, len(lines))
+        for start in range(0, len(lines), size):
+            chunk = lines[start : start + size]
+            print(f"[{start + 1}-{start + len(chunk)}/{len(lines)}]", file=sys.stderr)
+            procs = plan_workers(workers, len(chunk))  # > 1: no zone pool inside a plan worker
+            task = functools.partial(scans.case_facts, solve_workers=1 if procs > 1 else None)
+            for line, facts in zip(chunk, map_in_order(task, chunk, procs), strict=True):
+                missing = [c for c in ui.CASES if c.id not in picks]
+                if not missing:
+                    break
+                first = (
+                    None if facts is None else next((c for c in missing if c.match(facts)), None)
+                )
+                if first is None:
+                    continue
+                raw = ui._unwrap(json.loads(line))
+                path = out / f"case-{first.id.replace('_', '-')}-{raw.get('id')}.json"
+                path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
+                take(path, facts)
+            if len(picks) == len(ui.CASES):
                 break
-            raw = ui._unwrap(json.loads(line))
-            print(f"[{i}/{len(lines)}] plan {raw.get('id')}", file=sys.stderr)
-            facts = _facts(raw)
-            if facts is None:
-                continue
-            first = next((c for c in missing if c.match(facts)), None)
-            if first is None:
-                continue
-            path = out / f"case-{first.id.replace('_', '-')}-{raw.get('id')}.json"
-            path.write_text(json.dumps(raw, indent=2) + "\n", encoding="utf-8")
-            take(path, facts)
 
     rows = []
     for case in ui.CASES:
@@ -168,8 +181,16 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=5)
     p.add_argument("--out", type=Path, default=ui.CASE_DIR)
     p.add_argument("--fixtures", type=Path, default=ui.FIXTURE_DIR)
+    p.add_argument("--workers", type=int, help="processes for the scan (default: up to 4)")
     args = p.parse_args(argv)
-    missing = build(args.plans, out=args.out, fixtures=args.fixtures, n=args.n, seed=args.seed)
+    missing = build(
+        args.plans,
+        out=args.out,
+        fixtures=args.fixtures,
+        n=args.n,
+        seed=args.seed,
+        workers=args.workers,
+    )
     rows = ui.case_rows(args.out / "cases.json")
     size = sum(f.stat().st_size for f in args.out.glob("*.json"))
     print(f"{len(rows)} cases, {size / 1e6:.2f} MB in {args.out}")
