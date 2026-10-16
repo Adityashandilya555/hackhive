@@ -198,7 +198,7 @@ def _heading(a: Cell, b: Cell) -> Cell:
 
 # --------------------------------------------------------------------------- rings (#15)
 
-# shortcut: every corner combination is scored (≤ 4 options per stop, so ≤ 4⁵ rings at 5 nodes);
+# shortcut: every corner combination is scored (≤ 4 options per stop, so ≤ 4**5 rings at 5 nodes);
 # the ≤ 20-node what-if (#28) will need a per-stop or greedy choice (#19).
 
 
