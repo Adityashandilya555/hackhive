@@ -403,14 +403,21 @@
       "type": "array"
     },
     "frame": {
-      "default": "identity",
-      "enum": [
-        "identity",
-        "flip_y",
-        "origin_shift"
+      "anyOf": [
+        {
+          "enum": [
+            "identity",
+            "flip_y",
+            "origin_shift"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
       ],
-      "title": "Frame",
-      "type": "string"
+      "default": null,
+      "title": "Frame"
     },
     "hubs": {
       "default": [],

@@ -35,6 +35,7 @@ from hackhive.contracts import (
     Constraints,
     Door,
     FoldedPart,
+    Frame,
     Node,
     Plan,
     Room,
@@ -466,9 +467,6 @@ def _given_points(nodes: Any, pid: Any) -> list[tuple[str | None, str | None, fl
 
 
 NODE_SNAP_M = 0.10  # a given node this close outside an eligible room is assigned to it (#38)
-
-
-Frame = Literal["identity", "flip_y", "origin_shift"]
 
 
 def _pick_frame(xy: np.ndarray, rooms: list[Room], inner: BaseGeometry, pid: Any) -> Frame:
