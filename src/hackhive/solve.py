@@ -205,7 +205,7 @@ def _rounded(polyline: Sequence[tuple[float, float]], tol: float) -> list[tuple[
     """T6 (#34): every vertex to `DECIMALS`; a coordinate within `tol` of the previous vertex's
     takes that vertex's rounded value, so both ends of a segment stay exactly axis-aligned."""
     out: list[tuple[float, float]] = []
-    for i, (x, y) in enumerate(polyline):
+    for i, (x, y) in builtins.enumerate(polyline):
         rx, ry = round(x, DECIMALS), round(y, DECIMALS)
         if out:
             px, py = polyline[i - 1]
