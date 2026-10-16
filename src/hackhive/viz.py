@@ -907,11 +907,12 @@ def to_png(fig: Figure, dpi: int = 150) -> bytes:
 
 _SLIDE_IN = (16.0, 9.0)  # slide 8's 16:9 frame, in inches
 _SLIDE_DPI = 200
+_ROW_H = 0.065  # one table row, as a fraction of the panel's height
 
 
 def hub_count_badge(bounds: Any) -> str:
     """`6 hubs, proven minimal against a lower bound of 2`: H against the lower bound, from the
-    sidecar's `bounds` (#22's proof). #24's badge wording can replace this text."""
+    sidecar's `bounds` (#22's proof: `exhaustive` only when H is the fewest any zoning uses)."""
     h, lb = bounds.k_found, bounds.k_lb
     hubs = f"{h} hub{'' if h == 1 else 's'}"
     if h == lb:
@@ -950,6 +951,7 @@ def draw_presentation(plan: Plan, result: Any) -> Figure:
         va="top",
         gid="presentation:badge",
     )
+    height = _ROW_H * (len(rows) + 1)  # a fixed bbox would stretch a one-hub row to 2 inches
     table = right.table(
         cellText=[
             [
@@ -963,15 +965,16 @@ def draw_presentation(plan: Plan, result: Any) -> Figure:
             for r, h in zip(rows, sub.hubs, strict=True)
         ],
         colLabels=["Hub", "Rooms", "m²", "Nodes", "Ring (m)", "Bends"],
-        colWidths=[0.09, 0.37, 0.11, 0.12, 0.16, 0.12],
-        bbox=[0, 0.4, 1, 0.45],
+        colWidths=[0.08, 0.44, 0.1, 0.11, 0.16, 0.11],
+        cellLoc="left",  # right-aligned cells overflow leftwards into the Hub column
+        bbox=[0, 0.85 - height, 1, height],
     )
     table.auto_set_font_size(False)
     table.set_fontsize(10)
     w = c.cost_weights
     right.text(
         0,
-        0.33,
+        0.8 - height,
         f"J = {w.length:g}·L + {w.cross:g}·X + {w.overlap:g}·O + {w.bend:g}·B\n"
         f"L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B}\nJ {m.J:.3f}",
         fontsize=12,
@@ -983,7 +986,7 @@ def draw_presentation(plan: Plan, result: Any) -> Figure:
     gap = checker.area_gap(r.area_m2 for r in rows)
     right.text(
         0,
-        0.08,
+        0.65 - height,  # under the three J lines
         f"Assigned-area gap (max − min): {gap:.1f} m²",
         fontsize=12,
         color=INK_SECONDARY,

@@ -20,7 +20,7 @@ from hackhive.ui import (
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "app.py")
 FIXTURES = ROOT / "tests" / "fixtures"
-TIMEOUT = 60  # the first draw of a plan takes a second or two on a cold laptop
+TIMEOUT = 120  # 13344 alone takes ~60 s since #95/#101; 60 flaked on a busy runner (#107)
 
 
 def _run(at: AppTest | None = None) -> AppTest:
