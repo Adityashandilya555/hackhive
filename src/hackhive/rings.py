@@ -40,6 +40,7 @@ class Hub:
     room_id: str
     location: Point2
     ring: list[str]  # [hub_id, node ids in visiting order, hub_id]
+    assigned_rooms: list[str]  # the zone, hub's room first (slide 8)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -99,15 +100,18 @@ def first_ring(
         return sum(1 for nb in inside.neighbors(room) if nb != room) if room in inside else 0
 
     room = min({cand.room_id for cand in cands}, key=lambda r: (-links(r), -area[r], r))
+    # to the µm, so equal totals tie on xy whatever the float sum order (3086's hub moved a cell
+    # between Python 3.11 and 3.12+, whose sum() is compensated; #79 CI)
     best = min(
         (cand for cand in cands if cand.room_id == room),
-        key=lambda cand: (sum(manhattan(cand.xy, n.xy) for n in nodes), cand.xy),
+        key=lambda cand: (round(sum(manhattan(cand.xy, n.xy) for n in nodes), 6), cand.xy),
     )
 
     points = {hub_id: best.xy, **{n.id: n.xy for n in nodes}}
     ring = order_ring(hub_id, [n.id for n in nodes], lambda a, b: manhattan(points[a], points[b]))
     warnings = ["wall_clearance_only"] if best.wall_clearance_only else []
-    return Hub(hub_id, room, best.xy, ring, warnings)
+    assigned = [room, *sorted(zone - {room})]
+    return Hub(hub_id, room, best.xy, ring, assigned, warnings)
 
 
 def order_ring(hub: str, nodes: Sequence[str], dist: Callable[[str, str], float]) -> list[str]:

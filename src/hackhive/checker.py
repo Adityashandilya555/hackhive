@@ -963,6 +963,46 @@ def metrics_text(m: Metrics | None) -> str:
     return f"H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}"
 
 
+def reported_mismatches(sub: Submission, c: Constraints = _DEFAULT) -> list[str]:
+    """Reported values that disagree with the polylines by more than the tolerance (#23).
+
+    The organisers ignore `length_m`, `ring_length_m` and `reported_metrics` and recompute them
+    (C42), so a mismatch breaks no rule: it's a warning that our writer (or a hand edit) wrote
+    something else than the cable drawn. Non-finite coordinates are rule 4's, not this."""
+    tol = c.tolerance_m
+    out: list[str] = []
+
+    def differ(reported: float, recomputed: float) -> bool:
+        return math.isfinite(recomputed) and abs(reported - recomputed) > tol
+
+    total = 0.0
+    for h in sub.hubs:
+        ring = 0.0
+        for s in h.route_segments:
+            length = segment_length(s.polyline) if len(s.polyline) >= 2 else 0.0
+            ring += length
+            if differ(s.length_m, length):
+                out.append(
+                    f"reported {h.hub_id} {s.from_}→{s.to} length_m {s.length_m:.3f} m, "
+                    f"recomputed {length:.3f} m (the organisers recompute it, C42)"
+                )
+        total += ring
+        if differ(h.ring_length_m, ring):
+            out.append(
+                f"reported {h.hub_id} ring_length_m {h.ring_length_m:.3f} m, "
+                f"recomputed {ring:.3f} m (the organisers recompute it, C42)"
+            )
+    rm = sub.reported_metrics
+    if rm.hub_count != len(sub.hubs):
+        out.append(f"reported hub_count {rm.hub_count}, the submission has {len(sub.hubs)} hubs")
+    if differ(rm.total_length_m, total):
+        out.append(
+            f"reported total_length_m {rm.total_length_m:.3f} m, recomputed {total:.3f} m "
+            "(the organisers recompute it, C42)"
+        )
+    return out
+
+
 @dataclass(frozen=True)
 class Report:
     """Everything a reviewer sees: what the CLI prints and the app's panel renders (#12)."""

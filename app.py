@@ -16,12 +16,13 @@ import networkx as nx
 import streamlit as st
 
 from hackhive import checker, graph
-from hackhive.contracts import Constraints, Plan
+from hackhive.contracts import Constraints, Plan, Sidecar
 from hackhive.io import load_plan
-from hackhive.solve import solve, submit
+from hackhive.solve import Result, solve, submit
 from hackhive.ui import (
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
+    case_tags,
     checklist_line,
     fixture_ids,
     fixture_label,
@@ -36,7 +37,9 @@ from hackhive.ui import (
     room_counts,
     solution_label,
     solution_paths,
+    status_banner,
     submission_mismatch,
+    tag_chips,
     verdict_line,
     violation_line,
 )
@@ -80,16 +83,13 @@ def picture(source: str, key: str, content: bytes | None = None, show: bool = Fa
 @st.cache_data(max_entries=64, show_spinner="Solving…")
 def solved(source: str, key: str, content: bytes | None) -> tuple[str | None, str]:
     """`solve()` (#16) through the submit gate (C43), into a temp folder per input: the path of
-    the submission it wrote (None when the gate refused one) and the sidecar's status."""
+    the submission it wrote (None when the gate refused one) and the sidecar as JSON (#83)."""
     plan, _ = load(source, key, content)
     result = solve(plan, PRESET)
     digest = hashlib.sha256(f"{source}\0{key}\0".encode() + (content or b"")).hexdigest()[:16]
     written = submit(result, SOLVED_DIR / digest)
     sub = next((p for p in written if not p.name.endswith(".sidecar.json")), None)
-    side = result.sidecar
-    return (
-        str(sub) if sub else None
-    ), f"{side.status}: {side.reason}" if side.reason else side.status
+    return (str(sub) if sub else None), result.sidecar.model_dump_json()
 
 
 @st.cache_data(max_entries=64, show_spinner="Drawing the solution…")
@@ -161,12 +161,13 @@ def pick_solution(plan: Plan, best: Path | None) -> Path | None:
 
 
 def best_tab(
-    source: str, key: str, content: bytes | None, plan: Plan, path: Path | None, status: str
+    source: str, key: str, content: bytes | None, plan: Plan, path: Path | None, side: Sidecar
 ) -> None:
-    """Slide 5's expected solution: the overlay, the per-hub summary (C25) and the reviewer
-    checklist (C26), all from the submission and the checker mirror."""
+    """Slide 5's expected solution: the status banner (#83), the overlay, the per-hub summary
+    (C25) and the reviewer checklist (C26), all from the submission and the checker mirror."""
+    banner(side, plan)
     if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
-        st.warning(f"No valid design for this plan ({status}). The Plan tab still shows it.")
+        st.caption("No design was submitted. The Plan tab still shows the plan.")
         return
     try:
         sub = load_submission(path)
@@ -194,6 +195,11 @@ def best_tab(
             st.dataframe(hub_table(plan, sub, rep.metrics), hide_index=True)
     with panel:
         reviewer_panel(rep)
+
+
+def banner(side: Sidecar, plan: Plan | None) -> None:
+    kind, text = status_banner(side, plan)
+    getattr(st, kind)(text)
 
 
 def reviewer_panel(rep: checker.Report) -> None:
@@ -257,25 +263,33 @@ if choice is None:
 
 source, key, content = choice
 try:
-    plan, _ = load(source, key, content)
+    plan, G = load(source, key, content)
 except (OSError, ValueError) as e:
-    st.error(f"Can't draw this plan. {e}")
+    banner(Sidecar(plan_id=key, status="input_error", reason=str(e)), None)
     st.stop()
 except Exception as e:  # a plan we can parse but not handle further: say so, never a traceback
-    st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
+    banner(Sidecar(plan_id=key, status="input_error", reason=f"{type(e).__name__}: {e}"), None)
     st.stop()
 
 try:
-    best_path, status = solved(source, key, content)
+    best_path, side_json = solved(source, key, content)
+    side = Sidecar.model_validate_json(side_json)
 except Exception as e:  # solve() never raises for a loaded plan; the landing tab never tracebacks
-    best_path, status = None, f"{type(e).__name__}: {e}"
+    best_path = None
+    side = Sidecar(plan_id=plan.plan_id, status="infeasible", reason=f"{type(e).__name__}: {e}")
 with solution_slot:
     solution = pick_solution(plan, Path(best_path) if best_path else None)
 
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
+try:
+    best_sub = load_submission(Path(best_path)) if best_path else None
+except ValueError:  # a stale cached path (temp dir cleaned): the design tags just drop out
+    best_sub = None
+if tags := case_tags(plan, G, Result(plan, best_sub, side)):
+    st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
 best, plan_tab = st.tabs(["Best", "Plan"])
 with best:
-    best_tab(source, key, content, plan, solution, status)
+    best_tab(source, key, content, plan, solution, side)
 with plan_tab:
     drawing, panel = st.columns([5, 3], gap="large")
     with drawing:
