@@ -868,6 +868,32 @@ def draw_solution(
     return fig
 
 
+def draw_gap_histogram(counts: Mapping[int, int]) -> Figure:
+    """The Batch tab's histogram (#33): submitted plans per H − LB, the hubs used above the lower
+    bound. One bar per gap that occurs, its count written on it; integer ticks across the range."""
+    fig = Figure(figsize=(5, 2.6), facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot()
+    ax.set_facecolor(SURFACE)
+    for gap, k in counts.items():
+        ax.bar(gap, k, width=0.8, color=LINK_DOOR, gid=f"gap:{gap}", zorder=2)
+        ax.text(gap, k, f"{k}", ha="center", va="bottom", fontsize=_LABEL_PT + 1, color=INK)
+    top = max(counts.values(), default=1)
+    ax.set_xticks(range(0, max(counts, default=0) + 1))
+    ax.set_ylim(0, top * 1.2 + 0.1)
+    ax.set_xlabel(
+        "H − LB (hubs above the lower bound)", fontsize=_LABEL_PT + 1, color=INK_SECONDARY
+    )
+    ax.set_ylabel("plans", fontsize=_LABEL_PT + 1, color=INK_SECONDARY)
+    ax.tick_params(colors=INK_SECONDARY, labelsize=_LABEL_PT + 1)
+    ax.grid(axis="y", color=INK_SECONDARY, alpha=0.15, zorder=0)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(INK_SECONDARY)
+    return fig
+
+
 WHAT_IF_GID = "what-if-label"
 
 
