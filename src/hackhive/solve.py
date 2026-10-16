@@ -111,6 +111,7 @@ class Result:
     plan: Plan | None
     submission: Submission | None
     sidecar: Sidecar
+    graph: nx.Graph | None = None  # solve()'s room graph, reused for case tags (#32)
 
     @property
     def submittable(self) -> bool:
@@ -497,6 +498,7 @@ def solve(
     notes = [*plan.warnings, *_fold_notes(plan), *_name_notes(plan.plan_id)]
     if note := what_if_note(c):  # #30: labelled, and `Result.submittable` keeps it unwritten
         notes.insert(0, note)
+    G = build_graph(plan, c)
     base = {"warnings": notes, "folded_parts": list(plan.folded_parts), "frame": plan.frame}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
@@ -510,7 +512,7 @@ def solve(
             bounds=Bounds(k_lb=k_lb),
             **base,
         )
-        return Result(plan, None, side)
+        return Result(plan, None, side, G)
 
     def designed(d: _Design, skipped: Sequence[_Design]) -> Result:
         sub, m, violations = d.submission, d.metrics, d.violations
@@ -549,9 +551,9 @@ def solve(
             folded_parts=list(plan.folded_parts),
             frame=plan.frame,
         )
-        return Result(plan, sub, side)
+        return Result(plan, sub, side, G)
 
-    g = eligible_graph(build_graph(plan, c))
+    g = eligible_graph(G)
     try:
         zonings = _zonings(plan, g, c)
     except Infeasible as e:

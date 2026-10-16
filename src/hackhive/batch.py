@@ -9,15 +9,20 @@ from __future__ import annotations
 import csv
 import gzip
 import json
+import re
 import statistics
+import sys
 import time
+import zlib
 from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
-from hackhive.contracts import Constraints
+from hackhive import __version__
+from hackhive.cases import case_tags
+from hackhive.contracts import Constraints, Provenance
 from hackhive.io import InputFormatError, load_plan
-from hackhive.solve import Result, solve, submit
+from hackhive.solve import Result, _sidecar, solve, submit
 from hackhive.zoning import eligible_area_and_nodes
 
 COLUMNS = [
@@ -38,49 +43,87 @@ COLUMNS = [
     "ms",
     "status",
     "reason",
+    "tags",
 ]
 # the shared sample first (#32 HUMAN step), else the full ResPlan export
 DEFAULT_SOURCES = (Path("data/sample/test-100.jsonl.gz"), Path("data/resplan/plans.jsonl"))
 
 
-def _records(source: Path) -> Iterator[dict]:
-    """Raw plans from a `.jsonl` / `.jsonl.gz` file (one plan per line) or a directory of plan
-    JSON files (the local test-split export), in file order."""
+def _records(source: Path) -> Iterator[tuple[str, dict | None, str]]:
+    """`(where, plan, why)` per record of a `.jsonl` / `.jsonl.gz` file (one plan per line) or a
+    directory of plan JSON files (the local test-split export), in file order. An unreadable
+    record has `plan` None and `why` saying why, so the batch can row it and carry on."""
     if source.is_dir():
         for p in sorted(source.glob("*.json")):
-            yield json.loads(p.read_text(encoding="utf-8"))
+            yield p.stem, *_parse(p.read_bytes())
         return
     opener = gzip.open if source.suffix == ".gz" else open
-    with opener(source, "rt", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                yield json.loads(line)
+    i = 0
+    try:
+        with opener(source, "rb") as f:
+            for i, line in enumerate(f, start=1):
+                if line.strip():
+                    yield f"line{i}", *_parse(line)
+    except (OSError, EOFError, zlib.error) as e:  # a cut-off download: keep the rows read
+        yield f"line{i + 1}", None, f"unreadable file ({e})"
 
 
-def plans(source: Path, split: str) -> Iterator[dict]:
-    """The split's plans, `augmented` copies skipped. The split comes from a `split.json` (keyed
-    by ResPlan `id`) beside the source; without one, the source is taken as already that split."""
+def _parse(data: bytes) -> tuple[dict | None, str]:
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except UnicodeDecodeError as e:
+        return None, f"not UTF-8 ({e})"
+    except json.JSONDecodeError as e:
+        return None, f"not JSON ({e})"
+    return (raw, "") if isinstance(raw, dict) else (None, "not a JSON object")
+
+
+def plans(source: Path, split: str) -> Iterator[tuple[str, dict | None, str]]:
+    """The split's records, `augmented` copies skipped. The split comes from a `split.json`
+    (keyed by ResPlan `id`) beside the source; without one, the source is taken as already that
+    split. With one, an unreadable record can't be placed in the split, so it is dropped with a
+    warning on stderr."""
     split_file = (source if source.is_dir() else source.parent) / "split.json"
     ids = None
     if split_file.is_file():
         ids = set(json.loads(split_file.read_text(encoding="utf-8"))[split])
-    for raw in _records(source):
-        if raw.get("augmented"):
+    for where, raw, why in _records(source):
+        if raw is None:
+            if ids is not None:
+                print(f"skipped {where}: {why}", file=sys.stderr)
+                continue
+        elif raw.get("augmented"):
             continue
-        if ids is None or raw.get("id") in ids:
-            yield raw
+        elif ids is not None and not (isinstance(raw.get("id"), int | str) and raw["id"] in ids):
+            continue
+        yield where, raw, why
 
 
-def _row(raw: dict, c: Constraints, out_dir: Path) -> dict:
+def _input_error(
+    pid: str, reason: str, detail: str, c: Constraints, out_dir: Path, t0: float
+) -> dict:
+    """An `input_error` row and its sidecar, both with `reason` (a fixed kind, grouped in the
+    summary); the detail goes to the sidecar's warnings."""
+    prov = Provenance(version=__version__)
+    side = _sidecar(pid, c, prov, status="input_error", reason=reason, warnings=[detail])
+    submit(Result(None, None, side), out_dir)
+    row = dict.fromkeys(COLUMNS, "")
+    row.update(plan_id=pid, submitted=False, status="input_error", reason=reason)
+    row["ms"] = round((time.perf_counter() - t0) * 1000)
+    return row
+
+
+def _row(where: str, raw: dict | None, why: str, c: Constraints, out_dir: Path) -> dict:
     t0 = time.perf_counter()
+    if raw is None:
+        return _input_error(where, f"input_error: {why.split(' (')[0]}", why, c, out_dir, t0)
     try:
         plan = load_plan(raw, c)
     except (InputFormatError, ValueError) as e:
-        row = dict.fromkeys(COLUMNS, "")
         pid = raw.get("plan_id") or f"PLAN_{raw.get('id')}"
-        row.update(plan_id=pid, submitted=False, status="input_error", reason=f"input_error: {e}")
-        row["ms"] = round((time.perf_counter() - t0) * 1000)
-        return row
+        # io's messages start `plan <id>: ` and may end `, got <value>`: drop both to group them
+        kind = re.sub(r"^plan \S+: ", "", str(e)).split(", got ")[0]
+        return _input_error(str(pid), f"input_error: {kind}", str(e), c, out_dir, t0)
     result: Result = solve(plan, c)
     submit(result, out_dir)
     ms = round((time.perf_counter() - t0) * 1000)
@@ -98,11 +141,22 @@ def _row(raw: dict, c: Constraints, out_dir: Path) -> dict:
         "ms": ms,
         "status": side.status,
         "reason": side.reason or "",
+        "tags": _tags(plan, c, result),
     }
     for k in ("H", "L", "X", "O", "B", "J", "area_gap"):
         v = getattr(cost, k) if cost is not None else ""
         row[k] = round(v, 4) if isinstance(v, float) else v
     return row
+
+
+def _tags(plan, c: Constraints, result: Result) -> str:
+    """`cases.case_tags` ids (stable keys for #33, unlike the labels). A tag failure must not cost
+    the plan's row, so it leaves the column empty."""
+    try:
+        return ";".join(t.id for t in case_tags(plan, result.graph, result))
+    except Exception as e:  # noqa: BLE001
+        print(f"{result.sidecar.plan_id}: no case tags ({e})", file=sys.stderr)
+        return ""
 
 
 def run(source: Path, split: str, n: int, out: Path, c: Constraints | None = None) -> list[dict]:
@@ -112,10 +166,10 @@ def run(source: Path, split: str, n: int, out: Path, c: Constraints | None = Non
     out.parent.mkdir(parents=True, exist_ok=True)
     out_dir = out.parent / out.stem
     rows = []
-    for raw in plans(Path(source), split):
+    for rec in plans(Path(source), split):
         if len(rows) >= n:
             break
-        rows.append(_row(raw, c, out_dir))
+        rows.append(_row(*rec, c, out_dir))
     with out.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=COLUMNS)
         w.writeheader()
@@ -151,7 +205,7 @@ def summary(rows: list[dict]) -> str:
         )
     reasons = Counter(r["reason"] for r in rows if r["status"] in ("infeasible", "input_error"))
     lines += [f"  {k}× {why}" for why, k in reasons.most_common()]
-    ms = sorted(r["ms"] for r in rows)
+    ms = sorted(r["ms"] for r in loaded)
     if ms:
         p95 = ms[min(len(ms) - 1, round(0.95 * (len(ms) - 1)))]
         lines.append(f"time per plan: p50 {statistics.median(ms):.0f} ms · p95 {p95} ms")
