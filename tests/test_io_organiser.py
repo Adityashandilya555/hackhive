@@ -227,3 +227,135 @@ def test_a_node_room_id_that_names_no_eligible_room_is_an_input_error():
     raw["nodes"][0]["room_id"] = "R99"
     with pytest.raises(InputFormatError, match="R99"):
         load_plan(raw)
+
+
+# --------------------------------------------------------------------------- solved (#16)
+
+
+def _solve_raw(raw: dict, tmp_path: Path, name: str = "plan.json"):
+    from hackhive.solve import solve_file
+
+    path = tmp_path / name
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    return solve_file(path)
+
+
+def _leg_ends(sub) -> dict[str, list[tuple[float, float]]]:
+    ends: dict[str, list[tuple[float, float]]] = {}
+    for hub in sub.hubs:
+        for seg in hub.route_segments:
+            ends.setdefault(seg.from_, []).append(tuple(seg.polyline[0]))
+            ends.setdefault(seg.to, []).append(tuple(seg.polyline[-1]))
+    return ends
+
+
+def _assert_solved_in_the_nodes_frame(raw: dict, result) -> None:
+    """No `error`, the organiser's ids verbatim, and every leg ends exactly on a given node
+    point (scaled, never moved or transformed back: the checker matches *their* points)."""
+    from hackhive.checker import check_rules
+
+    sub, side = result.submission, result.sidecar
+    assert result.submittable, side.reason
+    assert sub.plan_id == side.plan_id == raw["plan_id"]
+    room_ids = {r["id"] for r in raw["rooms"]}
+    for hub in sub.hubs:
+        assert hub.room_id in room_ids and set(hub.assigned_rooms) <= room_ids
+    assert sorted(n for h in sub.hubs for n in h.assigned_nodes) == sorted(
+        n["id"] for n in raw["nodes"]
+    )
+    m = result.plan.m_per_unit
+    given = {n["id"]: (n["x"] * m, n["y"] * m) for n in raw["nodes"]}
+    ends = _leg_ends(sub)
+    for nid, xy in given.items():
+        assert len(ends[nid]) == 2
+        assert all(e == pytest.approx(xy, abs=1e-9) for e in ends[nid]), nid
+    errors = [v for v in check_rules(load_plan(raw), sub) if v.severity == "error"]
+    assert not errors and side.violations == check_rules(load_plan(raw), sub)
+
+
+def test_solving_the_guess_uses_the_organiser_ids_verbatim(tmp_path):
+    """C46, C48: plan_id, room ids and node ids pass through to the submission."""
+    raw = _guess()
+    result = _solve_raw(raw, tmp_path)
+    _assert_solved_in_the_nodes_frame(raw, result)
+    assert result.sidecar.frame == "identity"
+
+
+@pytest.mark.parametrize("frame", ["flip_y", "origin_shift"])
+def test_a_reframed_guess_is_solved_in_the_nodes_frame(frame, tmp_path):
+    """#61 review (Rohit): the geometry moved into the nodes' frame, so the writer emits that
+    frame as is; nothing is transformed back on output. The sidecar records the frame."""
+    raw = _guess()
+    x0, y0, _, y1 = _units_bounds(raw)
+    for n in raw["nodes"]:
+        if frame == "flip_y":
+            n["y"] = y0 + y1 - n["y"]
+        else:
+            n["x"] -= x0
+            n["y"] -= y0
+    result = _solve_raw(raw, tmp_path)
+    assert result.plan.frame == result.sidecar.frame == frame
+    assert any(w.startswith(f"frame: {frame}") for w in result.sidecar.warnings)
+    _assert_solved_in_the_nodes_frame(raw, result)
+    inner = result.plan.inner
+    assert all(inner.covers(Point(h.location.x, h.location.y)) for h in result.submission.hubs)
+
+
+@pytest.mark.parametrize(
+    ("break_it", "says"),
+    [
+        (lambda raw: raw.pop("area"), "missing area"),
+        (lambda raw: raw.pop("inner"), "missing inner"),
+        (
+            lambda raw: [n.update(x=n["x"] + 1e6) for n in raw["nodes"]],
+            "frame: 5 nodes outside rooms",
+        ),
+    ],
+    ids=["no-area", "no-inner", "nodes-outside"],
+)
+def test_an_unreadable_organiser_plan_is_an_input_error_sidecar(break_it, says, tmp_path):
+    """C21, C43: no submission, never a crash; the sidecar says `input_error: …` and why."""
+    from hackhive.solve import submit
+
+    raw = _guess()
+    break_it(raw)
+    result = _solve_raw(raw, tmp_path)
+    written = submit(result, tmp_path / "out")
+    assert [p.name for p in written] == ["PLAN_5924.sidecar.json"]
+    side = result.sidecar
+    assert side.status == "input_error" and result.submission is None
+    assert side.reason.startswith("input_error: ") and says in side.reason
+
+
+def test_a_node_a_centimetre_outside_is_kept_and_the_sidecar_warns(tmp_path):
+    """C3, C9: kept unmoved, assigned to its room, and the sidecar carries the warning."""
+    raw = _guess()
+    m = load_plan(GUESS).m_per_unit
+    node = raw["nodes"][0]
+    room = next(r for r in raw["rooms"] if r["id"] == node["room_id"])
+    poly = shape(room["polygon"])
+    ray = LineString([(node["x"], node["y"]), (poly.bounds[0] - 10, node["y"])])
+    node["x"] = min(p.x for p in shapely.get_parts(ray.intersection(poly.boundary))) - 0.01 / m
+    result = _solve_raw(raw, tmp_path)
+    got = next(n for n in result.plan.nodes if n.id == node["id"])
+    assert got.xy == pytest.approx((node["x"] * m, node["y"] * m), abs=1e-9)
+    assert got.room_id == node["room_id"]
+    assert any(node["id"] in w and "outside" in w for w in result.sidecar.warnings)
+
+
+def test_cli_solves_the_guess_and_reports_an_input_error(tmp_path, capsys):
+    from hackhive import cli
+
+    assert cli.main(["solve", str(GUESS), "--out", str(tmp_path / "ok")]) == 0
+    assert sorted(p.name for p in (tmp_path / "ok").iterdir()) == [
+        "PLAN_5924.json",
+        "PLAN_5924.png",
+        "PLAN_5924.sidecar.json",
+    ]
+    raw = _guess()
+    del raw["area"]
+    bad = tmp_path / "no-area.json"
+    bad.write_text(json.dumps(raw), encoding="utf-8")
+    assert cli.main(["solve", str(bad), "--out", str(tmp_path / "bad")]) == 1
+    assert [p.name for p in (tmp_path / "bad").iterdir()] == ["PLAN_5924.sidecar.json"]
+    assert "input_error" in capsys.readouterr().out
