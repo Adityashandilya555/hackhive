@@ -1,0 +1,304 @@
+[
+  {
+    "case": "ok",
+    "title": "A clean design",
+    "look_for": "green ✓: every rule met, nothing to explain",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "strict_only",
+    "title": "Strict-only design",
+    "look_for": "orange banner: valid only if the organisers allow the strict readings (Q2, Q4)",
+    "plan": "case-strict-only-15333.json",
+    "expected": {
+      "status": "submitted_strict_only",
+      "k_found": 2,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "room_over_cap",
+    "title": "A room over 100 m²",
+    "look_for": "red banner names the room and its m²; the Plan tab still draws (try the area-cap what-if)",
+    "plan": "case-room-over-cap-1782.json",
+    "expected": {
+      "status": "infeasible",
+      "tags": [
+        "open_passage",
+        "en_suite"
+      ]
+    }
+  },
+  {
+    "case": "grid_failed",
+    "title": "Grid failed",
+    "look_for": "a door or passage too thin for the 10 cm grid (#78)",
+    "plan": "case-grid-failed-2332.json",
+    "expected": {
+      "status": "infeasible",
+      "tags": [
+        "open_passage",
+        "folded"
+      ]
+    }
+  },
+  {
+    "case": "no_hub_capable",
+    "title": "No hub-capable room",
+    "look_for": "rooms too thin for a hub 0.5 m from every wall",
+    "plan": "case-no-hub-capable-9443.json",
+    "expected": {
+      "status": "infeasible",
+      "tags": [
+        "open_passage",
+        "disconnected",
+        "isolated",
+        "low_clearance"
+      ]
+    }
+  },
+  {
+    "case": "open_passage",
+    "title": "open passage",
+    "look_for": "cable crosses a wall-less gap",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "en_suite",
+    "title": "en-suite single-door",
+    "look_for": "a room whose only other door is its own bathroom: retracing in is legal",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "one_node_ring",
+    "title": "one-node ring",
+    "look_for": "hub → node → hub: out-and-back, or a thin two-lane loop when the node is far (#81)",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "lb_met",
+    "title": "hubs = lower bound",
+    "look_for": "no zoning can use fewer hubs",
+    "plan": "../plans/plan-3086.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 1,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "lb_met"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_1",
+    "title": "hubs > lower bound (+1, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_2",
+    "title": "hubs > lower bound (+2, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "case-above-lb-2-1715.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 4,
+      "tags": [
+        "open_passage",
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_3",
+    "title": "hubs > lower bound (+3, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "case-above-lb-3-14608.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 5,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs"
+      ]
+    }
+  },
+  {
+    "case": "above_lb_4",
+    "title": "hubs > lower bound (+4, proven minimum)",
+    "look_for": "door links force extra zones; every zoning was checked",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  },
+  {
+    "case": "many_hubs",
+    "title": "4+ hubs",
+    "look_for": "many rings share the doors",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  },
+  {
+    "case": "disconnected",
+    "title": "disconnected groups",
+    "look_for": "rooms no door joins need own hubs",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "isolated",
+    "title": "isolated eligible room",
+    "look_for": "no door or open passage to another eligible room: it needs its own hub",
+    "plan": "../plans/plan-2814.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 2,
+      "tags": [
+        "en_suite",
+        "one_node_ring",
+        "above_lb",
+        "disconnected",
+        "isolated"
+      ]
+    }
+  },
+  {
+    "case": "multi_living",
+    "title": "multi-part living",
+    "look_for": "each living part has a node",
+    "plan": "../plans/plan-576.json",
+    "expected": {
+      "status": "ok",
+      "k_found": 6,
+      "tags": [
+        "open_passage",
+        "one_node_ring",
+        "above_lb",
+        "many_hubs",
+        "disconnected",
+        "isolated",
+        "multi_living"
+      ]
+    }
+  },
+  {
+    "case": "low_clearance",
+    "title": "node clearance < 0.5 m",
+    "look_for": "a node close to a wall",
+    "plan": "case-no-hub-capable-9443.json",
+    "expected": {
+      "status": "infeasible",
+      "tags": [
+        "open_passage",
+        "disconnected",
+        "isolated",
+        "low_clearance"
+      ]
+    }
+  },
+  {
+    "case": "folded",
+    "title": "folded sliver",
+    "look_for": "a living sliver merged into its neighbour",
+    "plan": "case-grid-failed-2332.json",
+    "expected": {
+      "status": "infeasible",
+      "tags": [
+        "open_passage",
+        "folded"
+      ]
+    }
+  }
+]

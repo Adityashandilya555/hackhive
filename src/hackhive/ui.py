@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -292,6 +293,77 @@ Q2_URL = "https://github.com/Adityashandilya555/hackhive/blob/main/docs/clarifyi
 _ROOM_OVER_CAP = re.compile(r"room (\S+) is ([\d.]+) m² > ([\d.]+) m²")
 
 
+# --------------------------------------------------------------------------- optimality badge
+
+# the proofs that make H the fewest hubs possible (#24); greedy and none prove nothing
+PROOFS = ("exhaustive", "lb_met")
+
+
+def proven_min_hubs(side: Sidecar) -> int | None:
+    """The hub count solve() proved minimal (`bounds.proof` is `lb_met` or `exhaustive`, set
+    per plan by `solve._proof`, #22), or None when unproven."""
+    b = side.bounds
+    return b.k_found if b is not None and b.proof in PROOFS else None
+
+
+@dataclass(frozen=True)
+class Badge:
+    kind: str  # the Streamlit call: success (✓) or error (✗, only for an unproven H > LB)
+    text: str
+    explain: str | None = None  # why H > LB, for the expander; None when H = LB
+
+
+def _why_above_lb(G: nx.Graph, lb: int) -> str:
+    """Why no split into `lb` zones exists, from the same checks as `case_tags`' `isolated` and
+    `disconnected` tags; the living-room star is the fallback when neither applies (#98 review)."""
+    E = graph.eligible_graph(G)
+    lone = sum(E.degree(r) == 0 for r in E)
+    groups = nx.number_connected_components(E) - lone
+    why = []
+    if lone:
+        why.append(
+            f"{lone} eligible room{' has' if lone == 1 else 's have'} no door or open passage "
+            f"to another eligible room, so {'it needs its' if lone == 1 else 'each needs its'} "
+            "own hub."
+        )
+    if groups > 1:
+        why.append(f"The other rooms form {groups} groups that no door joins: each needs own hubs.")
+    zones = f"{lb} zone{'' if lb == 1 else 's'}"
+    if not why:
+        return (
+            "when rooms open only onto the living room (a star around it), no split into "
+            f"{zones} fits both caps."
+        )
+    return f"no split into {zones} exists here. " + " ".join(why)
+
+
+def optimality_badge(side: Sidecar, plan: Plan, G: nx.Graph, c: Constraints) -> Badge | None:
+    """The Best tab's badge (#24, C7, T7) from the sidecar's bounds and cost and the room graph
+    `G`; None without a design. "optimal" is written only under a proof and refers to the hub
+    count, never to J. J is solve()'s design, not a hand-made file picked in the Solution box."""
+    b, m = side.bounds, side.cost
+    if b is None or b.k_found is None or m is None:
+        return None
+    k, lb = b.k_found, b.k_lb
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    hubs = f"{k} hub{'' if k == 1 else 's'}"
+    cost = f"solve()'s design: J = {m.J:.2f} (L {m.L:.2f} m · X {m.X} · O {m.O:.2f} m · B {m.B})"
+    if k == lb:
+        return Badge(
+            "success", f"✓ {hubs} = lower bound ({area:.1f} m², {len(plan.nodes)} nodes) · {cost}"
+        )
+    if proven_min_hubs(side) == k:
+        return Badge(
+            "success",
+            f"✓ proven minimum · {hubs} · optimal (exhaustive search) · LB {lb} (+{k - lb})"
+            f" · {cost} · optimal refers to the hub count only",
+            f"The lower bound {lb} counts only area (≤ {c.max_area_m2:g} m²) and nodes "
+            f"(≤ {c.max_nodes}) per hub. Each zone must also be connected through its own doors: "
+            f"{_why_above_lb(G, lb)} Every zoning was checked, so {k} is the fewest possible.",
+        )
+    return Badge("error", f"✗ {hubs} > lower bound {lb} (+{k - lb}) · not proven minimal · {cost}")
+
+
 @dataclass(frozen=True)
 class CaseTag:
     id: str
@@ -407,6 +479,136 @@ def status_banner(side: Sidecar, plan: Plan | None) -> tuple[str, str]:
     if side.status == "infeasible":
         return "error", f"✗ **infeasible**: {_infeasible_line(reason, plan)}"
     return "error", f"✗ **input_error**: {md_text(reason)}"
+
+
+# --------------------------------------------------------------------------- case library (#84)
+
+CASE_DIR = ROOT / "tests" / "fixtures" / "cases"
+CASES_JSON = CASE_DIR / "cases.json"
+# kept as regression examples once a fix makes their plan stop showing the case (#84, #78)
+REGRESSION_CASES = frozenset({"grid_failed"})
+
+
+@dataclass(frozen=True)
+class CaseFacts:
+    """What one solved plan shows: the sidecar's status and reason, its hub counts and tags."""
+
+    status: str
+    reason: str
+    k_lb: int | None
+    k_found: int | None
+    tags: tuple[CaseTag, ...]
+
+    def tag(self, tag_id: str) -> CaseTag | None:
+        return next((t for t in self.tags if t.id == tag_id), None)
+
+    def expected(self) -> dict[str, Any]:
+        """`cases.json`'s `expected`: the status, the hub count when there's a design, the tags."""
+        out: dict[str, Any] = {"status": self.status}
+        if self.k_found is not None:
+            out["k_found"] = self.k_found
+        out["tags"] = [t.id for t in self.tags]
+        return out
+
+
+def case_facts(plan: Plan, result: Result) -> CaseFacts:
+    """A plan's `CaseFacts` from `solve(plan)`'s result, with the tags the app's chips show."""
+    side = result.sidecar
+    b = side.bounds
+    k_found = b.k_found if b is not None and result.submission is not None else None
+    tags = case_tags(plan, graph.build_graph(plan), result)
+    k_lb = b.k_lb if b is not None else None
+    return CaseFacts(side.status, side.reason or "", k_lb, k_found, tuple(tags))
+
+
+@dataclass(frozen=True)
+class Case:
+    """One dataset case. A tag case takes its title and `look_for` from the tag (`case_tags`)
+    unless it names its own; a status case always names them."""
+
+    id: str
+    match: Callable[[CaseFacts], bool]
+    title: str | None = None
+    look_for: str | None = None
+    tag: str | None = None
+
+    def describe(self, facts: CaseFacts) -> tuple[str, str]:
+        t = facts.tag(self.tag) if self.tag else None
+        title = self.title or (t.label if t else self.id)
+        return title, self.look_for or (t.look_for if t else "")
+
+
+def _tag_case(tag_id: str, **kw: Any) -> Case:
+    return Case(tag_id, lambda f: f.tag(tag_id) is not None, tag=tag_id, **kw)
+
+
+def _above_lb(extra: int) -> Case:
+    def match(f: CaseFacts) -> bool:
+        return f.tag("above_lb") is not None and f.k_found - f.k_lb == extra
+
+    return Case(f"above_lb_{extra}", match, tag="above_lb")
+
+
+# Every case in the 600-plan scan (plan §4): one per status or no-design reason, one per tag.
+# `too large` (D8: no ResPlan plan needs it) and `input_error` (no plan to solve) aren't here,
+# nor `routing failed`: no plan of the scan fails routing any more (§4's 12025 now solves; 412856
+# and 432441 are `input_error` since #78). Add it back when a plan does.
+CASES: tuple[Case, ...] = (
+    Case(
+        "ok",
+        lambda f: f.status == "ok",
+        "A clean design",
+        "green ✓: every rule met, nothing to explain",
+    ),
+    Case(
+        "strict_only",
+        lambda f: f.status == "submitted_strict_only",
+        "Strict-only design",
+        "orange banner: valid only if the organisers allow the strict readings (Q2, Q4)",
+    ),
+    Case(
+        "room_over_cap",
+        lambda f: f.status == "infeasible" and bool(_ROOM_OVER_CAP.search(f.reason)),
+        "A room over 100 m²",
+        "red banner names the room and its m²; the Plan tab still draws (try the area-cap what-if)",
+    ),
+    Case(
+        "grid_failed",
+        lambda f: f.status == "infeasible" and f.reason.startswith("grid failed"),
+        "Grid failed",
+        "a door or passage too thin for the 10 cm grid (#78)",
+    ),
+    Case(
+        "no_hub_capable",
+        lambda f: f.status == "infeasible" and "hub-capable" in f.reason,
+        "No hub-capable room",
+        f"rooms too thin for a hub {Constraints().hub_wall_clearance_m:g} m from every wall",
+    ),
+    _tag_case("open_passage"),
+    _tag_case("en_suite"),
+    _tag_case("one_node_ring"),
+    _tag_case("lb_met"),
+    _above_lb(1),
+    _above_lb(2),
+    _above_lb(3),
+    _above_lb(4),
+    _tag_case("many_hubs"),
+    _tag_case("disconnected"),
+    _tag_case("isolated"),
+    _tag_case("multi_living"),
+    _tag_case("low_clearance"),
+    _tag_case("folded"),
+)
+
+
+def case_rows(path: Path = CASES_JSON) -> list[dict[str, Any]]:
+    """`cases.json`: `[{case, title, look_for, plan, expected: {status, k_found?, tags}}]`."""
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def case_plan_path(row: dict[str, Any], path: Path = CASES_JSON) -> Path:
+    """A row's plan file: `plan` is relative to `cases.json`'s folder."""
+    return (path.parent / row["plan"]).resolve()
 
 
 # --------------------------------------------------------------------------- what-ifs (#30)
