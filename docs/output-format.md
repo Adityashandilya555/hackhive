@@ -219,7 +219,7 @@ when the solver's choice changes.
 |---|---|
 | `lb_met` | `k_found` equals the lower bound `k_lb`, so no design can use fewer hubs |
 | `exhaustive` | every zoning was enumerated and none uses fewer hubs than `k_found` |
-| `none` | a design with fewer hubs exists but had only `strict` or `error` violations, or couldn't be built, so the gate moved up a hub count |
+| `none` | nothing was submitted (`k_found` is null), or a design with fewer hubs exists but had only `strict` or `error` violations, or couldn't be built, so the gate moved up a hub count |
 | `greedy` | not emitted yet: reserved for the greedy zoning fallback (#49) |
 
 ### Status

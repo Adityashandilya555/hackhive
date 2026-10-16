@@ -43,7 +43,8 @@ uv run hackhive batch --plans tests/fixtures/plans --n 3 --out out/batch.csv
 
 Without `--plans`, `batch` reads `data/sample/test-100.jsonl.gz`, else `data/resplan/plans.jsonl`,
 and keeps the `--split` (default `test`) listed in a `split.json` beside it. `data/` is not committed:
-download ResPlan from its repository (below) into `data/resplan/`.
+for a full run, put ResPlan (below) there as `data/resplan/plans.jsonl`, one plan per line, with its
+`split.json` beside it.
 
 `solve --help` lists the what-if flags (area cap, hub clearance, D5, D7). A what-if run is labelled
 WHAT-IF and never writes a submission.
