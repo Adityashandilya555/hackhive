@@ -30,7 +30,13 @@ What-if flags (labelled WHAT-IF; never written as a submission, exit 0 when the 
 | `--zone-links-via-excluded` | a bathroom or stair may link two zone rooms (D5) |
 | `--route-through-other-rooms` | cable may cross bathrooms or other hubs' rooms (D7) |
 
-<!-- PART B (#22): `python -m hackhive.solve --list` (every arrangement, ranked). -->
+Every arrangement, ranked (#22: fewest hubs, then the worse J of the two counting readings, then the area gap):
+
+```
+uv run python -m hackhive.solve --list tests/fixtures/plans/plan-5924.json
+```
+
+It prints one row per arrangement: H, J (pass 0, each ring routed alone), J under each reading, the area gap and the zones. `solve` submits the first of them that passes the checker mirror after the rip-up passes.
 
 ## Check a submission
 
@@ -42,7 +48,11 @@ Recomputes every metric from the polylines and checks slide 3's six rules. Exit 
 
 ## Batch
 
-`hackhive batch` is coming with #32.
+```
+uv run hackhive batch --plans tests/fixtures/plans --out out/batch.csv
+```
+
+Solves every plan (by default up to 100 of `--split test`), writes one CSV row per plan, and writes the designs beside the CSV (#32).
 
 ## The app
 
