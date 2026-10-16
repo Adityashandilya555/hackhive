@@ -248,16 +248,17 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 ### 4.5 `grid.py`: 10 cm room-label raster
 - **Responsibility:**
   - an int16 raster: room ids, door/opening ids, −1 blocked;
-  - paint order: rooms → walls / windows / front door → doors and openings → outside;
+  - paint order: rooms → walls / windows / front door → openings → doors → outside (doors last, so an opening band never takes a door's cells);
+  - each passage joins the two rooms `build_graph` (#9) names in `Door.rooms` / `Opening.rooms`; the raster checks its cells touch them;
   - the move rule: same label, or door ↔ one of its 2 rooms;
   - `snap(xy) -> (cell, stub)`: snaps a point to a cell, with the L-stub corners inside the point's own room (#10).
-- **In → out:** `Plan` + `Opening` list → `LabelGrid`.
+- **In → out:** `Plan` (openings default to `plan.openings`) → `LabelGrid`.
 - **Algorithm:** O(cells); 7k-122k cells per plan.
 - **Enforces:** C12-C14, C33.
 - **Issues:** #10 (V1702).
 - **Derived from:** OrthoRoute portal snapping → **Adapt** for node, hub and door snapping (`orthoroute/algorithms/manhattan/unified_pathfinder.py:L3377-3444 @ 9e06f2d`, MIT).
 - **Not taken:** ResPlan `geometry_to_mask` (cv2 dependency); OrthoRoute's 3D lattice and vias.
-- **Risks:** door/room raster gaps → doors are dilated into the wall band, with an assert that every door touches exactly 2 rooms.
+- **Risks:** door/room raster gaps → doors are dilated into the wall band, and every passage must touch the 2 rooms #9 names (raster contact, with an error on a strong third room, only when it has no names).
 
 ### 4.6 `route.py`: bend-aware search, path cache, ring routing
 - **Responsibility:**
@@ -425,7 +426,7 @@ Every edge case is decided in `docs/decision_conventions.md`; the format is docu
   |---|---|
   | 5088 | small |
   | 3086 | open passage |
-  | 1293 | 2 hubs at the LB |
+  | 1293 | LB 2, needs 3 (the vault's corner-door links dropped, #62) |
   | 5924 | star: LB 2, needs 3 |
   | 576 | multi-part living, 2 components, needs 6 |
   | 13344 | 3 hubs at cap 5, 1 at cap 20 |
