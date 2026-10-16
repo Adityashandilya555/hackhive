@@ -67,7 +67,10 @@ def test_a_raised_area_cap_solves_a_room_over_100_m2_but_writes_no_submission(tm
     assert solve(plan, C).submission is None  # the preset can't serve the 120 m² room
     c = Constraints(max_area_m2=150)
     result = solve(plan, c)
-    assert result.submission is not None and result.sidecar.status in ("ok", "submitted_strict_only")
+    assert result.submission is not None and result.sidecar.status in (
+        "ok",
+        "submitted_strict_only",
+    )
     assert not result.submittable
     written = submit(result, tmp_path)
     assert written == [tmp_path / "PLAN_BIG.sidecar.json"]

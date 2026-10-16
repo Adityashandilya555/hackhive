@@ -868,6 +868,30 @@ def draw_solution(
     return fig
 
 
+WHAT_IF_GID = "what-if-label"
+
+
+def label_what_if(fig: Figure, changes: Sequence[str]) -> Figure:
+    """A red WHAT-IF band above the drawing naming every change from the problem statement (#30),
+    so a what-if picture can't pass for a submitted design. Nothing for the preset (no changes).
+    The text is white on red, and the word WHAT-IF carries it, never the colour alone."""
+    if changes:
+        fig.text(
+            _MIDWAY,  # the figure's horizontal centre
+            1.0,
+            "WHAT-IF: " + "; ".join(changes) + " · never submitted",
+            ha="center",
+            va="bottom",
+            fontsize=_LABEL_PT + 1,
+            fontweight="bold",
+            color=SURFACE,
+            gid=WHAT_IF_GID,
+            bbox={"boxstyle": "square,pad=0.4", "fc": STATUS_CRITICAL, "ec": "none"},
+            wrap=True,
+        )
+    return fig
+
+
 def to_png(fig: Figure, dpi: int = 150) -> bytes:
     """The figure as PNG bytes. The figure is cleared afterwards so its memory is released."""
     buf = io.BytesIO()
