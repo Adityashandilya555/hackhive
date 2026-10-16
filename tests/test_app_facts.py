@@ -169,12 +169,23 @@ def test_solutions_are_found_for_5088_only_with_valid_first():
     assert solution_label(paths[0]) == "valid"
 
 
-def test_no_solution_yet_for_a_plan_without_one():
-    assert "no solution yet" in _main_text(_run()).lower()
+@pytest.mark.parametrize("pid", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_best_tab_shows_solves_design_for_every_fixture(pid):
+    """#18 (C26): the Best tab runs solve() (#16) on the picked plan and shows its design, first
+    in the Solution list, with the checker's verdict: never "no solution yet" (#72 is merged)."""
+    at = _pick(_run(), pid)
+    text = _main_text(at)
+    assert "no solution yet" not in text.lower()
+    assert at.sidebar.selectbox(key="solution").index == 0
+    assert "Reviewer checklist" in text and "Per-hub summary" in text
+    assert "valid" in text and "invalid" not in text
+    assert at.main.image, "the design overlay is drawn"
 
 
 def test_5088_checklist_shows_five_ticks_from_the_checker():
     at = _pick(_run(), "5088")
+    at.sidebar.selectbox(key="solution").set_value("valid")  # the hand-made one, after solve()'s
+    _run(at)
     text = _main_text(at)
     assert "Reviewer checklist" in text
     rep = checker.report(_plan("5088"), load_submission(solution_paths("5088")[0]), Constraints())
