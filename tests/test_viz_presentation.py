@@ -10,7 +10,7 @@ from hackhive import checker
 from hackhive.cli import main
 from hackhive.solve import file_stem, solve_file
 from hackhive.ui import hub_metrics
-from hackhive.viz import draw_presentation, export_presentation
+from hackhive.viz import draw_presentation, export_presentation, presentation_png
 
 ROOT = Path(__file__).resolve().parents[1]
 PLANS = ROOT / "tests" / "fixtures" / "plans"
@@ -44,6 +44,11 @@ def test_5924_writes_png_and_svg_at_16_9(r5924, tmp_path):
     root = ET.fromstring(svg.read_bytes())
     _, _, vw, vh = (float(v) for v in root.get("viewBox").split())
     assert vw / vh == pytest.approx(16 / 9, rel=0.01)
+
+
+def test_png_bytes_are_the_exported_file(r5924, tmp_path):
+    png, _ = export_presentation(r5924.plan, r5924, tmp_path)
+    assert presentation_png(r5924.plan, r5924) == png.read_bytes()  # the app's download (#44)
 
 
 def test_5924_summary_and_j_match_the_checker(r5924):

@@ -64,6 +64,12 @@ def test_starts_with_fixture_5924_drawn():
     assert not at.error
 
 
+def test_best_tab_offers_the_presentation_image():
+    at = _run()
+    labels = [b.proto.label for b in at.main.get("download_button")]
+    assert "Download presentation image" in labels  # #44: viz.presentation_png's bytes
+
+
 def test_problem_statement_is_locked_at_the_organisers_values():
     at = _run()
     # the locked panel's own inputs; #30's What-if expander adds editable ones beside it
