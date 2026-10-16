@@ -9,7 +9,11 @@ the quick loop, never that it is skipped by the full run.
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+from hackhive import parallel
 
 SLOW = {
     # one big case plan (15333), solved for its expected tags
@@ -55,3 +59,12 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.slow)
         if item.nodeid in SHARED_13344:
             item.add_marker(pytest.mark.xdist_group("fixture-13344"))
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Under `pytest -n`, `solve()` routes its zones inline instead of in its own process pool:
+    the test workers already fill every core, and forking a pool inside an xdist worker (a
+    process with threads) can stall on Linux. A test that passes `workers=` explicitly still
+    gets its pool."""
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        parallel.default_workers = lambda: 1
