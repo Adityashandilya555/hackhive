@@ -1,11 +1,12 @@
 """Acceptance tests for #24: the optimality badge and checklist line 5 (T7)."""
 
+from functools import cache
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from hackhive import checker
+from hackhive import checker, graph
 from hackhive.contracts import Bounds, Constraints, CostBreakdown, Sidecar
 from hackhive.io import load_plan
 from hackhive.solve import solve
@@ -27,16 +28,18 @@ def _side(k_lb: int, k_found: int, proof: str) -> Sidecar:
 
 @pytest.fixture(scope="module")
 def solved():
+    @cache
     def run(pid: str):
         plan = load_plan(PLANS / f"plan-{pid}.json")
-        return plan, solve(plan, C).sidecar
+        G = graph.build_graph(plan)
+        return plan, G, solve(plan, C).sidecar
 
     return run
 
 
 def test_badge_5924_proven_minimum(solved):
-    plan, side = solved("5924")
-    b = optimality_badge(side, plan, C)
+    plan, G, side = solved("5924")
+    b = optimality_badge(side, plan, G, C)
     assert b.kind == "success"
     assert "3 hubs · optimal (exhaustive search) · LB 2 (+1)" in b.text
     assert "✓ proven minimum" in b.text and "✗" not in b.text
@@ -46,8 +49,8 @@ def test_badge_5924_proven_minimum(solved):
 def test_badge_1293_proven_minimum(solved):
     """The issue's "1293 = lower bound" predates #62: 1293 is LB 2 but needs 3 hubs
     (tests/fixtures/README.md, docs/ARCHITECTURE.md), and #22's search proves it."""
-    plan, side = solved("1293")
-    b = optimality_badge(side, plan, C)
+    plan, G, side = solved("1293")
+    b = optimality_badge(side, plan, G, C)
     assert b.kind == "success" and "✗" not in b.text
     assert "✓ proven minimum · 3 hubs · optimal (exhaustive search) · LB 2 (+1)" in b.text
 
@@ -55,8 +58,8 @@ def test_badge_1293_proven_minimum(solved):
 @pytest.mark.parametrize("pid", ["576", "1293", "2814", "3086", "5088", "5924", "13344"])
 def test_badge_follows_the_real_proof(solved, pid):
     """#22's real `bounds.proof`: lb_met reads "= lower bound", exhaustive "proven minimum"."""
-    plan, side = solved(pid)
-    b = optimality_badge(side, plan, C)
+    plan, G, side = solved(pid)
+    b = optimality_badge(side, plan, G, C)
     assert side.bounds.proof in ("lb_met", "exhaustive")
     assert b.kind == "success" and "✗" not in b.text
     assert ("= lower bound" in b.text) == (side.bounds.proof == "lb_met")
@@ -64,24 +67,51 @@ def test_badge_follows_the_real_proof(solved, pid):
 
 
 def test_badge_k_equals_lb_5088(solved):
-    plan, side = solved("5088")
-    b = optimality_badge(side, plan, C)
+    plan, G, side = solved("5088")
+    b = optimality_badge(side, plan, G, C)
     assert b.kind == "success"
     assert b.text.startswith("✓ 1 hub = lower bound (50.0 m², 3 nodes)")
     assert b.explain is None
 
 
+def test_expander_names_an_isolated_room_2814(solved):
+    """2814 (LB 1, 2 hubs): an eligible room has no door, so it needs its own hub (#98 review)."""
+    plan, G, side = solved("2814")
+    b = optimality_badge(side, plan, G, C)
+    assert "1 eligible room has no door or open passage" in b.explain
+    assert "living room" not in b.explain
+    assert "1 zone " in b.explain and "1 zones" not in b.explain
+
+
+def test_expander_576_names_the_isolated_room_not_a_star(solved):
+    plan, G, side = solved("576")
+    b = optimality_badge(side, plan, G, C)
+    assert "1 eligible room has no door or open passage" in b.explain
+    assert "star" not in b.explain
+
+
+def test_expander_5924_falls_back_to_the_living_room_star(solved):
+    plan, G, side = solved("5924")
+    assert "living room (a star around it)" in optimality_badge(side, plan, G, C).explain
+
+
+def test_badge_names_solve_s_design(solved):
+    """The Best tab can show a hand-made file; the badge's J is solve()'s design (#98 review)."""
+    plan, G, side = solved("5924")
+    assert "solve()'s design: J = " in optimality_badge(side, plan, G, C).text
+
+
 @pytest.mark.parametrize("proof", ["none", "greedy"])
 def test_badge_unproven_never_says_optimal(solved, proof):
-    plan, _ = solved("5088")
-    b = optimality_badge(_side(2, 3, proof), plan, C)
+    plan, G, _ = solved("5088")
+    b = optimality_badge(_side(2, 3, proof), plan, G, C)
     assert "optimal" not in (b.text + (b.explain or "")).lower()
     assert b.kind == "error" and b.text.startswith("✗")
 
 
 def test_badge_shows_j_and_its_breakdown(solved):
-    plan, side = solved("5924")
-    b = optimality_badge(side, plan, C)
+    plan, G, side = solved("5924")
+    b = optimality_badge(side, plan, G, C)
     m = side.cost
     assert f"J = {m.J:.2f}" in b.text
     for part in (f"L {m.L:.2f} m", f"X {m.X}", f"O {m.O:.2f} m", f"B {m.B}"):
@@ -90,8 +120,8 @@ def test_badge_shows_j_and_its_breakdown(solved):
 
 
 def test_no_badge_without_a_design(solved):
-    plan, _ = solved("5088")
-    assert optimality_badge(Sidecar(plan_id="PLAN_X", status="infeasible"), plan, C) is None
+    plan, G, _ = solved("5088")
+    assert optimality_badge(Sidecar(plan_id="PLAN_X", status="infeasible"), plan, G, C) is None
 
 
 @pytest.mark.parametrize(
@@ -124,8 +154,7 @@ def test_report_passes_the_proof_through():
     plan = load_plan(PLANS / "plan-5924.json")
     res = solve(plan, C)
     rep = checker.report(plan, res.submission, C, proven_min=proven_min_hubs(res.sidecar))
-    assert rep.lines[4] == "✓ 3 hubs > lower bound 2 (" + rep.lines[4].split("(", 1)[1]
-    assert rep.lines[4].endswith("· proven minimum")
+    assert rep.lines[4] == "✓ 3 hubs > lower bound 2 (150.0 m², 5 nodes) · proven minimum"
 
 
 def test_app_best_tab_shows_the_badge_for_5924():

@@ -312,16 +312,41 @@ class Badge:
     explain: str | None = None  # why H > LB, for the expander; None when H = LB
 
 
-def optimality_badge(side: Sidecar, plan: Plan, c: Constraints) -> Badge | None:
-    """The Best tab's badge (#24, C7, T7) from the sidecar's bounds and cost; None without a
-    design. "optimal" is written only under a proof and refers to the hub count, never to J."""
+def _why_above_lb(G: nx.Graph, lb: int) -> str:
+    """Why no split into `lb` zones exists, from the same checks as `case_tags`' `isolated` and
+    `disconnected` tags; the living-room star is the fallback when neither applies (#98 review)."""
+    E = graph.eligible_graph(G)
+    lone = sum(E.degree(r) == 0 for r in E)
+    groups = nx.number_connected_components(E) - lone
+    why = []
+    if lone:
+        why.append(
+            f"{lone} eligible room{' has' if lone == 1 else 's have'} no door or open passage "
+            f"to another eligible room, so {'it needs its' if lone == 1 else 'each needs its'} "
+            "own hub."
+        )
+    if groups > 1:
+        why.append(f"The other rooms form {groups} groups that no door joins: each needs own hubs.")
+    zones = f"{lb} zone{'' if lb == 1 else 's'}"
+    if not why:
+        return (
+            "when rooms open only onto the living room (a star around it), no split into "
+            f"{zones} fits both caps."
+        )
+    return f"no split into {zones} exists here. " + " ".join(why)
+
+
+def optimality_badge(side: Sidecar, plan: Plan, G: nx.Graph, c: Constraints) -> Badge | None:
+    """The Best tab's badge (#24, C7, T7) from the sidecar's bounds and cost and the room graph
+    `G`; None without a design. "optimal" is written only under a proof and refers to the hub
+    count, never to J. J is solve()'s design, not a hand-made file picked in the Solution box."""
     b, m = side.bounds, side.cost
     if b is None or b.k_found is None or m is None:
         return None
     k, lb = b.k_found, b.k_lb
     area = sum(r.area_m2 for r in plan.rooms if r.eligible)
     hubs = f"{k} hub{'' if k == 1 else 's'}"
-    cost = f"J = {m.J:.2f} (L {m.L:.2f} m · X {m.X} · O {m.O:.2f} m · B {m.B})"
+    cost = f"solve()'s design: J = {m.J:.2f} (L {m.L:.2f} m · X {m.X} · O {m.O:.2f} m · B {m.B})"
     if k == lb:
         return Badge(
             "success", f"✓ {hubs} = lower bound ({area:.1f} m², {len(plan.nodes)} nodes) · {cost}"
@@ -333,8 +358,7 @@ def optimality_badge(side: Sidecar, plan: Plan, c: Constraints) -> Badge | None:
             f" · {cost} · optimal refers to the hub count only",
             f"The lower bound {lb} counts only area (≤ {c.max_area_m2:g} m²) and nodes "
             f"(≤ {c.max_nodes}) per hub. Each zone must also be connected through its own doors: "
-            "when rooms open only onto the living room (a star around it), no split into "
-            f"{lb} zones fits both caps. Every zoning was checked, so {k} is the fewest possible.",
+            f"{_why_above_lb(G, lb)} Every zoning was checked, so {k} is the fewest possible.",
         )
     return Badge("error", f"✗ {hubs} > lower bound {lb} (+{k - lb}) · not proven minimal · {cost}")
 

@@ -222,6 +222,7 @@ def best_tab(
     key: str,
     content: bytes | None,
     plan: Plan,
+    G: nx.Graph,
     path: Path | None,
     side: Sidecar,
     c: Constraints,
@@ -232,7 +233,7 @@ def best_tab(
     judged under `c`; with `counting`, J under both readings of the counting rules (D3, #30)."""
     settings = c.model_dump_json()
     banner(side, plan)
-    if badge := optimality_badge(side, plan, c):  # #24: proof of the hub count, never of J
+    if badge := optimality_badge(side, plan, G, c):  # #24: proof of the hub count, never of J
         getattr(st, badge.kind)(badge.text)
         if badge.explain:
             with st.expander("Why more hubs than the lower bound?"):
@@ -456,7 +457,7 @@ if tags := case_tags(plan, G, Result(plan, best_sub, side)):
     st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
 best, plan_tab = st.tabs(["Best", "Plan"])
 with best:
-    best_tab(source, key, content, plan, solution, side, settings_c, counting)
+    best_tab(source, key, content, plan, G, solution, side, settings_c, counting)
 with plan_tab:
     drawing, panel = st.columns([5, 3], gap="large")
     with drawing:
