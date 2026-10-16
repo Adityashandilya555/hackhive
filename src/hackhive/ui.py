@@ -4,21 +4,27 @@ says. Nothing here imports streamlit, so all of it is unit-tested without runnin
 from __future__ import annotations
 
 import json
+import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from hackhive import checker
+import networkx as nx
+
+from hackhive import checker, graph
 from hackhive.contracts import (
     Constraints,
     CostWeights,
     HubMetrics,
     HubOut,
     Plan,
+    Sidecar,
     Submission,
     Violation,
     lower_bound,
 )
-from hackhive.io import load_plan
+from hackhive.io import NODE_CLEARANCE_M, load_plan
+from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "plans"
@@ -276,3 +282,125 @@ def step_caption(sub: Submission, step: int) -> str:
     hub_id, seg = order[step - 1]
     back = ", back to its hub" if seg.to == hub_id else ""
     return f"Step {step} of {total} · {hub_id}: {seg.from_} → {seg.to}{back}"
+
+
+# --------------------------------------------------------------------------- case tags and banners (#83)
+
+Q2_URL = "https://github.com/Adityashandilya555/hackhive/blob/main/docs/clarifying_questions.md"
+_ROOM_OVER_CAP = re.compile(r"room (\S+) is ([\d.]+) m² > ([\d.]+) m²")
+
+
+@dataclass(frozen=True)
+class CaseTag:
+    id: str
+    label: str
+    look_for: str  # one line: what to look at in the drawing
+
+
+def case_tags(plan: Plan, G: nx.Graph, result: Result) -> list[CaseTag]:
+    """What makes this plan a special case, from the plan, its room graph and solve()'s result.
+    The design tags (one-node ring, hub counts) appear only when there is a design."""
+    tags: list[CaseTag] = []
+    E = graph.eligible_graph(G)
+    if any(kind == "opening" for *_, kind in G.edges(data="kind")):
+        tags.append(CaseTag("open_passage", "open passage", "cable crosses a wall-less gap"))
+    if any(G.degree(r) > 1 for r in graph.single_door_rooms(G) if r in E):
+        tags.append(
+            CaseTag(
+                "en_suite",
+                "en-suite single-door",
+                "a room whose only other door is its own bathroom: retracing in is legal",
+            )
+        )
+    sub, bounds = result.submission, result.sidecar.bounds
+    if sub is not None and any(len(h.assigned_nodes) == 1 for h in sub.hubs):
+        tags.append(CaseTag("one_node_ring", "one-node ring", "a hub → node → hub out-and-back"))
+    if sub is not None and bounds is not None and bounds.k_found is not None:
+        extra = bounds.k_found - bounds.k_lb
+        if extra == 0:
+            tags.append(CaseTag("lb_met", "hubs = lower bound", "no zoning can use fewer hubs"))
+        elif bounds.proof == "exhaustive":
+            tags.append(
+                CaseTag(
+                    "above_lb",
+                    f"hubs > lower bound (+{extra}, proven minimum)",
+                    "door links force extra zones; every zoning was checked",
+                )
+            )
+        if bounds.k_found >= 4:
+            tags.append(CaseTag("many_hubs", "4+ hubs", "many rings share the doors"))
+    if nx.number_connected_components(E) > 1:
+        tags.append(
+            CaseTag("disconnected", "disconnected groups", "rooms no door joins need own hubs")
+        )
+    if any(E.degree(r) == 0 for r in E):
+        tags.append(
+            CaseTag(
+                "isolated",
+                "isolated eligible room",
+                "no door or open passage to another eligible room: it needs its own hub",
+            )
+        )
+    if sum(r.type == "living" and r.eligible for r in plan.rooms) > 1:
+        tags.append(CaseTag("multi_living", "multi-part living", "each living part has a node"))
+    if any(n.clearance_m is not None and n.clearance_m < NODE_CLEARANCE_M for n in plan.nodes):
+        tags.append(
+            CaseTag(
+                "low_clearance",
+                f"node clearance < {NODE_CLEARANCE_M:g} m",
+                "a node close to a wall",
+            )
+        )
+    if plan.folded_parts:
+        tags.append(CaseTag("folded", "folded sliver", "a living sliver merged into its neighbour"))
+    return tags
+
+
+def tag_chips(tags: list[CaseTag]) -> str:
+    """The tags as one line of markdown chips; the `look_for` goes in the help line instead."""
+    return " ".join(f":blue-badge[{md_text(t.label)}]" for t in tags)
+
+
+def _infeasible_line(reason: str, plan: Plan | None) -> str:
+    if m := _ROOM_OVER_CAP.search(reason):
+        room, area, cap = m.groups()
+        kind = next((r.type for r in plan.rooms if r.id == room), "") if plan else ""
+        return (
+            f"Room {md_text(room)} {kind} is {area} m² \\> {cap} m²: no hub can serve it. "
+            "Try the area-cap what-if (#30)."
+        )
+    if reason.startswith("grid failed"):
+        return f"A door or passage is too thin for the grid (#78). {md_text(reason)}"
+    if reason.startswith("routing failed"):
+        return f"No route inside the free space. {md_text(reason)}"
+    if "hub-capable" in reason:
+        return f"No room can hold a hub this far from walls. {md_text(reason)}"
+    if reason.startswith("too large"):
+        return f"Too many rooms for exact zoning. {md_text(reason)}"
+    return md_text(reason)
+
+
+def status_banner(side: Sidecar, plan: Plan | None) -> tuple[str, str]:
+    """(`success` | `warning` | `error`, markdown): one banner per sidecar status (C43)."""
+    reason = side.reason or ""
+    if side.status == "ok":
+        return "success", "✓ **ok**: a clean design, no violations."
+    if side.status == "submitted_strict_only":
+        strict = [v.rule for v in side.violations if v.severity == "strict"]
+        parts = []
+        if n := strict.count(4):
+            parts.append(
+                f"{n} retrace{'s' * (n != 1)} outside a single-door room (rule 4, [Q2]({Q2_URL}))"
+            )
+        if n := strict.count(6):
+            parts.append(
+                f"{n} hub{'s' * (n != 1)} closer than {Constraints.problem_statement().hub_wall_clearance_m:g} m to a door or passage edge "
+                f"(rule 6, [Q4]({Q2_URL}))"
+            )
+        return "warning", (
+            f"⚠ **submitted_strict_only**: {'; '.join(parts) or 'strict readings only'}. "
+            "Valid only if the organisers allow it."
+        )
+    if side.status == "infeasible":
+        return "error", f"✗ **infeasible**: {_infeasible_line(reason, plan)}"
+    return "error", f"✗ **input_error**: {md_text(reason)}"
