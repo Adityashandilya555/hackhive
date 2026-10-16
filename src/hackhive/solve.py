@@ -395,8 +395,11 @@ def enumerate(
 
 
 def route(arrangement: Arrangement, plan: Plan, c: Constraints | None = None) -> Routing:
-    """An arrangement's full geometry on demand: every ring after the rip-up passes (#80)."""
+    """An arrangement's full geometry on demand: every ring after the rip-up passes (#80).
+    The room graph is built for `c` first: the grid paints what it filled (#31's window doors),
+    whatever settings `plan` was last built with (#116 review)."""
     c = c or Constraints()
+    build_graph(plan, c)
     return route_passes(LabelGrid.from_plan(plan, cell_m=c.grid_m), plan, arrangement.hubs, c)
 
 
