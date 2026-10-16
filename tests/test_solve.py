@@ -547,13 +547,16 @@ def test_solve_submits_enumerate_first_fully_routed(plan_id):
     top = solve_mod.enumerate(plan, C)[0]
     result = solve(load_plan(PLANS / f"plan-{plan_id}.json", C), C)
     side, sub = result.sidecar, result.submission
+    d = solve_mod.DECIMALS  # T6 (#34): the submission is rounded
     assert [(h.hub_id, h.room_id, (h.location.x, h.location.y)) for h in sub.hubs] == [
-        (h.hub_id, h.room_id, h.location) for h in top.hubs
+        (h.hub_id, h.room_id, (round(h.location[0], d), round(h.location[1], d))) for h in top.hubs
     ]
     assert [h.closed_sequence for h in sub.hubs] == [h.ring for h in top.hubs]
     assert [h.assigned_rooms for h in sub.hubs] == [h.assigned_rooms for h in top.hubs]
     routed = solve_mod.route(top, plan, C)
-    assert [h.route_segments for h in sub.hubs] == [r.segments for r in routed.rings]
+    assert [[s.polyline for s in h.route_segments] for h in sub.hubs] == [
+        [solve_mod._rounded(s.polyline, C.tolerance_m) for s in r.segments] for r in routed.rings
+    ]
     assert check_rules(plan, sub, C) == [] and side.status == "ok"
     assert (side.arrangement.rank, side.arrangement.signature) == (1, top.signature)
     assert side.arrangement.skipped == []
