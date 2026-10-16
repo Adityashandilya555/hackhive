@@ -83,6 +83,7 @@ def test_each_5924_zone_gets_a_closed_ring_over_its_nodes():
         zone_nodes = sorted(n.id for n in plan.nodes if n.room_id in zone)
         assert hub.ring[0] == hub.ring[-1] == hub.hub_id
         assert sorted(hub.ring[1:-1]) == zone_nodes  # each node exactly once
+        assert hub.assigned_rooms == [hub.room_id, *sorted(zone - {hub.room_id})]  # #79
 
 
 def test_each_5924_hub_obeys_rule_6_and_keeps_off_nodes():
