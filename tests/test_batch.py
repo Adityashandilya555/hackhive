@@ -92,11 +92,12 @@ def test_an_infeasible_plan_is_a_row_and_the_batch_continues(tmp_path):
 
 
 def test_two_runs_give_the_same_csv_apart_from_ms(tmp_path):
-    """C16: deterministic, so only the timing column may differ."""
+    """C16, #103: deterministic, inline or on 2 worker processes, so only the timing column may
+    differ, and the rows keep the source's order."""
     src = _sample(tmp_path)
     a, b = tmp_path / "a.csv", tmp_path / "b.csv"
-    batch.run(src, "test", 20, a, C)
-    batch.run(src, "test", 20, b, C)
+    batch.run(src, "test", 20, a, C, workers=1)
+    batch.run(src, "test", 20, b, C, workers=2)
     strip = [{k: v for k, v in r.items() if k != "ms"} for r in _rows(a)]
     assert strip == [{k: v for k, v in r.items() if k != "ms"} for r in _rows(b)]
 
@@ -132,6 +133,35 @@ def test_a_directory_of_plan_files_is_a_source_too(tmp_path):
         (d / f"plan-{i}.json").write_bytes((PLANS / f"plan-{i}.json").read_bytes())
     rows = batch.run(d, "test", 20, tmp_path / "b.csv", C)
     assert sorted(r["plan_id"] for r in rows) == ["PLAN_3086", "PLAN_5088"]
+
+
+def test_a_plan_worker_solves_inline_and_a_serial_run_keeps_the_zone_pool(tmp_path, monkeypatch):
+    """#103: in a pool each plan calls `solve(..., workers=1)`, so 4 plan workers don't each
+    start 4 zone workers; one process at a time keeps `solve()`'s default (#101)."""
+    seen = []
+
+    def inline(fn, items, workers=None):
+        seen.append(fn.keywords["solve_workers"])
+        return [fn(x) for x in items]
+
+    monkeypatch.setattr(batch, "map_in_order", inline)
+    src = _sample(tmp_path)
+    batch.run(src, "test", 2, tmp_path / "a.csv", C, workers=2)
+    batch.run(src, "test", 2, tmp_path / "b.csv", C, workers=1)
+    assert seen == [1, None]
+
+
+def test_a_small_batch_runs_one_plan_at_a_time_by_default():
+    """#103: plan workers only once each gets 4 plans; fewer, and one big plan sets the wall time,
+    so one plan at a time with `solve`'s zone pool wins (7 fixtures: 25.2 s vs 37.6 s). An
+    explicit `workers` is used as given, at most one per plan."""
+    from hackhive.parallel import default_workers
+
+    assert batch.plan_workers(None, 7) == 1
+    assert batch.plan_workers(None, 8) == min(default_workers(), 2)
+    assert batch.plan_workers(None, 40) == default_workers()
+    assert batch.plan_workers(2, 3) == 2
+    assert batch.plan_workers(4, 2) == 2
 
 
 def test_a_line_that_is_not_json_becomes_an_input_error_row(tmp_path):
