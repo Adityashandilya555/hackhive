@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -565,3 +565,55 @@ def readings_rows(sub: Submission, c: Constraints) -> list[dict[str, Any]]:
             }
         )
     return rows
+
+
+# --------------------------------------------------------------------------- arrangements (#26)
+
+ARRANGEMENTS_PER_PAGE = 12
+
+
+def hub_counts(arrangements: Sequence[Any]) -> list[int]:
+    """The hub counts present, ascending: the gallery filter's options."""
+    return sorted({a.H for a in arrangements})
+
+
+def filter_by_hubs(arrangements: Sequence[Any], ks: Collection[int]) -> list[tuple[int, Any]]:
+    """(rank, arrangement) for those with a hub count in `ks` (all when empty), in rank order;
+    the rank is the 1-based place in the full, `rank_key`-sorted list."""
+    return [(n, a) for n, a in enumerate(arrangements, start=1) if not ks or a.H in ks]
+
+
+def page_count(n: int, per: int = ARRANGEMENTS_PER_PAGE) -> int:
+    return max(1, -(-n // per))
+
+
+def page_of(items: Sequence[Any], page: int, per: int = ARRANGEMENTS_PER_PAGE) -> list[Any]:
+    """Page `page` (1-based) of `items`; a page past the end gives the last one."""
+    page = min(max(page, 1), page_count(len(items), per))
+    return list(items[(page - 1) * per : page * per])
+
+
+def best_by_hub_count(arrangements: Sequence[Any]) -> list[dict[str, Any]]:
+    """The gallery header: per hub count, how many arrangements and the best J (the ranking's J,
+    D3's worse reading). It replaces #27's Pareto view: fewest hubs always ranks first."""
+    rows = []
+    for k in hub_counts(arrangements):
+        same = [a for a in arrangements if a.H == k]
+        rows.append(
+            {"Hubs": k, "Arrangements": len(same), "Best J": round(min(a.J for a in same), 3)}
+        )
+    return rows
+
+
+def tile_verdict(violations: Sequence[Violation]) -> str:
+    """The checker's word on a tile: ✓ valid, ⚠ strict only, ✗ invalid (the mark and the word,
+    never colour alone)."""
+    if any(v.severity == "error" for v in violations):
+        return "✗ invalid"
+    return "⚠ strict only" if violations else "✓ valid"
+
+
+def tile_caption(rank: int, a: Any, m: checker.Metrics, verdict: str) -> str:
+    """`#3 · H 3 · J 98.24 · 52.1 m · 40 bends · ✓ valid`: the order key's H and J first (C16,
+    C17), then length and bends from the checker mirror, then its verdict."""
+    return f"#{rank} · H {a.H} · J {a.J:.2f} · {m.L:.1f} m · {m.B} bends · {verdict}"

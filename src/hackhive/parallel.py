@@ -3,7 +3,9 @@ ranking; #103's plan loops are meant to use it too)."""
 
 from __future__ import annotations
 
+import multiprocessing
 import os
+import sys
 from collections.abc import Callable, Iterable
 from concurrent.futures import ProcessPoolExecutor
 from typing import TypeVar
@@ -30,5 +32,12 @@ def map_in_order(fn: Callable[[T], R], items: Iterable[T], workers: int | None =
     n = min(workers or default_workers(), len(items))
     if n <= 1:
         return [fn(x) for x in items]
-    with ProcessPoolExecutor(n) as pool:
+    with ProcessPoolExecutor(n, mp_context=_context()) as pool:
         return list(pool.map(fn, items))
+
+
+def _context() -> multiprocessing.context.BaseContext | None:
+    """Workers start from a fork server, never by forking the caller (#26): Streamlit runs the app
+    on threads, and forking a threaded process can deadlock. Scoped to these pools, so it never
+    changes the process-wide start method. Windows always spawns (None: its default)."""
+    return None if sys.platform == "win32" else multiprocessing.get_context("forkserver")

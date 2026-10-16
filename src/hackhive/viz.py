@@ -868,6 +868,23 @@ def draw_solution(
     return fig
 
 
+TILE_IN = (4.2, 3.4)  # one gallery tile, in inches (#26)
+
+
+def draw_tile(plan: Plan, arrangement: Any, c: Any = None) -> Figure:
+    """One gallery tile (#26): the arrangement's zones, hubs and cached rings (pass 0) drawn by
+    `draw_solution`, small and without its legend (the tab explains the marks once)."""
+    from hackhive.solve import arrangement_submission  # solve imports viz's neighbours
+
+    fig = Figure(figsize=TILE_IN, facecolor=SURFACE)
+    FigureCanvasAgg(fig)
+    ax = fig.add_subplot()
+    draw_solution(plan, arrangement_submission(plan, arrangement, c), ax=ax)
+    if (legend := ax.get_legend()) is not None:
+        legend.remove()
+    return fig
+
+
 WHAT_IF_GID = "what-if-label"
 
 
