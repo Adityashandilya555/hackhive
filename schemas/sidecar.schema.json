@@ -1,5 +1,40 @@
 {
   "$defs": {
+    "ArrangementUsed": {
+      "additionalProperties": false,
+      "description": "Which ranked arrangement `solve()` submitted, and why the better-ranked ones weren't (C43).",
+      "properties": {
+        "rank": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Rank"
+        },
+        "signature": {
+          "title": "Signature",
+          "type": "string"
+        },
+        "skipped": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Skipped",
+          "type": "array"
+        }
+      },
+      "required": [
+        "rank",
+        "signature"
+      ],
+      "title": "ArrangementUsed",
+      "type": "object"
+    },
     "Bounds": {
       "additionalProperties": false,
       "properties": {
@@ -386,6 +421,17 @@
   "additionalProperties": false,
   "description": "Everything that is not part of the submission.",
   "properties": {
+    "arrangement": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ArrangementUsed"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
     "bounds": {
       "anyOf": [
         {
