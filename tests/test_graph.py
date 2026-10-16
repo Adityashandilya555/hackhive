@@ -281,3 +281,72 @@ def test_cli_576(capsys):
     assert any(" · door door_" in line for line in out) and any(
         " · opening" in line for line in out
     )
+
+
+# --------------------------------------------------------------------------- single-door rooms
+
+
+def _typed_graph(edges, types):
+    G = nx.Graph()
+    G.add_nodes_from(
+        (r, {"type": t, "eligible": t in ("living", "bedroom", "kitchen", "storage")})
+        for r, t in types.items()
+    )
+    G.add_edges_from(edges)
+    return G
+
+
+def test_a_dead_end_bathroom_door_is_no_second_way_out():
+    """2026-10-16 (Rohit): a room whose only other door leads into a bathroom that opens nowhere
+    else counts as single-door for retracing."""
+    from hackhive.graph import single_door_rooms
+
+    types = {"L": "living", "B": "bedroom", "W": "bathroom", "K": "kitchen"}
+    G = _typed_graph([("L", "B"), ("B", "W"), ("L", "K")], types)
+    assert single_door_rooms(G) >= {"B", "K", "W"}
+    assert "L" not in single_door_rooms(G)  # bedroom and kitchen: two real ways out
+
+
+def test_a_bathroom_that_opens_into_another_room_still_counts():
+    """…unless the bathroom also connects to another room: then it's a real second way."""
+    from hackhive.graph import single_door_rooms
+
+    types = {"L": "living", "B": "bedroom", "W": "bathroom", "K": "kitchen"}
+    G = _typed_graph([("L", "B"), ("B", "W"), ("W", "K")], types)
+    assert "B" not in single_door_rooms(G)
+
+
+def test_only_bathrooms_are_ignored_not_balconies():
+    """The decision covers bathrooms only: a dead-end balcony door still counts."""
+    from hackhive.graph import single_door_rooms
+
+    types = {"L": "living", "B": "bedroom", "Y": "balcony"}
+    G = _typed_graph([("L", "B"), ("B", "Y")], types)
+    assert "B" not in single_door_rooms(G)
+
+
+def test_a_room_reached_only_through_a_bathroom_keeps_its_one_door():
+    """A room whose only door is into a dead-end bathroom is still single-door, as before."""
+    from hackhive.graph import single_door_rooms
+
+    G = _typed_graph([("B", "W")], {"B": "bedroom", "W": "bathroom"})
+    assert single_door_rooms(G) == {"B", "W"}
+
+
+def test_single_door_rooms_on_the_fixtures():
+    from hackhive.graph import single_door_rooms
+
+    plan = load_plan(FIXTURES / "plans" / "plan-5088.json")
+    one_door = single_door_rooms(build_graph(plan))
+    assert room_by_label(plan, "bedroom_0").id in one_door  # living + a dead-end bathroom
+    assert room_by_label(plan, "kitchen_0").id in one_door
+    assert room_by_label(plan, "living_0").id not in one_door  # bedroom and kitchen doors
+    plan = load_plan(FIXTURES / "plans" / "plan-576.json")  # a bedroom: living + a dead-end balcony
+    g = build_graph(plan)
+    balcony_bed = [
+        r.id
+        for r in plan.rooms
+        if r.type == "bedroom"
+        and sorted(g.nodes[n]["type"] for n in g.neighbors(r.id)) == ["balcony", "living"]
+    ]
+    assert balcony_bed and not set(balcony_bed) & single_door_rooms(g)

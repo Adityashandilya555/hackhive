@@ -34,7 +34,13 @@ from hackhive.contracts import (
     Violation,
     lower_bound,
 )
-from hackhive.graph import OUTDOOR, build_graph, eligible_graph
+from hackhive.graph import (
+    OUTDOOR,
+    build_graph,
+    eligible_graph,
+    retrace_links,
+    single_door_rooms,
+)
 from hackhive.grid import door_gap
 from hackhive.io import get_geometries, load_plan
 from hackhive.zoning import wall_geometry
@@ -445,8 +451,9 @@ class _Context:
     c: Constraints
     rooms: dict[str, Room]
     nodes: dict[str, Node]
-    graph: nx.Graph  # the full room graph (#9), for zones and single-door rooms
+    graph: nx.Graph  # the full room graph (#9), for zones
     eligible: nx.Graph  # its eligible view
+    single_door: frozenset[str]  # graph.single_door_rooms: where a same-line retrace is legal
     hub_walls: BaseGeometry  # zoning.wall_geometry: what rule 6 measures from
 
 
@@ -730,16 +737,18 @@ def _shared_stretches(
 
 
 def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
-    """The single-door rooms (degree 1 in the full graph) this ring must enter, because its hub
-    or one of its nodes is there, each with its one door gap or open passage, grown by tol."""
+    """The single-door rooms (`graph.single_door_rooms`) this ring must enter, because its hub
+    or one of its nodes is there, each with its one way out (door gap or open passage), grown
+    by tol."""
     tol = ctx.c.tolerance_m
     doors = {d.id: d for d in ctx.plan.doors}
     rooms = {hub.room_id, *(ctx.nodes[n].room_id for n in hub.closed_sequence if n in ctx.nodes)}
     zones = []
     for rid in sorted(rooms):
-        if rid not in ctx.graph or ctx.graph.degree(rid) != 1:
+        if rid not in ctx.single_door:
             continue
-        ((_, _, link),) = ctx.graph.edges(rid, data=True)
+        (way_out,) = retrace_links(ctx.graph, rid)
+        link = ctx.graph.edges[rid, way_out]
         parts = [ctx.rooms[rid].polygon]
         if link["kind"] == "opening":
             parts.append(link["region"])
@@ -752,7 +761,8 @@ def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
 def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
     """`strict` for a same-line retrace within one ring (#46 Q5). A retrace into a single-door
     room is legal and scored as O (#43, slide 3 rule 4), so these are exempt: any stretch two
-    legs share around a node in a degree-1 room, and any stretch that touches a single-door room
+    legs share around a node in a single-door room (`graph.single_door_rooms`: a dead-end
+    bathroom door doesn't count, 2026-10-16), and any stretch that touches a single-door room
     (or its passage) holding the ring's hub or one of its nodes, whichever legs share it (a hub
     there must leave and re-enter through the same door, #68 review). Overlaps between
     different rings are cost only."""
@@ -765,7 +775,7 @@ def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
     for i in range(len(legs)):
         for j in range(i, len(legs)):
             node = ctx.nodes.get(seq[j]) if j == i + 1 else None
-            if node is not None and ctx.graph.degree(node.room_id) == 1:
+            if node is not None and node.room_id in ctx.single_door:
                 continue
             for a, b in _shared_stretches(legs[i], legs[j] if j != i else None, tol):
                 stretch = shapely.LineString([a, b])
@@ -864,6 +874,7 @@ def check_rules(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -
         nodes={n.id: n for n in plan.nodes},
         graph=graph,
         eligible=eligible_graph(graph),
+        single_door=single_door_rooms(graph),
         hub_walls=wall_geometry(plan),
     )
     out = _rule1_coverage(submission, ctx)

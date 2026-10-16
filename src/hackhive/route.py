@@ -462,11 +462,12 @@ def route_ring(
 
 
 def single_door_nodes(plan: Plan, c: Constraints = _DEFAULT) -> frozenset[str]:
-    """Nodes in single-door rooms: degree 1 in the full room graph, as check_rules counts them."""
-    from hackhive.graph import build_graph
+    """Nodes in single-door rooms (`graph.single_door_rooms`, exactly as check_rules counts
+    them): a dead-end bathroom door is no second way out (2026-10-16)."""
+    from hackhive.graph import build_graph, single_door_rooms
 
-    g = build_graph(plan, c)
-    return frozenset(n.id for n in plan.nodes if g.degree(n.room_id) == 1)
+    one_door = single_door_rooms(build_graph(plan, c))
+    return frozenset(n.id for n in plan.nodes if n.room_id in one_door)
 
 
 def route_rings(
