@@ -20,7 +20,14 @@ import networkx as nx
 from shapely.geometry import Point
 
 from hackhive import __version__
-from hackhive.checker import HUB_POINT, Metrics, check_rules, metrics, reported_mismatches
+from hackhive.checker import (
+    HUB_POINT,
+    Metrics,
+    check_rules,
+    metrics,
+    reported_mismatches,
+    segment_length,
+)
 from hackhive.contracts import (
     Bounds,
     Constraints,
@@ -175,23 +182,52 @@ def _hub_point_errors(plan: Plan, hubs: Sequence[Hub], c: Constraints) -> list[V
     return out
 
 
+DECIMALS = 4  # T6 (#34): 0.1 mm, well inside the checker's 1 mm tolerance
+
+
+def _rounded(polyline: Sequence[tuple[float, float]], tol: float) -> list[tuple[float, float]]:
+    """T6 (#34): every vertex to `DECIMALS`; a coordinate within `tol` of the previous vertex's
+    takes that vertex's rounded value, so both ends of a segment stay exactly axis-aligned."""
+    out: list[tuple[float, float]] = []
+    for i, (x, y) in enumerate(polyline):
+        rx, ry = round(x, DECIMALS), round(y, DECIMALS)
+        if out:
+            px, py = polyline[i - 1]
+            rx = out[-1][0] if abs(x - px) <= tol else rx
+            ry = out[-1][1] if abs(y - py) <= tol else ry
+        out.append((rx, ry))
+    return out
+
+
 def _submission(
     plan: Plan, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
 ) -> tuple[Submission, Metrics]:
-    """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
+    """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order.
+    Coordinates are rounded (T6) and every length recomputed from the rounded polylines."""
     out = []
     for hub, ring in zip(hubs, rings, strict=True):
+        segments = [
+            {**s.model_dump(by_alias=True), "polyline": _rounded(s.polyline, c.tolerance_m)}
+            for s in ring.segments
+        ]
+        for s in segments:
+            s["length_m"] = round(segment_length(s["polyline"]), DECIMALS)
         out.append(
             HubOut.model_validate(
                 {
                     "hub_id": hub.hub_id,
                     "room_id": hub.room_id,
-                    "location": {"x": hub.location[0], "y": hub.location[1]},
+                    "location": {
+                        "x": round(hub.location[0], DECIMALS),
+                        "y": round(hub.location[1], DECIMALS),
+                    },
                     "assigned_rooms": hub.assigned_rooms,
                     "assigned_nodes": sorted(hub.ring[1:-1]),
                     "closed_sequence": hub.ring,
-                    "route_segments": [s.model_dump(by_alias=True) for s in ring.segments],
-                    "ring_length_m": ring.ring_length_m,
+                    "route_segments": segments,
+                    "ring_length_m": round(
+                        sum(segment_length(s["polyline"]) for s in segments), DECIMALS
+                    ),
                 }
             )
         )
@@ -202,7 +238,7 @@ def _submission(
         plan_id=plan.plan_id,
         units="m",
         hubs=out,
-        reported_metrics={"hub_count": m.H, "total_length_m": m.L},
+        reported_metrics={"hub_count": m.H, "total_length_m": round(m.L, DECIMALS)},
     )
     return sub, m
 

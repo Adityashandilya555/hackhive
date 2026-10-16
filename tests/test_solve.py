@@ -2,6 +2,7 @@
 
 import dataclasses
 import json
+import re
 from itertools import pairwise
 from pathlib import Path
 
@@ -54,6 +55,20 @@ def test_each_fixture_solves_to_a_valid_submission(plan_id, tmp_path):
     assert side.cost.H == len(sub.hubs)
     assert sub.reported_metrics.hub_count == len(sub.hubs)
     assert sub.reported_metrics.total_length_m == pytest.approx(side.cost.L)
+    _assert_rounded_and_axis_aligned((tmp_path / f"{pid}.json").read_text("utf-8"), sub)
+
+
+def _assert_rounded_and_axis_aligned(text: str, sub: Submission) -> None:
+    """T6 (#34): every number written has ≤ 4 decimals and every segment is exactly horizontal or
+    vertical, so the organisers' checker never sees a 1e-15 slant."""
+    assert not re.findall(r"\d\.\d{5,}|\de-", text)
+    for h in sub.hubs:
+        assert h.route_segments[0].polyline[0] == (h.location.x, h.location.y)
+        for s, nxt in pairwise([*h.route_segments, h.route_segments[0]]):
+            assert s.polyline[-1] == nxt.polyline[0]
+        for s in h.route_segments:
+            for (ax, ay), (bx, by) in pairwise(s.polyline):
+                assert ax == bx or ay == by, (h.hub_id, s.from_, s.to, (ax, ay), (bx, by))
 
 
 @pytest.mark.parametrize("plan_id", ["5924", "13344"])
