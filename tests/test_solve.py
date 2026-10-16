@@ -3,6 +3,7 @@
 
 import dataclasses
 import json
+import re
 from itertools import pairwise
 from pathlib import Path
 
@@ -66,6 +67,32 @@ def test_each_fixture_solves_to_a_valid_submission(plan_id, tmp_path):
     assert side.cost.H == len(sub.hubs)
     assert sub.reported_metrics.hub_count == len(sub.hubs)
     assert sub.reported_metrics.total_length_m == pytest.approx(side.cost.L)
+    _assert_rounded_and_axis_aligned((tmp_path / f"{pid}.json").read_text("utf-8"), sub)
+
+
+def _assert_rounded_and_axis_aligned(text: str, sub: Submission) -> None:
+    """T6 (#34): every number written has ≤ 4 decimals and every segment is exactly horizontal or
+    vertical, so the organisers' checker never sees a 1e-15 slant."""
+    assert not re.findall(r"\d\.\d{5,}|\de-", text)
+    for h in sub.hubs:
+        assert h.route_segments[0].polyline[0] == (h.location.x, h.location.y)
+        for s, nxt in pairwise([*h.route_segments, h.route_segments[0]]):
+            assert s.polyline[-1] == nxt.polyline[0]
+        for s in h.route_segments:
+            for (ax, ay), (bx, by) in pairwise(s.polyline):
+                assert ax == bx or ay == by, (h.hub_id, s.from_, s.to, (ax, ay), (bx, by))
+
+
+def test_rounding_keeps_a_sub_mm_jog_and_drops_duplicate_points():
+    """#102 review: only float noise snaps to the previous vertex, so a real 0.9 mm jog never
+    drifts along the run; a jog under half a step rounds away without a duplicate point."""
+    chain = [(0, 0), (0, 1), (0.0009, 1), (0.0009, 2), (0.0018, 2), (0.0018, 3), (0.0027, 3)]
+    assert solve_mod._rounded(chain)[-1] == (0.0027, 3)
+    assert solve_mod._rounded([(1.0, 1.0), (1.00002, 1.0), (1.00002, 2.0)]) == [
+        (1.0, 1.0),
+        (1.0, 2.0),
+    ]
+    assert solve_mod._rounded([(0.1 + 0.2, 0.0), (0.3, 1.0)]) == [(0.3, 0.0), (0.3, 1.0)]
 
 
 @pytest.mark.parametrize("plan_id", ["5924", "13344"])
@@ -531,13 +558,16 @@ def test_solve_submits_enumerate_first_fully_routed(plan_id):
     top = solve_mod.enumerate(plan, C)[0]
     result = solve(load_plan(PLANS / f"plan-{plan_id}.json", C), C)
     side, sub = result.sidecar, result.submission
+    d = solve_mod.DECIMALS  # T6 (#34): the submission is rounded
     assert [(h.hub_id, h.room_id, (h.location.x, h.location.y)) for h in sub.hubs] == [
-        (h.hub_id, h.room_id, h.location) for h in top.hubs
+        (h.hub_id, h.room_id, (round(h.location[0], d), round(h.location[1], d))) for h in top.hubs
     ]
     assert [h.closed_sequence for h in sub.hubs] == [h.ring for h in top.hubs]
     assert [h.assigned_rooms for h in sub.hubs] == [h.assigned_rooms for h in top.hubs]
     routed = solve_mod.route(top, plan, C)
-    assert [h.route_segments for h in sub.hubs] == [r.segments for r in routed.rings]
+    assert [[s.polyline for s in h.route_segments] for h in sub.hubs] == [
+        [solve_mod._rounded(s.polyline) for s in r.segments] for r in routed.rings
+    ]
     assert check_rules(plan, sub, C) == [] and side.status == "ok"
     assert (side.arrangement.rank, side.arrangement.signature) == (1, top.signature)
     assert side.arrangement.skipped == []

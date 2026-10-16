@@ -1,5 +1,5 @@
 """The `hackhive` command (#16): `solve` a plan through the submit gate, `check` a submission,
-`batch` a split into a CSV report (#32)."""
+`batch` a split into a CSV report (#32), `present` one plan's slide-8 image (#44)."""
 
 from __future__ import annotations
 
@@ -118,6 +118,23 @@ def _check(args: argparse.Namespace) -> int:
     return STRICT_EXIT if r.violations and args.fail_on_strict else 0
 
 
+def _present(args: argparse.Namespace) -> int:
+    from hackhive.solve import solve_file
+    from hackhive.viz import export_presentation
+
+    if not args.plan.is_file():
+        print(f"no such plan file: {args.plan}", file=sys.stderr)
+        return 3
+    result = solve_file(args.plan)
+    written = export_presentation(result.plan, result, args.out)
+    if not written:
+        print(f"{result.sidecar.plan_id}: {result.sidecar.status}, no design to present")
+        return 1
+    for path in written:
+        print(f"wrote {path}")
+    return 0
+
+
 def _batch(args: argparse.Namespace) -> int:
     from hackhive.batch import default_source, run, summary
 
@@ -128,10 +145,10 @@ def _batch(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 3
-    rows = run(source, args.split, args.n, args.out, Constraints())
+    rows = run(source, args.split, args.n, args.out, Constraints(), workers=args.workers)
     print(summary(rows))
     print(f"wrote {args.out}")
-    return 0
+    return 0 if any(r["status"] != "input_error" for r in rows) else 1  # nothing loaded
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -141,7 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     3 when the plan file doesn't exist. With a what-if flag (#30) no submission is ever written:
     exit 0 when the what-if design has no `error` under its settings, 1 when there is none. check: exit 1 on any `error`, 0 when valid (strict-only
     too; each strict reading printed `STRICT (rule n, #46 Qm):`), 4 for strict-only under
-    `--fail-on-strict`, 3 when a file can't be read, 2 for a usage error (argparse).
+    `--fail-on-strict`, 3 when a file can't be read, 2 for a usage error (argparse). present: exit
+    0 when the image was written, 1 when there is no design, 3 when the plan file doesn't exist.
     """
     _utf8()
     p = argparse.ArgumentParser(prog="hackhive", description="PS4 floor-plan network planner.")
@@ -172,12 +190,21 @@ def main(argv: list[str] | None = None) -> int:
         "--fail-on-strict", action="store_true", help="exit 4 when only strict violations exist"
     )
     k.set_defaults(run=_check)
+    r = sub.add_parser("present", help="the final-presentation image of one plan (#44)")
+    r.add_argument("plan", type=Path, help="the plan JSON file")
+    r.add_argument("--out", type=Path, required=True, help="the output directory")
+    r.set_defaults(run=_present)
     b = sub.add_parser("batch", help="solve a split with the preset and write a CSV report")
     b.add_argument("--split", default="test", help="split.json key (default test)")
     b.add_argument("--n", type=int, default=100, help="at most this many plans (default 100)")
     b.add_argument("--out", type=Path, required=True, help="the CSV file; designs go beside it")
     b.add_argument(
         "--plans", type=Path, help="a .jsonl(.gz) of plans or a directory of plan JSON files"
+    )
+    b.add_argument(
+        "--workers",
+        type=int,
+        help="plans solved at once (default: up to 4 once there are 4 plans each; 1: one at a time)",
     )
     b.set_defaults(run=_batch)
     args = p.parse_args(argv)

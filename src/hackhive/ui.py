@@ -6,7 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -14,6 +14,7 @@ from typing import Any
 import networkx as nx
 
 from hackhive import batch, checker, graph
+from hackhive.cases import CaseTag, case_tags  # noqa: F401  (re-exported for app.py)
 from hackhive.contracts import (
     Constraints,
     CostWeights,
@@ -25,7 +26,7 @@ from hackhive.contracts import (
     Violation,
     lower_bound,
 )
-from hackhive.io import NODE_CLEARANCE_M, load_plan
+from hackhive.io import load_plan
 from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -365,73 +366,6 @@ def optimality_badge(side: Sidecar, plan: Plan, G: nx.Graph, c: Constraints) -> 
     return Badge("error", f"✗ {hubs} > lower bound {lb} (+{k - lb}) · not proven minimal · {cost}")
 
 
-@dataclass(frozen=True)
-class CaseTag:
-    id: str
-    label: str
-    look_for: str  # one line: what to look at in the drawing
-
-
-def case_tags(plan: Plan, G: nx.Graph, result: Result) -> list[CaseTag]:
-    """What makes this plan a special case, from the plan, its room graph and solve()'s result.
-    The design tags (one-node ring, hub counts) appear only when there is a design."""
-    tags: list[CaseTag] = []
-    E = graph.eligible_graph(G)
-    if any(kind == "opening" for *_, kind in G.edges(data="kind")):
-        tags.append(CaseTag("open_passage", "open passage", "cable crosses a wall-less gap"))
-    if any(G.degree(r) > 1 for r in graph.single_door_rooms(G) if r in E):
-        tags.append(
-            CaseTag(
-                "en_suite",
-                "en-suite single-door",
-                "a room whose only other door is its own bathroom: retracing in is legal",
-            )
-        )
-    sub, bounds = result.submission, result.sidecar.bounds
-    if sub is not None and any(len(h.assigned_nodes) == 1 for h in sub.hubs):
-        look = "hub → node → hub: out-and-back, or a thin two-lane loop when the node is far (#81)"
-        tags.append(CaseTag("one_node_ring", "one-node ring", look))
-    if sub is not None and bounds is not None and bounds.k_found is not None:
-        extra = bounds.k_found - bounds.k_lb
-        if extra == 0:
-            tags.append(CaseTag("lb_met", "hubs = lower bound", "no zoning can use fewer hubs"))
-        elif bounds.proof == "exhaustive":
-            tags.append(
-                CaseTag(
-                    "above_lb",
-                    f"hubs > lower bound (+{extra}, proven minimum)",
-                    "door links force extra zones; every zoning was checked",
-                )
-            )
-        if bounds.k_found >= 4:
-            tags.append(CaseTag("many_hubs", "4+ hubs", "many rings share the doors"))
-    if nx.number_connected_components(E) > 1:
-        tags.append(
-            CaseTag("disconnected", "disconnected groups", "rooms no door joins need own hubs")
-        )
-    if any(E.degree(r) == 0 for r in E):
-        tags.append(
-            CaseTag(
-                "isolated",
-                "isolated eligible room",
-                "no door or open passage to another eligible room: it needs its own hub",
-            )
-        )
-    if sum(r.type == "living" and r.eligible for r in plan.rooms) > 1:
-        tags.append(CaseTag("multi_living", "multi-part living", "each living part has a node"))
-    if any(n.clearance_m is not None and n.clearance_m < NODE_CLEARANCE_M for n in plan.nodes):
-        tags.append(
-            CaseTag(
-                "low_clearance",
-                f"node clearance < {NODE_CLEARANCE_M:g} m",
-                "a node close to a wall",
-            )
-        )
-    if plan.folded_parts:
-        tags.append(CaseTag("folded", "folded sliver", "a living sliver merged into its neighbour"))
-    return tags
-
-
 def tag_chips(tags: list[CaseTag]) -> str:
     """The tags as one line of markdown chips; the `look_for` goes in the help line instead."""
     return " ".join(f":blue-badge[{md_text(t.label)}]" for t in tags)
@@ -756,3 +690,55 @@ def open_target(plan_id: str) -> tuple[str, str] | None:
     if RESPLAN_JSONL.exists():
         return "ResPlan id", key
     return None
+
+
+# --------------------------------------------------------------------------- arrangements (#26)
+
+ARRANGEMENTS_PER_PAGE = 12
+
+
+def hub_counts(arrangements: Sequence[Any]) -> list[int]:
+    """The hub counts present, ascending: the gallery filter's options."""
+    return sorted({a.H for a in arrangements})
+
+
+def filter_by_hubs(arrangements: Sequence[Any], ks: Collection[int]) -> list[tuple[int, Any]]:
+    """(rank, arrangement) for those with a hub count in `ks` (all when empty), in rank order;
+    the rank is the 1-based place in the full, `rank_key`-sorted list."""
+    return [(n, a) for n, a in enumerate(arrangements, start=1) if not ks or a.H in ks]
+
+
+def page_count(n: int, per: int = ARRANGEMENTS_PER_PAGE) -> int:
+    return max(1, -(-n // per))
+
+
+def page_of(items: Sequence[Any], page: int, per: int = ARRANGEMENTS_PER_PAGE) -> list[Any]:
+    """Page `page` (1-based) of `items`; a page past the end gives the last one."""
+    page = min(max(page, 1), page_count(len(items), per))
+    return list(items[(page - 1) * per : page * per])
+
+
+def best_by_hub_count(arrangements: Sequence[Any]) -> list[dict[str, Any]]:
+    """The gallery header: per hub count, how many arrangements and the best J (the ranking's J,
+    D3's worse reading). It replaces #27's Pareto view: fewest hubs always ranks first."""
+    rows = []
+    for k in hub_counts(arrangements):
+        same = [a for a in arrangements if a.H == k]
+        rows.append(
+            {"Hubs": k, "Arrangements": len(same), "Best J": round(min(a.J for a in same), 3)}
+        )
+    return rows
+
+
+def tile_verdict(violations: Sequence[Violation]) -> str:
+    """The checker's word on a tile: ✓ valid, ⚠ strict only, ✗ invalid (the mark and the word,
+    never colour alone)."""
+    if any(v.severity == "error" for v in violations):
+        return "✗ invalid"
+    return "⚠ strict only" if violations else "✓ valid"
+
+
+def tile_caption(rank: int, a: Any, m: checker.Metrics, verdict: str) -> str:
+    """`#3 · H 3 · J 98.24 · 52.1 m · 40 bends · ✓ valid`: the order key's H and J first (C16,
+    C17), then length and bends from the checker mirror, then its verdict."""
+    return f"#{rank} · H {a.H} · J {a.J:.2f} · {m.L:.1f} m · {m.B} bends · {verdict}"
