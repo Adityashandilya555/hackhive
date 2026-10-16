@@ -479,8 +479,15 @@ def _free_space(plan: Plan, c: Constraints) -> _FreeSpace:
 
 
 def _rule1_coverage(sub: Submission, ctx: _Context) -> list[Violation]:
-    """Every eligible room and every node in exactly one hub; a node's room in its hub (C1, C9)."""
+    """Every eligible room and every node in exactly one hub; a node's room in its hub (C1, C9).
+    Hub ids are unique and never a node's id, or `closed_sequence` is ambiguous (#68 review)."""
     out: list[Violation] = []
+    for hid, k in Counter(h.hub_id for h in sub.hubs).items():
+        where = [p for h in sub.hubs if h.hub_id == hid for p in _hub_where(h, ctx)]
+        if k > 1:
+            out.append(_v(COVERAGE, f"hub id {hid} is used by {k} hubs", hid, where, [hid]))
+        if hid in ctx.nodes:
+            out.append(_v(COVERAGE, f"hub id {hid} is also a node id", hid, where, [hid]))
     room_hubs: dict[str, list[str]] = {}
     node_hubs: dict[str, list[str]] = {}
     for hub in sub.hubs:
@@ -668,14 +675,38 @@ def _shared_stretches(
     ]
 
 
+def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
+    """The single-door rooms (degree 1 in the full graph) this ring must enter, because its hub
+    or one of its nodes is there, each with its one door gap or open passage, grown by tol."""
+    tol = ctx.c.tolerance_m
+    doors = {d.id: d for d in ctx.plan.doors}
+    rooms = {hub.room_id, *(ctx.nodes[n].room_id for n in hub.closed_sequence if n in ctx.nodes)}
+    zones = []
+    for rid in sorted(rooms):
+        if rid not in ctx.graph or ctx.graph.degree(rid) != 1:
+            continue
+        ((_, _, link),) = ctx.graph.edges(rid, data=True)
+        parts = [ctx.rooms[rid].polygon]
+        if link["kind"] == "opening":
+            parts.append(link["region"])
+        for d in link.get("door_ids", []):
+            parts.append(door_gap(doors[d].polygon, ctx.plan.wall_depth_m, ctx.c.grid_m))
+        zones.append(unary_union(parts).buffer(tol))
+    return zones
+
+
 def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
-    """`strict` for a same-line retrace within one ring (#46 Q5), except around a node in a
-    single-door room (degree 1 in the full graph): that retrace is legal and scored as O (#43).
-    Overlaps between different rings are cost only."""
+    """`strict` for a same-line retrace within one ring (#46 Q5). A retrace into a single-door
+    room is legal and scored as O (#43, slide 3 rule 4), so these are exempt: any stretch two
+    legs share around a node in a degree-1 room, and any stretch that touches a single-door room
+    (or its passage) holding the ring's hub or one of its nodes, whichever legs share it (a hub
+    there must leave and re-enter through the same door, #68 review). Overlaps between
+    different rings are cost only."""
     tol = ctx.c.tolerance_m
     legs = [clean_polyline(s.polyline, tol) for s in hub.route_segments]
     labels = [f"{s.from_}→{s.to}" for s in hub.route_segments]
     seq = hub.closed_sequence
+    dead_ends = _dead_ends(hub, ctx)
     out = []
     for i in range(len(legs)):
         for j in range(i, len(legs)):
@@ -683,6 +714,9 @@ def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
             if node is not None and ctx.graph.degree(node.room_id) == 1:
                 continue
             for a, b in _shared_stretches(legs[i], legs[j] if j != i else None, tol):
+                stretch = shapely.LineString([a, b])
+                if any(zone.intersects(stretch) for zone in dead_ends):
+                    continue
                 what = labels[i] if i == j else f"{labels[i]} and {labels[j]}"
                 msg = f"{what} retrace {_dist(a, b):.2f} m of the same line (#46 Q5)"
                 out.append(_v(RING, msg, hub.hub_id, [a, b], [labels[i], labels[j]], "strict"))
@@ -801,6 +835,21 @@ _CHECKLIST = (
     ((ZONE,), "each zone connected through doors and open passages only"),
     ((FREE_SPACE,), "axis-aligned, no wall or window crossed"),
 )
+# not on slide 5's list, so shown only when rule 6 has a violation: no error hides behind 5 ✓
+_HUB_LINE = ((HUB_POINT,), "each hub in an assigned eligible room, ≥ {clearance:g} m from walls")
+
+
+def _check_line(
+    rules: tuple[int, ...], text: str, violations: Sequence[Violation], c: Constraints
+) -> str:
+    errors = sum(v.rule in rules and v.severity == "error" for v in violations)
+    strict = sum(v.rule in rules and v.severity == "strict" for v in violations)
+    text = text.format(area=c.max_area_m2, nodes=c.max_nodes, clearance=c.hub_wall_clearance_m)
+    return (
+        ("✗ " if errors else "✓ ")
+        + text
+        + (f" (strict: {strict})" if strict and not errors else "")
+    )
 
 
 def checklist(
@@ -814,15 +863,11 @@ def checklist(
     """Slide 5's "What a reviewer confirms": 5 lines, each starting ✓ or ✗ (C26).
 
     A line is ✗ only for an `error` among its rules; with only `strict` ones it stays ✓ and says
-    how many. Rule 6 has no line (the verdict covers it). Line 5 compares H with the lower bound
-    (a ranking fact, not a violation); `metrics` is None when they couldn't be computed.
+    how many. Line 5 compares H with the lower bound (a ranking fact, not a violation);
+    `metrics` is None when they couldn't be computed. Rule 6 isn't on slide 5's list, so a sixth
+    line appears only when it has a violation (#68 review): no error hides behind 5 ✓.
     """
-    out = []
-    for rules, text in _CHECKLIST:
-        errors = sum(v.rule in rules and v.severity == "error" for v in violations)
-        strict = sum(v.rule in rules and v.severity == "strict" for v in violations)
-        line = ("✗ " if errors else "✓ ") + text.format(area=c.max_area_m2, nodes=c.max_nodes)
-        out.append(line + (f" (strict: {strict})" if strict and not errors else ""))
+    out = [_check_line(rules, text, violations, c) for rules, text in _CHECKLIST]
     facts = f"({area_m2:.1f} m², {n_nodes} nodes)"
     if metrics is None:
         out.append(f"✗ hubs vs lower bound {lower_bound} {facts}: not computed")
@@ -831,6 +876,9 @@ def checklist(
         op = "=" if h == lower_bound else (">" if h > lower_bound else "<")
         tick = "✓" if h == lower_bound else "✗"
         out.append(f"{tick} {h} hub{'' if h == 1 else 's'} {op} lower bound {lower_bound} {facts}")
+    rules, text = _HUB_LINE
+    if any(v.rule in rules for v in violations):
+        out.append(_check_line(rules, text, violations, c))
     return out
 
 
@@ -840,6 +888,42 @@ def verdict(violations: Sequence[Violation]) -> str:
     if any(v.severity == "error" for v in violations):
         return "invalid"
     return "valid (strict only)" if violations else "valid"
+
+
+@dataclass(frozen=True)
+class Report:
+    """Everything a reviewer sees: what the CLI prints and the app's panel renders (#12)."""
+
+    violations: list[Violation]
+    metrics: Metrics | None  # None when a coordinate isn't finite (rule 4 reports it)
+    lower_bound: int
+    lines: list[str]  # `checklist`
+    verdict: str
+
+
+def report(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> Report:
+    """The rules, the metrics, the checklist and the verdict for one submission."""
+    violations = check_rules(plan, submission, c)
+    rooms = {r.id: r for r in plan.rooms}
+    hub_areas = {
+        h.hub_id: sum(
+            rooms[r].area_m2 for r in set(h.assigned_rooms) if r in rooms and rooms[r].eligible
+        )
+        for h in submission.hubs
+    }
+    try:
+        m = metrics(submission.hubs, c, hub_areas=hub_areas)
+    except ValueError:  # a non-finite coordinate: rule 4 reports it
+        m = None
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    lb = lower_bound(area, len(plan.nodes), c)
+    return Report(
+        violations=violations,
+        metrics=m,
+        lower_bound=lb,
+        lines=checklist(violations, m, lb, area, len(plan.nodes), c),
+        verdict=verdict(violations),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -866,32 +950,18 @@ def main(argv: list[str] | None = None) -> int:
             f"warning: the submission is for {sub.plan_id}, the plan is {plan.plan_id}",
             file=sys.stderr,
         )
-    violations = check_rules(plan, sub, c)
-    rooms = {r.id: r for r in plan.rooms}
-    hub_areas = {
-        h.hub_id: sum(
-            rooms[r].area_m2 for r in set(h.assigned_rooms) if r in rooms and rooms[r].eligible
-        )
-        for h in sub.hubs
-    }
-    try:
-        m = metrics(sub.hubs, c, hub_areas=hub_areas)
-    except ValueError:  # a non-finite coordinate: rule 4 reports it
-        m = None
-    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
-    for line in checklist(
-        violations, m, lower_bound(area, len(plan.nodes), c), area, len(plan.nodes), c
-    ):
+    r = report(plan, sub, c)
+    for line in r.lines:
         print(line)
+    m = r.metrics
     if m is None:
         print("metrics: not computed (non-finite coordinates)")
     else:
         print(f"metrics: H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}")
-    for v in violations:
+    for v in r.violations:
         print(f"rule {v.rule} [{v.severity}] {v.hub_id or 'plan'}: {v.message}")
-    result = verdict(violations)
-    print(result)
-    return 1 if result == "invalid" else 0
+    print(r.verdict)
+    return 1 if r.verdict == "invalid" else 0
 
 
 if __name__ == "__main__":
