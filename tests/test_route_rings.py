@@ -227,9 +227,10 @@ def test_stubs_never_retrace_at_a_node_unless_legal(routed, plan_id):
             dx, dy = abs(stop.xy[0] - cx), abs(stop.xy[1] - cy)
             if stop.id in single_door or dx <= TOL or dy <= TOL:
                 continue
+            # the stub's own box, not grown: grid runs leaving C only touch its corner
             area = box(
                 min(stop.xy[0], cx), min(stop.xy[1], cy), max(stop.xy[0], cx), max(stop.xy[1], cy)
-            ).buffer(TOL)
+            )
             clipped = []
             for seg in (ring.segments[i - 1], ring.segments[i]):
                 part = shapely.LineString(seg.polyline).intersection(area)
