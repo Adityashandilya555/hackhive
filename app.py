@@ -135,9 +135,26 @@ def load(source: str, key: str, content: bytes | None = None) -> tuple[Plan, nx.
     return plan, graph.build_graph(plan)
 
 
-@st.cache_data(max_entries=64, show_spinner="Drawing…")
-def picture(source: str, key: str, content: bytes | None = None, show: bool = False) -> bytes:
+@st.cache_data(max_entries=64, show_spinner="Building the room graph…")
+def room_graph(
+    source: str, key: str, content: bytes | None, settings: str
+) -> tuple[Plan, nx.Graph]:
+    """The plan and its room graph under `settings` (the Constraints as JSON): what the case
+    chips, #24's badge and the Plan tab read, so a what-if that links rooms (#31's window
+    doors, D5's via-excluded links) shows in them too (#116 review). `load()`'s graph is the
+    problem statement's."""
     plan, G = load(source, key, content)
+    c = Constraints.model_validate_json(settings)
+    if c.is_problem_statement:  # load() built this one already: build it once per plan
+        return plan, G
+    return plan, graph.build_graph(plan, c)
+
+
+@st.cache_data(max_entries=64, show_spinner="Drawing…")
+def picture(
+    source: str, key: str, content: bytes | None = None, show: bool = False, settings: str = ""
+) -> bytes:
+    plan, G = room_graph(source, key, content, settings or PRESET.model_dump_json())
     fig = draw_layers(plan)
     ax = fig.axes[0]
     if show:
@@ -765,7 +782,7 @@ def page() -> None:
 
     source, key, content = choice
     try:
-        plan, G = load(source, key, content)
+        plan, G = room_graph(source, key, content, settings_c.model_dump_json())
     except Exception as e:  # a plan we can't read or handle: say so, never a traceback
         reason = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
         with header:
@@ -814,7 +831,8 @@ def page() -> None:
         drawing, panel = st.columns([5, 3], gap="large")
         with drawing:
             try:
-                st.image(picture(source, key, content, show_graph), width="stretch")
+                settings = settings_c.model_dump_json()
+                st.image(picture(source, key, content, show_graph, settings), width="stretch")
             except Exception as e:  # drawing a plan we loaded: never a traceback
                 st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
             if plan.warnings:
