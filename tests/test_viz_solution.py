@@ -339,3 +339,67 @@ def test_best_tab_says_no_solution_yet_without_one():
     assert not best.image and not best.dataframe
     assert any("no solution yet" in c.value.lower() for c in best.caption)
     assert len(at.tabs[1].image) == 1  # the Plan tab still draws the plan
+
+
+# --------------------------------------------------------------------------- #71 review follow-ups
+
+
+@pytest.mark.parametrize("name", [p.stem for p in sorted(SOLUTIONS.glob("5088-*.json"))])
+def test_order_numbers_keep_off_violations_and_times_k_labels(plan_5088, name):
+    """Review 1: a ✗ marker, a violation label or a ×k label never covers a visit-order number
+    (5088-wall-crossing had an X on the circled 3)."""
+    sub = _sub(name)
+    violations = checker.check_rules(plan_5088, sub, C)
+    try:
+        fig = draw_solution(plan_5088, sub, violations=violations)
+    except ValueError:
+        pytest.skip("non-finite coordinates")
+    ax = fig.axes[0]
+    r = fig.canvas.get_renderer()
+    blockers = [a.get_window_extent(r) for a in _gids(ax, "violation:")]
+    blockers += [a.get_window_extent(r) for a in _gids(ax, "overlap-label:")]
+    for t in _gids(ax, "order:"):
+        box = t.get_window_extent(r)
+        assert not any(box.overlaps(b) for b in blockers), (name, t.get_gid())
+
+
+def test_best_tab_shows_a_drawing_error_instead_of_a_traceback(monkeypatch):
+    """Review 2: Best is the landing tab, so any drawing error is an st.error there."""
+    import streamlit as st
+
+    import hackhive.viz
+
+    def boom(*_a, **_k):
+        raise RuntimeError("overlay exploded")
+
+    monkeypatch.setattr(hackhive.viz, "draw_solution", boom)
+    st.cache_data.clear()
+    try:
+        at = _app("5088")
+        assert any("overlay exploded" in e.value for e in at.tabs[0].error)
+    finally:
+        st.cache_data.clear()
+
+
+def test_cli_warns_when_the_submission_is_for_another_plan(tmp_path, capsys):
+    """Nit 2: like `python -m hackhive.checker`, the overlay CLI warns on a plan_id mismatch."""
+    out = tmp_path / "x.png"
+    code = main(
+        [str(PLANS / "plan-5924.json"), str(out), "--solution", str(SOLUTIONS / "5088-valid.json")]
+    )
+    err = capsys.readouterr().err
+    assert code == 0 and "warning" in err and "PLAN_5088" in err and "PLAN_5924" in err
+
+
+def test_summary_rooms_text_is_one_helper(plan_5088):
+    """Nit 1: the table and the one-line summary share one rooms string."""
+    from hackhive.ui import hub_table, rooms_text
+
+    sub = _sub("5088-two-hubs-valid")
+    m = checker.metrics(sub.hubs, C)
+    rows = hub_metrics(plan_5088, sub, m)
+    for row, table_row, h in zip(rows, hub_table(plan_5088, sub, m), sub.hubs, strict=True):
+        text = rooms_text(h, plan_5088)
+        assert table_row["Rooms"] == text
+        assert hub_summary_line(row, h, plan_5088).startswith(f"{h.hub_id}: {text} · ")
+        assert row.area_m2 == checker.assigned_area(h, {r.id: r for r in plan_5088.rooms})
