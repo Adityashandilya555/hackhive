@@ -8,6 +8,7 @@ import pytest
 
 from hackhive import checker
 from hackhive.cli import main
+from hackhive.contracts import Constraints
 from hackhive.solve import file_stem, solve_file
 from hackhive.ui import hub_metrics
 from hackhive.viz import draw_presentation, export_presentation, presentation_png
@@ -77,6 +78,22 @@ def test_576_slide_says_six_hubs_proven_minimal_against_two(r576):
     badge = _texts(draw_presentation(r576.plan, r576), "presentation:badge")
     assert "6 hubs" in badge
     assert "proven minimal against a lower bound of 2" in badge
+
+
+def test_five_room_hub_fits_its_cells():
+    # a one-hub what-if (cap 250 m²) puts all five 5924 rooms on one row (#107 review)
+    r = solve_file(PLANS / "plan-5924.json", Constraints(max_area_m2=250))
+    assert len(set(r.submission.hubs[0].assigned_rooms)) == 5
+    fig = draw_presentation(r.plan, r)
+    fig.canvas.draw()
+    renderer = fig.canvas.get_renderer()
+    table = [ax.tables[0] for ax in fig.axes if ax.tables][0]
+    cells = table.get_celld()
+    for col in range(6):
+        cell = cells[(1, col)]
+        box, text = cell.get_window_extent(renderer), cell.get_text().get_window_extent(renderer)
+        assert box.x0 <= text.x0 and text.x1 <= box.x1, cell.get_text().get_text()
+    assert cells[(0, 0)].get_height() < 0.1  # a one-hub table keeps normal row heights
 
 
 def test_no_design_writes_nothing(r5924, tmp_path):
