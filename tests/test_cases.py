@@ -173,5 +173,7 @@ def test_scan_workers_solve_inline(tmp_path, monkeypatch):
 
     monkeypatch.setattr(make_cases, "map_in_order", inline)
     make_cases.build(jsonl, out=out, fixtures=fixtures, n=0, workers=2)
+    assert seen == [1]  # the small set fits one chunk of 2 workers
+    seen.clear()
     make_cases.build(jsonl, out=tmp_path / "again", fixtures=fixtures, n=0, workers=1)
-    assert seen == [1, None]
+    assert seen and set(seen) == {None}  # one plan per call, so nothing is solved past a pick

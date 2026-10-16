@@ -21,8 +21,8 @@ showing its case. Writes `tests/fixtures/cases/cases.json`, one row per case in 
 every run, so running it twice changes nothing. Exit code 1 if a case is left without a plan.
 
 The scan solves its plans on `--workers` processes (default: `hackhive.batch.plan_workers`,
-up to 4; #103), in ordered chunks of 4 × workers, and applies the picks in input order: the same picks as
-one process.
+up to 4; #103), in ordered chunks of `SCAN_CHUNK_PER_WORKER` × workers (one plan at a time on
+one process), and applies the picks in input order: the same picks as one process.
 """
 
 from __future__ import annotations
@@ -41,6 +41,9 @@ from hackhive.parallel import map_in_order
 
 _SOLVED: dict[Path, ui.CaseFacts | None] = {}
 DATASET_HINT = "uv run scripts/make_cases.py ~/HACKHIVE/data/resplan/plans.jsonl"
+# plans per worker in each scan chunk (#103). Not `batch.MIN_PLANS_PER_WORKER`, which only decides
+# when a loop goes parallel: the two share the value 4 by chance.
+SCAN_CHUNK_PER_WORKER = 4
 
 
 def _facts(path: Path) -> ui.CaseFacts | None:
@@ -124,7 +127,8 @@ def build(
     # 3. the scan, smallest first; each plan picked is written verbatim, named for its first case
     if plans is not None and len(picks) < len(ui.CASES):
         lines = _scan(plans, n, seed)
-        size = 4 * plan_workers(workers, len(lines))
+        w = plan_workers(workers, len(lines))
+        size = SCAN_CHUNK_PER_WORKER * w if w > 1 else 1  # serial: no plan solved past a pick
         for start in range(0, len(lines), size):
             chunk = lines[start : start + size]
             print(f"[{start + 1}-{start + len(chunk)}/{len(lines)}]", file=sys.stderr)

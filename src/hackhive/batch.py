@@ -1,7 +1,7 @@
 """The batch report (#32): solve every plan of a split with the preset, one CSV row per plan, and
 print a summary. The submissions and sidecars go next to the CSV (`out/batch.csv` →
 `out/batch/`), through the same gate as `hackhive solve`, so each can be re-checked with
-`hackhive check`. A large batch is solved on up to 4 worker processes (`plan_workers`, #103),, rows in the source's order.
+`hackhive check`. A large batch is solved on up to 4 worker processes (`plan_workers`, #103), rows in the source's order.
 """
 
 from __future__ import annotations
