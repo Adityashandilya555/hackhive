@@ -422,6 +422,18 @@
         "version": null
       }
     },
+    "reason": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reason"
+    },
     "settings": {
       "$ref": "#/$defs/Constraints",
       "default": {

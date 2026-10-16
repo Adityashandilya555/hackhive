@@ -47,6 +47,20 @@ LINK_DOOR = "#2a78d6"
 LINK_OPENING = "#008300"
 LINK_OTHER = INK_SECONDARY  # via an excluded room (a what-if setting only)
 
+# Hub rings (#16's minimal PNG; #17's overlay replaces it): the validated categorical palette in
+# its fixed order, one slot per hub. Past eight hubs the rest share a neutral ink, never a
+# generated or cycled hue; every hub also carries its id as a direct label.
+HUB_COLOURS = (
+    "#2a78d6",
+    "#eb6834",
+    "#1baf7a",
+    "#eda100",
+    "#e87ba4",
+    "#008300",
+    "#6250d6",
+    "#e34948",
+)
+
 ELIGIBLE = ("living", "bedroom", "kitchen", "storage")
 EXCLUDED = ("bathroom", "balcony", "stair", "garden", "pool", "parking", "land")
 NOT_DRAWN = ("land",)  # the plot outline covers the whole house; it isn't a room
@@ -492,6 +506,43 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
         title_fontsize=_LABEL_PT,
         labelcolor=INK_SECONDARY,
     )
+
+
+def hub_colour(index: int) -> str:
+    """Hub `index`'s ring colour (0-based, the submission's hub order)."""
+    return HUB_COLOURS[index] if index < len(HUB_COLOURS) else INK_SECONDARY
+
+
+def draw_rings(submission: Any, ax: Axes) -> None:
+    """Each hub's ring as a thin line in its hub colour, the hub as a square with its id (#16's
+    minimal picture; #17 adds zones, ring order and violations)."""
+    for i, hub in enumerate(submission.hubs):
+        colour = hub_colour(i)
+        for seg in hub.route_segments:
+            xs, ys = zip(*seg.polyline, strict=True)
+            ax.plot(xs, ys, color=colour, lw=1.4, solid_capstyle="round", zorder=6)
+        x, y = hub.location.x, hub.location.y
+        ax.plot([x], [y], marker="s", ms=8, mfc=colour, mec=SURFACE, mew=1.4, ls="none", zorder=8)
+        ax.annotate(
+            hub.hub_id,
+            (x, y),
+            xytext=(6, -6),
+            textcoords="offset points",
+            ha="left",
+            va="top",
+            fontsize=_LABEL_PT,
+            fontweight="bold",
+            color=INK,
+            zorder=8,
+            bbox={"boxstyle": "round,pad=0.12", "fc": SURFACE, "ec": "none", "alpha": 0.85},
+        )
+    if len(submission.hubs) > 1:
+        handles = [
+            Line2D([], [], color=hub_colour(i), lw=1.4, marker="s", ms=6, label=h.hub_id)
+            for i, h in enumerate(submission.hubs)
+        ]
+        ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.0, 1.0), frameon=False,
+                  fontsize=_LABEL_PT, labelcolor=INK)  # fmt: skip
 
 
 def to_png(fig: Figure, dpi: int = 150) -> bytes:
