@@ -93,6 +93,7 @@ WHAT_IF_DEFAULTS = {
     "wi_hub_wall_clearance_m": float(PRESET.hub_wall_clearance_m),
     "wi_zone_links_via_excluded": PRESET.zone_links_via_excluded,
     "wi_route_through_other_rooms": PRESET.route_through_other_rooms,
+    "wi_interior_windows_as_doors": PRESET.interior_windows_as_doors,
 }
 
 
@@ -447,7 +448,7 @@ def _reset_what_ifs() -> None:
 def what_if_panel() -> tuple[Constraints, bool]:
     """The What-if expander (#30): the settings it gives, and whether to show J under both
     counting readings (D3). No node-cap control (D1: 5 only); the J weights aren't editable
-    (they stay `ORGANISER_WEIGHTS`, #48). Interior windows as doors arrives with #31."""
+    (they stay `ORGANISER_WEIGHTS`, #48)."""
     for k, v in WHAT_IF_DEFAULTS.items():
         st.session_state.setdefault(k, v)
     changed = any(st.session_state[k] != v for k, v in WHAT_IF_DEFAULTS.items())
@@ -480,6 +481,12 @@ def what_if_panel() -> tuple[Constraints, bool]:
             key="wi_route_through_other_rooms",
             help="D7: off by default; a ring stays in its own hub's rooms.",
         )
+        st.checkbox(
+            "Treat windows on interior walls as doors (ResPlan reading)",
+            key="wi_interior_windows_as_doors",
+            help="#31, C37: off by default; slide 3 rules 3 and 5 never let cable or a zone "
+            "pass a window. ResPlan's own code reads such windows as doors.",
+        )
         st.button("Reset to Problem statement", key="wi_reset", on_click=_reset_what_ifs)
         st.divider()
         counting = st.toggle(
@@ -492,6 +499,7 @@ def what_if_panel() -> tuple[Constraints, bool]:
         hub_wall_clearance_m=st.session_state["wi_hub_wall_clearance_m"],
         zone_links_via_excluded=st.session_state["wi_zone_links_via_excluded"],
         route_through_other_rooms=st.session_state["wi_route_through_other_rooms"],
+        interior_windows_as_doors=st.session_state["wi_interior_windows_as_doors"],
     )
     return c, counting
 

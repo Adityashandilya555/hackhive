@@ -39,8 +39,10 @@ from hackhive.graph import (
     OUTDOOR,
     build_graph,
     eligible_graph,
+    passage_doors,
     retrace_links,
     single_door_rooms,
+    window_id,
 )
 from hackhive.grid import door_gap
 from hackhive.io import get_geometries, load_plan
@@ -562,13 +564,17 @@ def _hub_where(hub: HubOut, ctx: _Context) -> list[Point]:
 
 
 def _free_space(plan: Plan, c: Constraints) -> _FreeSpace:
-    """Rule 5's geometry; `build_graph` must have filled `plan.openings` first.
+    """Rule 5's geometry; `build_graph` must have filled `plan.openings` (and, for #31's
+    WHAT-IF, `plan.window_doors`) first: a window read as a door is a passage, never a crossing.
 
     Cable crosses a wall only inside `grid.door_gap` (the door stretched across the wall band),
     exactly where the router's raster lets it, so the two agree (#60 review).
     """
-    gaps = [door_gap(d, plan, c.grid_m) for d in plan.doors]
-    never = unary_union([*plan.windows, *plan.front_doors])
+    gaps = [door_gap(d, plan, c.grid_m) for d in passage_doors(plan)]
+    # #31: with `interior_windows_as_doors` (WHAT-IF), build_graph read some windows as doors
+    as_doors = {w.id for w in plan.window_doors}
+    shut = [w for i, w in enumerate(plan.windows) if window_id(i) not in as_doors]
+    never = unary_union([*shut, *plan.front_doors])
     walls = unary_union(plan.walls)
     passages = (
         unary_union([*gaps, *(o.polygon for o in plan.openings)])
@@ -580,7 +586,7 @@ def _free_space(plan: Plan, c: Constraints) -> _FreeSpace:
         free=free,
         passages=passages,
         walls=walls,
-        windows=unary_union(plan.windows),
+        windows=unary_union(shut),
         entrance=unary_union(plan.front_doors),
         inner=plan.inner,
         room_zones=[r.polygon.buffer(c.tolerance_m) for r in plan.rooms if r.type not in OUTDOOR],
@@ -800,7 +806,7 @@ def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
     or one of its nodes is there, each with its one way out (door gap or open passage), grown
     by tol."""
     tol = ctx.c.tolerance_m
-    doors = {d.id: d for d in ctx.plan.doors}
+    doors = {d.id: d for d in passage_doors(ctx.plan)}
     rooms = {hub.room_id, *(ctx.nodes[n].room_id for n in hub.closed_sequence if n in ctx.nodes)}
     zones = []
     for rid in sorted(rooms):
