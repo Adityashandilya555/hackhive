@@ -131,7 +131,7 @@ def _batch(args: argparse.Namespace) -> int:
     rows = run(source, args.split, args.n, args.out, Constraints())
     print(summary(rows))
     print(f"wrote {args.out}")
-    return 0
+    return 0 if any(r["status"] != "input_error" for r in rows) else 1  # nothing loaded
 
 
 def main(argv: list[str] | None = None) -> int:
