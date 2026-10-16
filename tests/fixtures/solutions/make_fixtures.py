@@ -290,12 +290,40 @@ FIVE_088 = {
     "5088-retrace-single-door.json": _with_h1(
         replace_leg(H1, "N3", "N2", leg("N3", "N2", N3, (4.6, N3[1]), (4.6, 4.4), (N2[0], 4.4), N2))
     ),
-    "5088-retrace-two-door.json": _with_h1(
+    # 2026-10-16 (Rohit): a door into a bathroom that leads nowhere else is no second way out,
+    # so the bedroom R02 (living + a dead-end bathroom) counts as single-door: this 1 m retrace
+    # at N2 is legal. It was the two-door case before that decision.
+    "5088-retrace-dead-end-bathroom.json": _with_h1(
         replace_leg(
             H1,
             "N2",
             "N1",
             leg("N2", "N1", N2, (N2[0], N2[1] - 1), (8.6, N2[1] - 1), (8.6, 4.0), (N1[0], 4.0), N1),
+        )
+    ),
+    # a genuine two-door room: the living room R01 (doors to the bedroom and the kitchen, plus a
+    # dead-end bathroom); N2→N1 comes down onto N1 and N1→H1 leaves up the same 1 m: strict
+    "5088-retrace-two-door.json": _with_h1(
+        replace_leg(
+            replace_leg(
+                H1,
+                "N2",
+                "N1",
+                leg(
+                    "N2",
+                    "N1",
+                    N2,
+                    (8.6, N2[1]),
+                    (8.6, 4.25),
+                    (2.4, 4.25),
+                    (2.4, round(N1[1] + 1.0, 6)),
+                    (N1[0], round(N1[1] + 1.0, 6)),
+                    N1,
+                ),
+            ),
+            "N1",
+            "H1",
+            leg("N1", "H1", N1, (N1[0], 5.55), HUB),
         )
     ),
     # #68 review: two hubs called H1 (H2 renamed throughout)

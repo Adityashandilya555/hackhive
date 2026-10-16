@@ -30,6 +30,9 @@ from hackhive.io import get_geometries, load_plan
 # plan_to_graph leaves them out).
 OUTDOOR = ("garden", "pool", "parking", "land")
 VIA_TYPES = ("bathroom", "stair")  # what `zone_links_via_excluded` may pass through (#46 Q2)
+# A door into one of these that leads nowhere else is no second way out of a room, for the
+# single-door retrace rule (decided 2026-10-16, Rohit; bathrooms only, balconies still count)
+DEAD_END_TYPES = ("bathroom",)
 
 DOOR_REACH = 0.6  # × wall depth: rooms this close to a door are its candidates (spec)
 SIDE_SHARE = 0.10  # a side's room must fill ≥ 10% of its probe strip
@@ -212,6 +215,27 @@ def build_graph(plan: Plan, c: Constraints | None = None) -> nx.Graph:
 def eligible_graph(G: nx.Graph) -> nx.Graph:
     """The eligible rooms only, as a read-only subgraph view (C34)."""
     return G.subgraph(n for n, eligible in G.nodes(data="eligible") if eligible)
+
+
+def _dead_end(G: nx.Graph, room: str, nb: str) -> bool:
+    """Whether `nb` is a dead end off `room`: a DEAD_END_TYPES room whose only link is `room`."""
+    return G.nodes[nb].get("type") in DEAD_END_TYPES and set(G.neighbors(nb)) == {room}
+
+
+def retrace_links(G: nx.Graph, room: str) -> list[str]:
+    """The rooms `room` links to that count as ways out for the single-door retrace rule
+    (slide 3 rule 4): every neighbour except a dead-end bathroom (2026-10-16). If every link is
+    such a dead end, they all count, so a room behind one bathroom keeps its one door."""
+    links = list(G.neighbors(room))
+    real = [nb for nb in links if not _dead_end(G, room, nb)]
+    return real or links
+
+
+def single_door_rooms(G: nx.Graph) -> frozenset[str]:
+    """Rooms with exactly one way out (`retrace_links`): cable may go in and back out through
+    that door on one line, which is legal (slide 3 rule 4) and scored as overlap. The one
+    definition the checker (rule 4) and the router share."""
+    return frozenset(r for r in G.nodes if len(retrace_links(G, r)) == 1)
 
 
 def _edge_lines(plan: Plan, G: nx.Graph) -> Iterable[str]:
