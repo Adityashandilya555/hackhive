@@ -6,52 +6,73 @@ repo: Adityashandilya555/hackhive
 
 # Clarifying questions for Sprint 2
 
-These are the questions whose answers change what Sprint 2 builds (#19-#35, #44, #48, #49). They pick up from #46, which was closed **with no answers recorded**. Each one names the Sprint 2 issue it blocks and the default we keep until it's answered. Our defaults are listed in [`assumptions.md`](assumptions.md).
+This file picks up from #46, which was closed **with no answers recorded**. Rule for what we ask: **only ask the organisers what a what-if toggle, a safe default or robust scoring can't cover.** Everything else is decided below, and the app shows the other reading as a labelled WHAT-IF. Our defaults are listed in [`assumptions.md`](assumptions.md).
 
 **When an answer arrives:**
-1. Move the question to *Answered* below, with the date and who answered.
-2. Update the matching row in `assumptions.md` and in `docs/decision_conventions.md`.
-3. Edit the issue it blocks.
+1. Move it to *Decided*, with the date and who answered.
+2. Update the matching row in `assumptions.md` and `docs/decision_conventions.md`.
+3. Edit the issue it affects.
 
-## Answered
+## Decided (Adi, 2026-10-16)
 
-| # | Question | Answer | Effect |
+| # | Point | Decision | Why we don't ask |
 |---|---|---|---|
-| A1 | Node cap: the slides say ≤ 5 nodes per hub, the Honeywell brief says ≤ 20. Which do we build? | **≤ 5 only. The ≤ 20 case isn't needed** (2026-10-16). | `Constraints.max_nodes` stays 5. #28 and #29 are no longer needed (T1). Remove the node-cap options from #26 and #30 (T2, T3). |
+| D1 | Node cap: slides say ≤ 5, the Honeywell brief says ≤ 20 | **5 only.** No ≤ 20 mode, no 5-vs-20 view. | Settled. Close #28 and #29. |
+| D2 | J weights (1 / 5 / 1 / 0.5) are "starting values, fixed after reference runs" (slide 6) | **The organisers' weights by default**, read from settings rather than code. Sidebar sliders change them as a labelled WHAT-IF. **The submitted design is always picked with the official weights**, since that's what's scored. | When final weights are published, we change one setting. |
+| D3 | Unclear counting rules: T-touch and split points as crossings, overlap between different rings, bends at nodes (old O3, O4, O9) | **Robust scoring:** score each design under both readings and submit the one whose worse J is lowest. The app gets a "counting rules" toggle that shows both. | Whichever way the organisers count, we aren't surprised. |
+| D4 | An eligible room > 100 m² (old O12) | **Ignore.** No submission, and the sidecar says why. The area-cap slider (#30) shows such plans solved under a higher cap, as a WHAT-IF. | 2.1% of ResPlan, and slide 2 says the benchmark excludes them. |
+| D5 | Zone link through a bathroom or stair (old O7) | **Default: no link.** A WHAT-IF toggle allows it (`zone_links_via_excluded`, #30). | The default is valid under either reading. |
+| D6 | Windows on interior walls (old O16) | **Default: obstacle.** A WHAT-IF checkbox treats them as doors (#31). | The default is valid under either reading. |
+| D7 | Cable through a bathroom or another hub's room (old O17) | **Default: allowed** (no rule forbids it). A WHAT-IF toggle forbids it. | Measured: **0 m** of 4,071 m of cable in 124 solved plans goes through one, so neither reading changes a design. |
+| D8 | #49 greedy zoning for > 16 connected rooms | **Backlog.** The "too large" sidecar stays as the safety net. | Measured: **0 of 16,999** plans have > 16 connected eligible rooms (largest: 9). |
+| D9 | Assigned-area gap (old O8) | Largest − smallest hub area. | Only breaks ties of equal J. |
+| D10 | Output frame "origin lower-left" (old O13) | Write in the frame of the organisers' own node points (#38 moves the geometry into it). | Their checker matches our cables to their node points, so their frame is right by construction. O1's sample confirms it. |
+| D11 | When final weights are published (old O10) | Adopt them via D2 (#48). | They'll announce them. |
+| D12 | Plan 576 (6 hubs vs lower bound 2) | Keep as the showcase for "hub count above the bound, and proven minimal". | n/a |
 
 ## For the organisers (one message)
 
-| # | Question | Blocks | Our default until answered |
+| # | Question | Why it can't be a toggle | Blocks |
 |---|---|---|---|
-| O1 | **Input file:** can you share one sample input JSON? How are rooms, room ids, doors, open passages and node points given? Are node coordinates in drawing units or metres? | #38 (open), #32, #34 | tolerant loader; anything unreadable is `input_error` |
-| O2 | **Retrace in a room with 2+ doors:** is a cable going back along the same line there allowed (counted as overlap), or is it a branch (invalid)? | #21, #23 | allowed, flagged `strict`, still submitted |
-| O3 | **Crossings:** which of these count as a crossing? (a) a T-touch: one cable ends on another's middle; (b) the point where two cables stop sharing a line; (c) a corner two cables turn together; (d) a cable passing through another ring's node or hub. | #21, checker | (a) 1, (b) 1, (c) 0, (d) 1 |
-| O4 | **Overlap between rings:** does overlap count when two *different* hubs' cables share a line, or only within one ring? | #21 | any rings |
-| O5 | **One-node ring:** is hub → node → hub on the same line valid, or does it count as a branch? | #20, #21 | valid, overlap charged |
-| O6 | **Hub 0.5 m:** is it measured to walls only, or also to door openings and open passages? Do windows count as walls here? | #20 | walls only (windows count); door gaps only give `strict` |
-| O7 | **Zones through an excluded room:** can two rooms of one zone connect through a bathroom (bedroom → bathroom → bedroom)? | #22, #30 | no |
-| O8 | **Tie-break:** what is the "assigned-area gap between hubs": largest minus smallest area, or something else? | #22 | largest − smallest |
-| O9 | **Bends at nodes:** is a bend counted when a cable arrives at a node in one direction and leaves in another? Is a reversal one bend? | #20, checker | yes; a reversal counts once |
-| O10 | **Final J weights:** when and where will the final weights (now 1 / 5 / 1 / 0.5) be published? | #48 | 1 / 5 / 1 / 0.5 |
-| O11 | **Limits:** is there a time limit per plan or per batch, and a maximum number of rooms per plan? | #19, #32, #49 | none known |
-| O12 | **Big rooms:** can a hidden plan contain one eligible room over 100 m²? If so, what should we submit? | #23 | no submission, sidecar `infeasible` |
-| O13 | **Coordinates:** "origin lower-left, y up": keep the input's coordinates ÷ scale, or shift the plan so its lower-left corner is (0, 0)? | #34, #38 | input coordinates ÷ scale, unshifted |
-| O14 | **Scoring:** how are rank points given per plan: by position, or by distance from the best design? | #20, #21, #22 | n/a (decides how hard to push J vs. risk) |
-| O15 | **Submission:** file names, folder layout and how we submit; the final-presentation picture's format (PNG, SVG or PDF) and whether it's one per plan. | #34, #44 | `<plan_id>.json` per plan; PNG per plan |
-| O16 | **Windows on interior walls** (drawn in some ResPlan plans): always obstacles, or ever passable like a door? | #31 | always obstacles |
-| O17 | **Passing through other rooms:** may cable pass through another hub's rooms, or through an excluded room such as a bathroom? | #21 | yes, costs only crossings and overlap |
-
-If only a few can be asked: **O1, O2, O3, O4**. They decide whether our designs are valid and how Sprint 2's router (#21) should behave.
+| Q1 | **Input file:** one sample input JSON. How are rooms, room ids, doors, open passages and node points given? Are node coordinates in drawing units or metres? | If the hidden plans don't load, every plan scores 0. | #38, #32, #34 |
+| Q2 | **Retracing:** slide 3 allows going back along the same line only to reach a single-door room. Is it allowed in a room with 2+ doors, or in a one-node ring (hub → node → hub), with the shared length counted as overlap? Or is that a branch (invalid)? | It decides validity. Measured: **122 of 124** of our designs (98%) contain such a retrace (332 rule-4 flags). | #21, #23 |
+| Q3 | **Final run:** do we get the hidden input files and submit one output per plan, or do you run our code? Is there a time limit per plan? What file names and folder layout do you expect, and what format for the presentation picture? How are rank points given per plan? | It decides packaging, search time (#19) and how hard to push J. | #19, #32, #34, #44 |
+| Q4 | **Hub clearance (rule 6):** is the 0.5 m measured to walls only, or also to door openings and open passages? Do windows count as walls? | It decides validity for the few hubs that can't keep clear of door gaps. Our first choice already avoids them. | #20 |
 
 ## For us (team decisions in Sprint 2)
 
-| # | Question | Issue | Proposal |
-|---|---|---|---|
-| T1 | With the cap fixed at 5 (A1), do we close #28 (≤ 20 what-if) and #29 (5 vs 20 side by side)? | #28, #29 | close both as not needed |
-| T2 | Does the arrangements gallery keep only the hub-count filter? | #26 | yes, drop the node-cap filter |
-| T3 | Which constraints stay editable as what-ifs, now that the node cap is fixed? | #30 | area cap, J weights, hub offset |
-| T4 | Do we keep submitting `strict`-only designs, or prefer a costlier design with no flags? (Depends on O2-O4.) | #21, #23 | keep submitting until the answers come |
-| T5 | Plans with more than 16 rooms in one connected group (or over 5,000 zonings) get **no submission today**. A missing plan scores 0, so is #49's greedy fallback a must for Sprint 2? | #49 | yes, priority |
-| T6 | Do we round output coordinates to 4 decimals, as `decision_conventions.md` §1 says (nothing rounds yet), or change the convention? Any rounding must keep every segment exactly axis-aligned. | #34 | round in the writer, then re-check axis alignment |
-| T7 | The reviewer checklist shows "✗ k hubs > lower bound" in red even when k is the proven minimum. Reword it (for example "k hubs, proven minimum; LB 2") with the optimality badge? | #24 | yes |
-| T8 | #46 was closed with no answers. Who sends O1-O17, and when? Do we reopen #46 to track the replies? | #46 | reopen and send this list as one message |
+| # | Question | Decision |
+|---|---|---|
+| T1 | Close #28 (≤ 20 what-if) and #29 (5 vs 20 side by side)? | **Yes** (D1). Also update `rings.py`'s error that still points to "Held-Karp (#28)". |
+| T2 | Gallery filters (#26)? | Hub count only. |
+| T3 | Which WHAT-IFs does #30 offer? | Area cap, J weights (D2), hub offset, counting rules (D3), zone link through bathroom/stair (D5), interior windows as doors (D6, #31), cable through bathrooms/other zones (D7). |
+| T4 | Keep submitting `strict`-only designs? | **Yes, as the fallback.** A missing plan scores 0 for sure, but strict-only isn't guaranteed valid (Q2). #21's target is **zero** retraces outside single-door rooms. |
+| T5 | **New P0:** 11% of plans get no design because the grid misses thin doors and open passages. | **New issue, fixed first** (draft below). |
+| T6 | Round output to 4 decimals? | Yes, in the writer: snap both ends of a segment to the same rounded coordinate, with a test that every segment stays exactly axis-aligned (#34). |
+| T7 | "✗ k hubs > lower bound" shows red even when k is proven minimal. | Show ✓ with "proven minimum" (#24). |
+| T8 | Reopen #46 and send Q1-Q4? | **Yes**, one sender. Log every answer here the same day. |
+
+### T5: draft issue (to file after approval)
+
+**[S2-00] Paint thin doors and open passages the 10 cm grid misses**
+- **Problem:** `LabelGrid.from_plan` paints a door gap or open-passage strip only on the cells whose **centre** lies inside it (`src/hackhive/grid.py:L97-103 @ b48523b`). A gap or strip thinner than a cell can cover no centre, so it raises `"… covers no cell centre"`. `solve` turns that into `infeasible: grid failed`, and the plan scores 0.
+- **Size:** 16 of 150 sampled plans (11%), plus 1 `"touches no room"`.
+- **Fix:** when a passage covers no cell centre, paint the cells it **intersects** (never across a window or the front door, never outside `inner`). The routes must still pass checker rule 5.
+- **Done when:**
+  - all 17 sampled plans get a design;
+  - the batch (#32) shows zero `grid failed`;
+  - `test_grid` gets a thin-gap fixture.
+
+## How the numbers were measured (2026-10-16, `main` @ `b48523b`)
+- **Room size and connectivity:** a scan of all 16,999 readable ResPlan plans (`load_plan` + `build_graph`, one read error). It counted the largest group of eligible rooms connected by doors or open passages, per plan:
+
+  | Largest group (rooms) | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 |
+  |---|---|---|---|---|---|---|---|---|---|
+  | Plans | 1 | 21 | 1,900 | 7,410 | 5,719 | 1,546 | 325 | 70 | 7 |
+
+  A 2,000-plan sample (seed 7) found an eligible room > 100 m² in 2.1%.
+- **Solve outcomes:** `solve()` on 150 random plans (seed 11) gave:
+  - 2 `ok`;
+  - 122 `submitted_strict_only`, every strict flag being a rule-4 retrace;
+  - 26 with no design: 17 grid failures, 7 rooms > 100 m², 2 routing failures.
+- **Cable through bathrooms, stairs or other hubs' rooms:** 0 m in those 124 designs (and in the 7 fixtures).

@@ -10,7 +10,8 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 
 **Status key**
 - **ours**: our decision; the slides don't say.
-- **⚠ Ox**: our default until the organisers answer question Ox in [`clarifying_questions.md`](clarifying_questions.md).
+- **⚠ Qx**: our default until the organisers answer question Qx in [`clarifying_questions.md`](clarifying_questions.md).
+- **Dx**: decided by us on 2026-10-16 (decision Dx there), usually with the other reading as a labelled **WHAT-IF** toggle in the app.
 - **clarified**: answered; no longer an open point.
 - **not built yet**: decided, but the code doesn't do it yet (the issue that will).
 
@@ -21,15 +22,15 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | # | Assumption | Status | Where |
 |---|---|---|---|
 | 0.1 | When the slides and the Honeywell brief disagree, **the slides win**: axis-aligned routes, single-door retrace allowed, fewest hubs first, given node points, one JSON per plan. The brief only fills gaps. | ours (Adi, 2026-10-15) | `AGENTS.md` |
-| 0.2 | **Node cap = 5 per hub.** The brief's "≤ 20 devices" case is **not needed**: no ≤ 20 mode, no 5-vs-20 comparison. | clarified (2026-10-16) | `Constraints.max_nodes = 5`; see T1-T3 |
-| 0.3 | The J weights 1 / 5 / 1 / 0.5 are the slides' starting values, kept in one place (`contracts.ORGANISER_WEIGHTS`) so the final ones are a one-line change. | ⚠ O10 | `contracts.py`, #48 |
+| 0.2 | **Node cap = 5 per hub.** The brief's "≤ 20 devices" case is **not needed**: no ≤ 20 mode, no 5-vs-20 comparison. | clarified (D1) | `Constraints.max_nodes = 5`; #28, #29 close (T1) |
+| 0.3 | The J weights 1 / 5 / 1 / 0.5 are the slides' starting values. **Default = the organisers' weights**, to be read from settings, not code. Sidebar sliders change them as a WHAT-IF. The submitted design is **always picked with the official weights**. Today they're one constant (`contracts.ORGANISER_WEIGHTS`) with no CLI or UI control. | D2, not built yet (#30, #48) | `contracts.py` |
 
 ## 1. Input and units
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
-| 1.1 | The organisers' input format isn't published. `io.read_json` accepts ResPlan-shaped JSON or a guessed organiser shape (a `rooms` list, a `nodes` list, `plan_id`); every key it reads is in `io.ORGANISER_KEYS`. Anything else fails loudly (`input_error`), never by guessing. | ⚠ O1 | `io.py` (#38) |
-| 1.2 | **Frame check:** given nodes must fall in eligible rooms. We try identity, then `flip_y`, then `origin_shift`, and move the **geometry** into the nodes' frame. Given nodes never move, and the output is written in that frame, not transformed back. | ⚠ O13 | `io.py`, `Plan.frame` |
+| 1.1 | The organisers' input format isn't published. `io.read_json` accepts ResPlan-shaped JSON or a guessed organiser shape (a `rooms` list, a `nodes` list, `plan_id`); every key it reads is in `io.ORGANISER_KEYS`. Anything else fails loudly (`input_error`), never by guessing. | ⚠ Q1 | `io.py` (#38) |
+| 1.2 | **Frame check:** given nodes must fall in eligible rooms. We try identity, then `flip_y`, then `origin_shift`, and move the **geometry** into the nodes' frame. Given nodes never move, and the output is written in that frame, not transformed back, which is the organisers' own frame by construction. | D10 (Q1's sample confirms) | `io.py`, `Plan.frame` |
 | 1.3 | ResPlan is already y-up, so dev plans use no flip and no shift: metres = units ÷ scale. | ours | `io.py` |
 | 1.4 | A given node ≤ 10 cm outside its room is kept where it is and assigned to the nearest eligible room (or the room it names), with a warning. Further away, or naming an unknown room, it's `input_error`. A node's own `room_id`, when given, is authoritative. | ours | `io.py` |
 | 1.5 | Ids: organiser ids are used as given. For ResPlan dev plans we generate `PLAN_<id>`, rooms `R01…` (living → bedroom → kitchen → storage), nodes `N1…`, hubs `H1…`, all plan-global. | ours | `io.py`, `solve.py` |
@@ -41,26 +42,27 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 |---|---|---|---|
 | 2.1 | Our generated node is the room's **max-clearance point in its free space** (the room minus walls and windows). When many points tie (a rectangle's centre line), it's the **middle** of that plateau, so it's the same on every platform. | ours | `io._mic` (#61) |
 | 2.2 | A node with < 0.5 m clearance is kept, with a warning. A living-room sliver that can't fit a 0.5 m point is folded into the next living part and gets no node. Generator only, never applied to organiser input. | ours | `io.py` |
-| 2.3 | An eligible room **> 100 m²** means no valid design exists: no submission, and the sidecar says `infeasible`. Slide 2 says the benchmark excludes such plans. | ⚠ O12 | `solve.py` |
+| 2.3 | An eligible room **> 100 m²** means no valid design exists: no submission, and the sidecar says `infeasible`. Slide 2 says the benchmark excludes such plans (2.1% of ResPlan). The area-cap slider shows them solved under a higher cap, as a WHAT-IF. | D4 | `solve.py` |
 
 ## 3. Zones
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
-| 3.1 | Two rooms linked **only through an excluded room** (bedroom → bathroom → bedroom) are **not** linked. The setting `zone_links_via_excluded` exists, default off. | ⚠ O7 | `graph.eligible_graph` |
-| 3.2 | A window drawn on an interior wall (a ResPlan quirk) is an **obstacle**. "Treat as a door" will be a what-if only, never submitted. | ⚠ O16 | `graph.py`, #31 |
+| 3.1 | Two rooms linked **only through an excluded room** (bedroom → bathroom → bedroom) are **not** linked. The setting `zone_links_via_excluded` (bathroom and stair) exists, default off; #30 makes it a WHAT-IF toggle. | D5 | `graph.eligible_graph` |
+| 3.2 | A window drawn on an interior wall (a ResPlan quirk) is an **obstacle**. "Treat as a door" will be a WHAT-IF checkbox, never submitted. | D6 (#31) | `graph.py`, #31 |
 | 3.3 | A doorless eligible room is its own zone, with its own hub. | ours | `zoning.py` |
 | 3.4 | A zone must contain a room that can host a hub (a point ≥ 0.51 m from walls). Otherwise that zoning is skipped, and a plan with no such zoning gets no submission. | ours | `zoning.py`, `solve._pick` |
 | 3.5 | A zoning is skipped when one of its zones has no node, because there is no ring to build. | ours | `solve._pick` |
-| 3.6 | Exact zoning handles **≤ 16 rooms** per connected group and **≤ 5,000 zonings**. Above that there is **no submission today**; the greedy fallback is #49. | ours, not built yet (#49); see T5 | `zoning.py`, `solve.py` |
+| 3.6 | Exact zoning handles **≤ 16 rooms** per connected group and **≤ 5,000 zonings**. Above that: no submission, and a "too large" sidecar. **No ResPlan plan gets there** (largest group: 9 rooms, out of 16,999 plans), so #49 goes to Backlog. | D8 | `zoning.py`, `solve.py` |
+| 3.7 | A door gap or open-passage strip that covers **no 10 cm cell centre** stops the grid (`covers no cell centre`), so the plan gets no design and scores 0: **11% of a 150-plan sample**. | **bug**, new P0 issue (T5) | `grid.py` |
 
 ## 4. Hubs
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
 | 4.1 | Hub count = the minimum over all valid zonings, proven by exhaustive search. The lower bound max(⌈area/100⌉, ⌈nodes/5⌉) is only reported (not always reachable). | ours | `zoning.py`, sidecar `bounds` |
-| 4.2 | Hub spots are 10 cm grid-cell centres **≥ 0.51 m** (1 cm margin) from both the room's whole outline and the walls. Only if a zone has none, the spot only needs ≥ 0.51 m from walls, tagged `wall_clearance_only`. | ⚠ O6 | `rings.hub_candidates` |
-| 4.3 | The checker gives `error` below 0.5 m from walls (windows and the outside count as walls), and only `strict` below 0.5 m from a door gap or open-passage edge. | ⚠ O6 | `checker.py` rule 6 |
+| 4.2 | Hub spots are 10 cm grid-cell centres **≥ 0.51 m** (1 cm margin) from both the room's whole outline and the walls. Only if a zone has none, the spot only needs ≥ 0.51 m from walls, tagged `wall_clearance_only`. | ⚠ Q4 | `rings.hub_candidates` |
+| 4.3 | The checker gives `error` below 0.5 m from walls (windows and the outside count as walls), and only `strict` below 0.5 m from a door gap or open-passage edge. | ⚠ Q4 | `checker.py` rule 6 |
 | 4.4 | A hub is never on a node point: we keep it ≥ 0.10 m away. | ours | `rings.NODE_KEEP_OFF_M` |
 | 4.5 | **First cut (Sprint 1):** the hub goes in the zone room with the most door links, at the spot closest to the zone's nodes in total. Among minimum-hub zonings, the one with the shortest Manhattan rings is chosen. | ours, exact choice is #20 | `rings.first_ring`, `solve._pick` |
 
@@ -74,19 +76,19 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | 5.4 | A stub never takes a corner whose L crosses a wall; the check uses the checker's own free-space geometry. | ours | `route.py` (#70) |
 | 5.5 | Corner choice is exhaustive up to 4⁵ combinations, then one greedy pass per stop. | ours | `route.MAX_CORNER_COMBOS` (#70) |
 | 5.6 | A run pinned at both ends to lines < 1 mm apart gets a **sub-mm jog**, so every piece is exactly horizontal or vertical. | ours | `route._square_up` (#70) |
-| 5.7 | Cable may pass through **other zones' rooms and excluded rooms**. It only costs X and O there. | ⚠ O17 | `grid.py` |
+| 5.7 | Cable may pass through **other zones' rooms and excluded rooms**. It only costs X and O there. A WHAT-IF toggle forbids it. Measured: 0 m of 4,071 m of cable does this in 124 solved plans. | D7 | `grid.py` |
 | 5.8 | The entrance (front door) is not a passage: cable never leaves `inner` through it. | ours | `grid.py` |
-| 5.9 | **No rip-up yet:** each leg takes its own shortest path, so legs can share a corridor. Such retraces in multi-door rooms are flagged rule-4 `strict` and still submitted. #21 will reduce them. | ⚠ O2, not built yet (#21) | `route.py`, checker rule 4 |
-| 5.10 | One-node ring (hub → node → hub): out-and-back on one line today. Decided but not built: a thin rectangle loop when the node is more than 1.2 m away (lower J). | ⚠ O5, not built yet (#21) | `decision_conventions.md` §5 |
+| 5.9 | **No rip-up yet:** each leg takes its own shortest path, so legs can share a corridor. Such retraces outside single-door rooms are flagged rule-4 `strict` and still submitted. They appear in **122 of 124** sampled designs (332 flags). #21's target is **zero**. | ⚠ Q2, not built yet (#21) | `route.py`, checker rule 4 |
+| 5.10 | One-node ring (hub → node → hub): out-and-back on one line today. Decided but not built: a thin rectangle loop when the node is more than 1.2 m away (lower J). | ⚠ Q2, not built yet (#21) | `decision_conventions.md` §5 |
 
 ## 6. How we read the metrics (our checker mirror)
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
-| 6.1 | X: a **T-touch** counts 1; each point where two cables **stop sharing a line** counts 1; a corner two cables **turn together** counts 0; another ring's cable through a **node or hub point** counts 1. | ⚠ O3 | `checker.py` (#43) |
-| 6.2 | O counts between **any** rings, not just within one: (k − 1) × length for k legs on the same line. | ⚠ O4 | `checker.py` |
-| 6.3 | B: +1 at a node when the incoming and outgoing directions differ, and at the hub closing the ring. A reversal counts once. | ⚠ O9 | `checker.py` |
-| 6.4 | Assigned-area gap = **largest − smallest** hub area (0 for one hub). | ⚠ O8 (Adi, 2026-10-15) | `metrics.area_gap` |
+| 6.1 | X: a **T-touch** counts 1; each point where two cables **stop sharing a line** counts 1; a corner two cables **turn together** counts 0; another ring's cable through a **node or hub point** counts 1. Planned: **robust scoring**, where each design is scored under both readings and we submit the one whose worse J is lowest, with an app toggle that shows both. | D3, robust scoring not built yet | `checker.py` (#43) |
+| 6.2 | O counts between **any** rings, not just within one: (k − 1) × length for k legs on the same line. The other reading goes into robust scoring (6.1). | D3 | `checker.py` |
+| 6.3 | B: +1 at a node when the incoming and outgoing directions differ, and at the hub closing the ring. A reversal counts once. The other reading goes into robust scoring (6.1). | D3 | `checker.py` |
+| 6.4 | Assigned-area gap = **largest − smallest** hub area (0 for one hub). | D9 | `metrics.area_gap` |
 | 6.5 | The checklist line "k hubs > lower bound" shows ✗ even when k is the proven minimum. | ours, see T7 | `checker.checklist` |
 
 ## 7. Output and the submit gate
@@ -94,7 +96,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | # | Assumption | Status | Where |
 |---|---|---|---|
 | 7.1 | The submission has exactly slide 8's keys. Everything else (status, violations, bounds, warnings, frame) goes in `<plan_id>.sidecar.json`. | ours (Adi, 2026-10-15) | `contracts.py`, `solve.py` |
-| 7.2 | **Gate:** no `error` → submit (`ok`); only `strict` flags → **still submit**, marked `submitted_strict_only`; any `error` → no submission (`infeasible`); unreadable input → `input_error`. | ours; see T4 | `solve.submit` |
+| 7.2 | **Gate:** no `error` → submit (`ok`); only `strict` flags → **still submit**, marked `submitted_strict_only`; any `error` → no submission (`infeasible`); unreadable input → `input_error`. Strict-only is the fallback, **not guaranteed valid** (Q2). | ours (T4) | `solve.submit` |
 | 7.3 | Coordinates are written as **full floats**, not rounded. `decision_conventions.md` §1 says 4 decimals, but nothing rounds yet. | ours, see T6 | `solve.py` |
 | 7.4 | `assigned_rooms` starts with the hub's room; `assigned_nodes` are sorted; `closed_sequence` is the ring order; reported lengths come from our mirror (the organisers ignore them). | ours | `solve.py` |
 | 7.5 | What-ifs (edited weights, via-excluded links, interior windows as doors) are **never** written as a submission. | ours | #30, #31 |
