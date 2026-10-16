@@ -8,8 +8,9 @@ or move between a door and one of the two rooms it joins; nothing else changes r
 id is greater than every room id. ``search`` rejects inputs that break it, because a door id
 equal to a room id would let a cable change rooms without a door (slide 3 rule 5).
 
-**Units:** costs are in cells. One step is one cell (``grid_m`` metres), so the bend weight
-must be in cells too: use ``bend_weight_cells(c)``, never the raw J weight.
+**Units:** costs are in cells. One step is one cell (``grid_m`` metres), so the bend and
+overlap weights must be in cells too: use ``bend_weight_cells(c)`` and
+``overlap_weight_cells(c)``, never the raw J weights.
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import itertools
 import math
 import sys
 import time
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -72,6 +73,13 @@ def bend_weight_cells(c: Constraints, cell_m: float | None = None) -> float:
     return c.cost_weights.bend / (c.cost_weights.length * (cell_m or c.grid_m))
 
 
+def overlap_weight_cells(c: Constraints) -> float:
+    """The J overlap weight in step units (#80): a step costs ``length · cell`` in J, and each
+    other cable already on the same cell edge adds ``overlap · cell`` (slide 7's O counts
+    (k − 1) · length), so the cell size cancels."""
+    return c.cost_weights.overlap / c.cost_weights.length
+
+
 def _check_ids(labels: np.ndarray, door_rooms: Mapping[int, tuple[int, int]]) -> None:
     if not door_rooms:
         return
@@ -100,11 +108,15 @@ def search(
     sources: Iterable[Cell],
     w_bend: float,
     targets: Iterable[Cell] | None = None,
+    penalty: Mapping[int, float] | None = None,
 ) -> SearchResult:
     """Dijkstra over (cell, heading): a straight step costs 1, a 90° turn 1 + ``w_bend``.
 
     180° turns are forbidden. Every source is seeded with all four headings at cost 0,
     so the first step never pays a bend. ``w_bend`` is in cells (``bend_weight_cells``).
+
+    ``penalty`` adds a cost to single steps, keyed ``(row · cols + col) · 4 + heading`` for the
+    step leaving (row, col) with that heading (``Occupancy.step_costs``, #80); it must be ≥ 0.
 
     With ``targets``, the search stops once every target's cheapest state is final (#19):
     ``cost`` and ``path_to`` stay exact for them, other states are final only below
@@ -128,6 +140,9 @@ def search(
             heap.append((0.0, r, c, h))
     heapq.heapify(heap)
     waiting = None if targets is None else {(int(r), int(c)) for r, c in targets}
+    pen = dict(penalty or {})
+    if any(v < 0 for v in pen.values()):
+        raise ValueError("penalties must be >= 0")
 
     while heap:
         d, r, c, h = heapq.heappop(heap)
@@ -138,6 +153,7 @@ def search(
             if not waiting:
                 return SearchResult(dist, parent, float(w_bend), d)
         here = grid[r][c]
+        state = (r * cols + c) * 4
         for nh, (dr, dc) in enumerate(DIRS):
             if nh == (h + 2) % 4:
                 continue  # no reversal
@@ -147,9 +163,11 @@ def search(
             if not _can_step(here, grid[nr][nc], door_rooms):
                 continue
             nd = d + 1.0 + (w_bend if nh != h else 0.0)
+            if pen:
+                nd += pen.get(state + nh, 0.0)
             if nd < dist[nr, nc, nh]:
                 dist[nr, nc, nh] = nd
-                parent[nr, nc, nh] = (r * cols + c) * 4 + h
+                parent[nr, nc, nh] = state + h
                 heapq.heappush(heap, (nd, nr, nc, nh))
     return SearchResult(dist, parent, float(w_bend))
 
@@ -219,6 +237,47 @@ def bends(path: list[Cell]) -> int:
 
 def _heading(a: Cell, b: Cell) -> Cell:
     return ((b[0] > a[0]) - (b[0] < a[0]), (b[1] > a[1]) - (b[1] < a[1]))
+
+
+# --------------------------------------------------------------------------- occupancy (#80)
+
+Edge = tuple[Cell, Cell]  # two neighbouring cells, the smaller first
+
+
+class Occupancy:
+    """How many committed legs use each cell edge, as a ``Counter`` (#80; OrthoRoute's
+    commit/clear bookkeeping, adapted). ``commit`` a leg's grid path once it is routed, ``clear``
+    it to rip its ring up; ``step_costs`` turns the counts into ``search``'s ``penalty``.
+
+    Two legs on one cell edge are on the same line, so they overlap (slide 7's O); neighbouring
+    rows are a cell apart, far more than the 1 mm tolerance, so they never do."""
+
+    def __init__(self) -> None:
+        self.count: Counter[Edge] = Counter()
+
+    @staticmethod
+    def edges(path: Sequence[Cell]) -> list[Edge]:
+        """Every cell edge along a corner-point path."""
+        cells = expand([(int(r), int(c)) for r, c in path])
+        return [(a, b) if a < b else (b, a) for a, b in zip(cells, cells[1:], strict=False)]
+
+    def commit(self, path: Sequence[Cell]) -> None:
+        self.count.update(self.edges(path))
+
+    def clear(self, path: Sequence[Cell]) -> None:
+        for e in self.edges(path):
+            self.count[e] -= 1
+            if self.count[e] <= 0:
+                del self.count[e]
+
+    def step_costs(self, w_overlap: float, cols: int) -> dict[int, float]:
+        """``search``'s penalty: ``w_overlap`` · uses for a step along a used edge, both ways."""
+        out: dict[int, float] = {}
+        for (a, b), k in self.count.items():
+            h = DIRS.index(_heading(a, b))
+            out[(a[0] * cols + a[1]) * 4 + h] = w_overlap * k
+            out[(b[0] * cols + b[1]) * 4 + (h + 2) % 4] = w_overlap * k
+        return out
 
 
 # --------------------------------------------------------------------------- path cache (#19)
@@ -653,10 +712,16 @@ class _Prepared:
     stops: list[_Snapped]
     paths: list[list[Point2]]  # leg i's grid path (stop i → stop i + 1, cyclic) as cell centres
     c: Constraints
+    cells: list[list[Cell]] = field(default_factory=list)  # the same paths as corner cells
 
 
-def _prepare(grid: LabelGrid, stops: Sequence[Stop], c: Constraints) -> _Prepared:
-    """Snap every stop to its cell and route every leg on the grid (one search per stop)."""
+def _prepare(
+    grid: LabelGrid, stops: Sequence[Stop], c: Constraints, occupancy: Occupancy | None = None
+) -> _Prepared:
+    """Snap every stop to its cell and route every leg on the grid (one search per stop).
+
+    With ``occupancy``, each leg pays ``overlap_weight_cells(c)`` per use of an occupied cell edge
+    and is committed once routed, so later legs, this ring's own included, see it (#80)."""
     if len(stops) < 2:
         raise ValueError(f"a ring needs at least 2 stops, got {len(stops)}")
     tol = c.tolerance_m
@@ -672,13 +737,20 @@ def _prepare(grid: LabelGrid, stops: Sequence[Stop], c: Constraints) -> _Prepare
         kind = "centre" if near_x and near_y else "near" if near_x or near_y else "full"
         snapped.append(_Snapped(s, cell, centre, corners, kind))
     w_bend = bend_weight_cells(c, grid.cell_m)
-    paths = []
+    w_overlap = overlap_weight_cells(c)
+    cols = grid.labels.shape[1]
+    paths, routed = [], []
     for a, b in zip(snapped, [*snapped[1:], snapped[0]], strict=True):
-        cells = path_to(search(grid.labels, grid.door_rooms, [a.cell], w_bend), b.cell)
+        pen = occupancy.step_costs(w_overlap, cols) if occupancy else None
+        found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
+        cells = path_to(found, b.cell)
         if not cells:
             raise ValueError(f"{a.stop.id}→{b.stop.id} unreachable")
+        if occupancy is not None:
+            occupancy.commit(cells)
         paths.append([grid.to_xy(cell) for cell in cells])
-    return _Prepared(snapped, paths, c)
+        routed.append(cells)
+    return _Prepared(snapped, paths, c, routed)
 
 
 def _on_line(k: Point2, a: Point2, b: Point2, tol: float) -> bool:
@@ -839,6 +911,7 @@ def route_ring(
     *,
     retrace_ok: Collection[str] = (),
     free: shapely.Geometry | None = None,
+    occupancy: Occupancy | None = None,
 ) -> list[RouteSegment]:
     """One closed ring as slide-8 route segments: stops[0] (the hub) → … → stops[-1] → stops[0].
 
@@ -849,10 +922,23 @@ def route_ring(
     room, where the retrace is legal) or within tol of its cell's row or column. Among those
     choices the ring with the lowest J (`checker.metrics`) wins; ties go to the first; past
     `MAX_CORNER_COMBOS` combinations, one greedy pass per stop. With `free` (rule 5's free
-    space), no stub corner runs through a wall. Raises ValueError for fewer than 2 stops, a stop
-    its room can't snap or reach without a wall, or an unreachable leg.
+    space), no stub corner runs through a wall. With `occupancy`, legs avoid used cell edges by
+    J's overlap weight and are committed to it (#80). Raises ValueError for fewer than 2 stops,
+    a stop its room can't snap or reach without a wall, or an unreachable leg.
     """
-    prep = _prepare(grid, stops, c)
+    return _route_ring(grid, stops, c, retrace_ok, free, occupancy)[0]
+
+
+def _route_ring(
+    grid: LabelGrid,
+    stops: Sequence[Stop],
+    c: Constraints,
+    retrace_ok: Collection[str],
+    free: shapely.Geometry | None,
+    occupancy: Occupancy | None,
+) -> tuple[list[RouteSegment], list[list[Cell]]]:
+    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed)."""
+    prep = _prepare(grid, stops, c, occupancy)
     n = len(prep.stops)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
     cache: dict[tuple[int, int | None, int | None], list[Point2]] = {}
@@ -875,7 +961,7 @@ def route_ring(
         best = [o[0] for o in options]
         for i, opts in enumerate(options):
             best = min(([*best[:i], o, *best[i + 1 :]] for o in opts), key=score)
-    return _segments(prep, best)
+    return _segments(prep, best), prep.cells
 
 
 def single_door_nodes(plan: Plan, c: Constraints = _DEFAULT) -> frozenset[str]:
@@ -896,14 +982,57 @@ def own_rooms_grid(grid: LabelGrid, rooms: Collection[str]) -> LabelGrid:
     return replace(grid, labels=labels.astype(grid.labels.dtype))
 
 
+RIP_UP_PASSES = 2  # ADR-004: rip-up-and-reroute passes after the sequential one
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """Every ring after one pass (#80), with the pass's J and O from `checker.metrics`."""
+
+    pass_no: int  # 0: each ring routed alone; 1 …: rip-up-and-reroute passes
+    rings: list[RoutedRing]  # in hub order
+    J: float
+    O: float  # noqa: E741 (slide 7's name)
+
+
+@dataclass(frozen=True)
+class Routing:
+    """`route_passes`' result: the lowest-J pass's rings, and every pass."""
+
+    rings: list[RoutedRing]
+    snapshots: list[Snapshot]
+    best: int  # the index of `rings`' snapshot (the first of equal J)
+
+
 def route_rings(
     grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
 ) -> list[RoutedRing]:
-    """Every hub's ring, routed independently in hub order (no rip-up yet, #21), each inside its
-    hub's `assigned_rooms` unless `c.route_through_other_rooms` (D7)."""
-    from hackhive.checker import _free_space, metrics  # checker imports grid, which imports us
+    """Every hub's ring, in hub order: `route_passes`' lowest-J pass."""
+    return route_passes(grid, plan, hubs, c).rings
+
+
+def route_passes(
+    grid: LabelGrid,
+    plan: Plan,
+    hubs: Sequence[Hub],
+    c: Constraints = _DEFAULT,
+    *,
+    passes: int = RIP_UP_PASSES,
+) -> Routing:
+    """Every hub's ring, each inside its hub's `assigned_rooms` unless
+    `c.route_through_other_rooms` (D7), over 1 + `passes` passes (#80, ADR-004).
+
+    Pass 0 routes each ring alone, in hub order. Every later pass rips each ring up in turn,
+    longest (pass 0's L) first, and reroutes it with an occupancy penalty: each cell edge that
+    another cable uses, this ring's own earlier legs included, costs J's overlap weight once
+    per cable (`overlap_weight_cells`). The pass with the lowest total J (`checker.metrics`,
+    crossings and overlaps between rings included) wins, so J is never above pass 0's.
+    """
+    from hackhive.checker import _free_space  # checker imports grid, which imports us
     from hackhive.graph import build_graph
 
+    if passes < 0:
+        raise ValueError(f"passes must be >= 0, got {passes}")
     # a zone may be joined only through a bathroom/stair (#46 Q2); its ring needs that room
     edges = build_graph(plan, c).edges(data=True) if c.zone_links_via_excluded else []
     via = [(a, b, d["via"]) for a, b, d in edges if d["kind"] == "via_excluded"]
@@ -911,24 +1040,56 @@ def route_rings(
     retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings _free_space needs
     free = _free_space(plan, c).free  # rule 5's own geometry, so stubs and checker agree
     nodes = {n.id: n for n in plan.nodes}
-    out = []
+    grids, stops = [], []
     for hub in hubs:
-        stops = [
-            Stop(hub.hub_id, hub.location, hub.room_id),
-            *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
-        ]
+        stops.append(
+            [
+                Stop(hub.hub_id, hub.location, hub.room_id),
+                *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
+            ]
+        )
         if c.route_through_other_rooms:
-            segments = route_ring(grid, stops, c, retrace_ok=retrace_ok, free=free)
+            grids.append(grid)
         else:
             zone = set(hub.assigned_rooms)
             rooms = zone.union(*(v for a, b, v in via if a in zone and b in zone))
-            try:
-                segments = route_ring(
-                    own_rooms_grid(grid, rooms), stops, c, retrace_ok=retrace_ok, free=free
-                )
-            except ValueError as e:  # never falls back to other rooms
-                raise ValueError(f"{e} within {hub.hub_id}'s rooms (D7)") from e
-        hub_out = HubOut.model_validate(
+            grids.append(own_rooms_grid(grid, rooms))
+
+    def route(i: int, occupancy: Occupancy | None) -> tuple[list[RouteSegment], list[list[Cell]]]:
+        try:
+            return _route_ring(grids[i], stops[i], c, retrace_ok, free, occupancy)
+        except ValueError as e:  # never falls back to other rooms
+            if c.route_through_other_rooms:
+                raise
+            raise ValueError(f"{e} within {hubs[i].hub_id}'s rooms (D7)") from e
+
+    first = [route(i, None) for i in range(len(hubs))]
+    segments = [segs for segs, _ in first]
+    cells = [legs for _, legs in first]
+    snapshots = [_snapshot(0, hubs, segments, c)]
+    order = sorted(range(len(hubs)), key=lambda i: -snapshots[0].rings[i].ring_length_m)
+    occupancy = Occupancy()
+    for legs in cells:
+        for path in legs:
+            occupancy.commit(path)
+    for pass_no in range(1, passes + 1):
+        for i in order:
+            for path in cells[i]:
+                occupancy.clear(path)
+            segments[i], cells[i] = route(i, occupancy)
+        snapshots.append(_snapshot(pass_no, hubs, segments, c))
+    best = min(range(len(snapshots)), key=lambda k: snapshots[k].J)
+    return Routing(snapshots[best].rings, snapshots, best)
+
+
+def _snapshot(
+    pass_no: int, hubs: Sequence[Hub], segments: Sequence[list[RouteSegment]], c: Constraints
+) -> Snapshot:
+    """Every ring of one pass, scored together by `checker.metrics`."""
+    from hackhive.checker import metrics  # checker imports grid, which imports this module
+
+    outs = [
+        HubOut.model_validate(
             {
                 "hub_id": hub.hub_id,
                 "room_id": hub.room_id,
@@ -936,13 +1097,18 @@ def route_rings(
                 "assigned_rooms": hub.assigned_rooms,
                 "assigned_nodes": hub.ring[1:-1],
                 "closed_sequence": hub.ring,
-                "route_segments": [s.model_dump(by_alias=True) for s in segments],
+                "route_segments": [s.model_dump(by_alias=True) for s in segs],
                 "ring_length_m": 0.0,
             }
         )
-        per_hub = metrics([hub_out], c).per_hub[hub.hub_id]
-        out.append(RoutedRing(hub.hub_id, segments, per_hub.L, per_hub.B))
-    return out
+        for hub, segs in zip(hubs, segments, strict=True)
+    ]
+    m = metrics(outs, c)
+    rings = [
+        RoutedRing(hub.hub_id, list(segs), m.per_hub[hub.hub_id].L, m.per_hub[hub.hub_id].B)
+        for hub, segs in zip(hubs, segments, strict=True)
+    ]
+    return Snapshot(pass_no, rings, m.J, m.O)
 
 
 # --------------------------------------------------------------------------- benchmark (#19)

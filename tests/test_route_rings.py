@@ -2,6 +2,7 @@
 C17, C40-C42, C48). Fixtures: load_plan → build_graph → the fewest-hubs zoning → first_ring per
 zone → LabelGrid, as in test_rings.py; every fixture plan is routed once per module."""
 
+import ast
 import math
 import subprocess
 import sys
@@ -9,6 +10,7 @@ from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import shapely
 from shapely.geometry import box
@@ -22,12 +24,12 @@ from hackhive.checker import (
     metrics,
     segment_length,
 )
-from hackhive.contracts import Constraints, HubOut, Submission
+from hackhive.contracts import Constraints, CostWeights, HubOut, Submission
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
 from hackhive.io import load_plan
 from hackhive.rings import first_ring
-from hackhive.route import Stop, route_ring, route_rings
+from hackhive.route import Occupancy, Stop, route_passes, route_ring, route_rings
 from hackhive.zoning import eligible_area_and_nodes, enumerate_zonings, min_hubs
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -46,8 +48,10 @@ def _route(plan_id: str, c: Constraints = C) -> SimpleNamespace:
     zoning = next(z for z in zonings if len(z) == k)
     hubs = [first_ring(zone, plan, g, C, hub_id=f"H{i}") for i, zone in enumerate(zoning, 1)]
     grid = LabelGrid.from_plan(plan)
-    rings = route_rings(grid, plan, hubs, c)
-    return SimpleNamespace(plan=plan, G=G, zoning=zoning, hubs=hubs, grid=grid, rings=rings)
+    routing = route_passes(grid, plan, hubs, c)
+    return SimpleNamespace(
+        plan=plan, G=G, zoning=zoning, hubs=hubs, grid=grid, rings=routing.rings, routing=routing
+    )
 
 
 @pytest.fixture(scope="module")
@@ -535,16 +539,122 @@ J_MAIN = {
 D7_COST = {"13344": 0.3}
 
 
+def _sequential(case) -> SimpleNamespace:
+    """The case with its pass-0 rings: each ring routed alone, as main routed them (#80)."""
+    return SimpleNamespace(**{**vars(case), "rings": case.routing.snapshots[0].rings})
+
+
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
 def test_own_rooms_j_against_main(routed, plan_id):
-    """C13, C17: J matches main on every fixture except the recorded D7 cost, and rule 5
-    passes; with the WHAT-IF on, J is main's exactly."""
-    case = routed[plan_id]
+    """C13, C17: the sequential pass's J matches main on every fixture except the recorded D7
+    cost, and rule 5 passes; with the WHAT-IF on, J is main's exactly."""
+    case = _sequential(routed[plan_id])
     j = metrics(submission(case).hubs, C).J
     assert j == pytest.approx(J_MAIN[plan_id] + D7_COST.get(plan_id, 0.0), abs=TOL)
     assert not [v for v in check_rules(case.plan, submission(case), C) if v.rule == 5]
-    loose = _route(plan_id, Constraints(route_through_other_rooms=True))
+    loose = _sequential(_route(plan_id, Constraints(route_through_other_rooms=True)))
     assert metrics(submission(loose).hubs, C).J == pytest.approx(J_MAIN[plan_id], abs=TOL)
+
+
+# --------------------------------------------------------------------------- occupancy (#80)
+
+
+def _retraces(case) -> int:
+    """Rule-4 retrace flags (strict, #46 Q5) on the case's rings."""
+    found = check_rules(case.plan, submission(case), C)
+    return sum(v.rule == 4 and v.severity == "strict" and "retrace" in v.message for v in found)
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_occupancy_j_not_above_the_sequential_baseline(routed, plan_id):
+    """C17: J after the rip-up passes ≤ J of the sequential baseline (pass 0), as checker.metrics
+    computes it from the submitted polylines."""
+    case = routed[plan_id]
+    best = metrics(submission(case).hubs, C).J
+    base = metrics(submission(_sequential(case)).hubs, C).J
+    assert best <= base + 1e-9
+    assert best == pytest.approx(min(s.J for s in case.routing.snapshots), abs=1e-9)
+
+
+def test_occupancy_576_overlap_not_above_the_baseline(routed):
+    """C17, C40: 576's O after the passes ≤ the sequential baseline's."""
+    case = routed["576"]
+    assert metrics(submission(case).hubs, C).O <= metrics(submission(_sequential(case)).hubs, C).O
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_occupancy_snapshots_one_per_pass_and_no_error(routed, plan_id):
+    """C13, C14: passes + 1 snapshots, each with its J and O; no snapshot gives an `error`."""
+    case = routed[plan_id]
+    snaps = case.routing.snapshots
+    assert [s.pass_no for s in snaps] == list(range(route.RIP_UP_PASSES + 1))
+    for snap in snaps:
+        view = SimpleNamespace(**{**vars(case), "rings": snap.rings})
+        m = metrics(submission(view).hubs, C)
+        assert (snap.J, snap.O) == (pytest.approx(m.J, abs=1e-9), pytest.approx(m.O, abs=1e-9))
+        assert not [v for v in check_rules(case.plan, submission(view), C) if v.severity == "error"]
+    assert case.routing.rings == snaps[case.routing.best].rings
+
+
+def test_occupancy_passes_is_a_setting(routed):
+    """`passes` sets the number of rip-up passes: 0 is the sequential routing alone."""
+    case = routed["5088"]
+    one = route_passes(case.grid, case.plan, case.hubs, C, passes=0)
+    assert [s.pass_no for s in one.snapshots] == [0] and one.best == 0
+    assert route_rings(case.grid, case.plan, case.hubs, C) == case.rings
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_occupancy_retraces_do_not_increase(routed, plan_id):
+    """C15: the rule-4 retrace flags don't increase on any fixture (T4's target is zero)."""
+    case = routed[plan_id]
+    assert _retraces(case) <= _retraces(_sequential(case))
+
+
+def test_occupancy_penalty_moves_a_leg_to_the_parallel_line():
+    """search: an occupied edge costs w_ov more per use, so a leg takes the parallel line when
+    the overlap costs more than its two bends and two steps, and stays on it when it doesn't."""
+    labels = np.zeros((3, 6), dtype=np.int64)
+    occ = Occupancy()
+    occ.commit([(1, 0), (1, 5)])
+    assert occ.count[((1, 2), (1, 3))] == 1 and len(occ.count) == 5
+    pen = occ.step_costs(1.0, labels.shape[1])
+    dear = route.search(labels, {}, [(1, 0)], 0.0, penalty=pen)
+    assert dear.cost((1, 5)) == 7.0 and route.bends(route.path_to(dear, (1, 5))) == 2
+    cheap = route.search(labels, {}, [(1, 0)], 0.0, penalty=occ.step_costs(0.1, 6))
+    assert cheap.cost((1, 5)) == pytest.approx(5.5) and route.path_to(cheap, (1, 5)) == [
+        (1, 0),
+        (1, 5),
+    ]
+    occ.commit([(1, 2), (1, 3)])
+    assert occ.count[((1, 2), (1, 3))] == 2
+    occ.clear([(1, 2), (1, 3)])
+    occ.clear([(1, 0), (1, 5)])
+    assert not occ.count
+
+
+def test_occupancy_weight_comes_from_cost_weights():
+    """C17: the overlap weight in steps is overlap / length from c.cost_weights, never a literal:
+    a step costs length · cell in J, an overlapped step overlap · cell more."""
+    assert route.overlap_weight_cells(C) == C.cost_weights.overlap / C.cost_weights.length
+    dear = Constraints(cost_weights=CostWeights(1.0, 5.0, 3.0, 0.5))
+    assert route.overlap_weight_cells(dear) == 3.0
+
+
+def test_occupancy_no_weight_literals_in_route():
+    """C17: no J weight (5, 0.5) appears in route.py as a number, except lines marked
+    not-a-weight (a cell centre is half a cell)."""
+    src = Path(route.__file__).read_text(encoding="utf-8")
+    lines = src.splitlines()
+    found = [
+        f"{n.lineno}: {lines[n.lineno - 1].strip()}"
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Constant)
+        and type(n.value) is float  # MAX_CORNER_COMBOS' 4**5 counts options, not cost
+        and n.value in (5.0, 0.5)
+        and "not-a-weight" not in lines[n.lineno - 1]
+    ]
+    assert found == []
 
 
 # --------------------------------------------------------------------------- see it

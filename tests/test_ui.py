@@ -67,7 +67,10 @@ def test_banner_strict_only_5924_names_its_retraces():
     plan, _, res = _case("5924")
     kind, text = status_banner(res.sidecar, plan)
     assert kind == "warning"
-    assert "3 retraces" in text and "Q2" in text
+    # the count is the sidecar's own rule-4 flags (#80's rip-up passes change it)
+    n = sum(v.rule == 4 and v.severity == "strict" for v in res.sidecar.violations)
+    assert n >= 1
+    assert f"{n} retrace" in text and "Q2" in text
 
 
 def test_banner_strict_only_names_each_rule_present():
