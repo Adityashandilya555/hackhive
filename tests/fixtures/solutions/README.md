@@ -25,7 +25,8 @@ result. 5088's are checked against `tests/fixtures/plans/plan-5088.json`; the
 | `5088-hub-0.3m-from-wall.json` | rule 6 `error`: the hub is 0.3 m from the living's window |
 | `5088-hub-in-unassigned-room.json` | rule 6 `error`: H2 sits in R01, which it isn't assigned |
 | `5088-retrace-single-door.json` | nothing: the retrace out of the single-door kitchen is legal (scored as O) |
-| `5088-retrace-two-door.json` | rule 4 `strict`: 1.00 m retraced inside the two-door bedroom (#46 Q5) |
+| `5088-retrace-two-door.json` | rule 4 `strict`: 1.00 m retraced at N1 inside the two-door living room (#46 Q5) |
+| `5088-retrace-dead-end-bathroom.json` | nothing: 1.00 m retraced at N2 in the bedroom whose only other door is a dead-end bathroom, which counts as single-door (2026-10-16) |
 | `5088-duplicate-hub-id.json` | rule 1: two hubs called H1 (#68 review) |
 | `5088-hub-in-single-door-room.json` | nothing: the hub shares the single-door kitchen, so the ring leaves and re-enters on one line (legal; #68 review) |
 | `syn-open-plan.json` | (a plan) living and kitchen joined by one open passage, for rule 6's `strict` |
