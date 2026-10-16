@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import builtins
 import dataclasses
+import functools
 import hashlib
 import json
 import re
@@ -34,7 +35,6 @@ from hackhive.checker import (
     HUB_POINT,
     READINGS,
     Metrics,
-    _free_space,
     area_gap,
     check_rules,
     metrics,
@@ -58,17 +58,9 @@ from hackhive.contracts import (
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
 from hackhive.io import InputFormatError, load_plan
-from hackhive.rings import Hub, best_ring, first_ring, manhattan
-from hackhive.route import (
-    RoutedRing,
-    Routing,
-    Stop,
-    route_passes,
-    route_ring,
-    route_rings,
-    single_door_nodes,
-    zone_grid,
-)
+from hackhive.parallel import map_in_order
+from hackhive.rings import Hub, best_ring_routed, first_ring, manhattan
+from hackhive.route import RoutedRing, Routing, route_passes, route_rings
 from hackhive.what_if import what_if_note
 from hackhive.zoning import (
     Infeasible,
@@ -290,43 +282,41 @@ def _renamed(hub: Hub, segments: list[RouteSegment], hub_id: str) -> tuple[Hub, 
     )
 
 
-def _ranker(
-    plan: Plan, g: nx.Graph, grid: LabelGrid, c: Constraints
-) -> Callable[[Sequence[Zoning]], list[Arrangement]]:
-    """Ranks zonings into arrangements. Each zone's `best_ring` and its ring routed alone are
-    memoised for the ranker's life, so `solve` can rank one hub count at a time.
+MIN_POOL_ZONES = 4  # fewer zones to route are routed inline: starting workers costs ~1 s
 
-    A zoning with a zone that can't be built (no node, no hub spot, a ring that can't be ordered
-    or routed) is left out: it's no arrangement.
+
+def _zone_ring(
+    zone: Zone, plan: Plan, g: nx.Graph, grid: LabelGrid, c: Constraints
+) -> tuple[Hub, list[RouteSegment]] | None:
+    """A zone's `best_ring` and its ring routed alone (pass 0), or None if the zone can't be built
+    (no node, no hub spot, a ring that can't be ordered or routed). Module-level, so a worker
+    process can import it (`parallel.map_in_order`)."""
+    try:
+        hub, segments = best_ring_routed(zone, plan, g, grid, c, hub_id=_ZONE_HUB)
+    except (Infeasible, ValueError):  # ValueError: no node, > 8 nodes
+        return None
+    return None if segments is None else (hub, segments)
+
+
+def _ranker(
+    plan: Plan, g: nx.Graph, grid: LabelGrid, c: Constraints, workers: int | None = None
+) -> Callable[[Sequence[Zoning]], list[Arrangement]]:
+    """Ranks zonings into arrangements. Each zone's ring is built once for the ranker's life (so
+    `solve` can rank one hub count at a time), and a call's new zones are built in parallel
+    (`workers` as in `parallel.map_in_order`): 13344's 21 three-hub zones take 32 s on one core,
+    11 s on four (#22 review). A zoning with a zone that can't be built is left out.
     """
-    retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings rule 5 needs
-    free = _free_space(plan, c).free  # rule 5's own geometry, as route_passes routes with
-    nodes = {n.id: n for n in plan.nodes}
     area = {r.id: r.area_m2 for r in plan.rooms}
     memo: dict[Zone, tuple[Hub, list[RouteSegment]] | None] = {}
 
-    def zone_ring(zone: Zone) -> tuple[Hub, list[RouteSegment]] | None:
-        if zone not in memo:
-            try:
-                hub = best_ring(zone, plan, g, grid, c, hub_id=_ZONE_HUB)
-                stops = [
-                    Stop(hub.hub_id, hub.location, hub.room_id),
-                    *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
-                ]
-                memo[zone] = (
-                    hub,
-                    route_ring(
-                        zone_grid(grid, plan, zone, c), stops, c, retrace_ok=retrace_ok, free=free
-                    ),
-                )
-            except (Infeasible, ValueError):  # ValueError: no node, > 8 nodes, unroutable
-                memo[zone] = None
-        return memo[zone]
-
     def rank(zonings: Sequence[Zoning]) -> list[Arrangement]:
+        todo = sorted({z for zoning in zonings for z in zoning} - memo.keys(), key=sorted)
+        build = functools.partial(_zone_ring, plan=plan, g=g, grid=grid, c=c)
+        pool = workers if len(todo) >= MIN_POOL_ZONES else 1
+        memo.update(zip(todo, map_in_order(build, todo, pool), strict=True))
         out = []
         for zoning in zonings:
-            built = [zone_ring(zone) for zone in _zone_order(zoning)]
+            built = [memo[zone] for zone in _zone_order(zoning)]
             if any(b is None for b in built):
                 continue
             named = [_renamed(*b, f"H{i}") for i, b in builtins.enumerate(built, start=1)]
@@ -346,20 +336,24 @@ def _zonings(plan: Plan, g: nx.Graph, c: Constraints) -> list[Zoning]:
     return enumerate_zonings(g, area, c, nodes=nodes, hub_capable=hub_capable_rooms(plan, c))
 
 
-def enumerate(plan: Plan, c: Constraints | None = None, k: int | None = None) -> list[Arrangement]:
+def enumerate(
+    plan: Plan, c: Constraints | None = None, k: int | None = None, *, workers: int | None = None
+) -> list[Arrangement]:
     """Every arrangement (C29), or only those with `k` hubs, ranked by `rank_key`: for each
-    zoning, each zone's `best_ring` (once per zone), its ring routed alone, and the zoning's totals
-    by the checker mirror under both counting readings (D3), crossings and overlaps between its
-    rings included. Raises `Infeasible` or `TooLarge` as `enumerate_zonings` does, and ValueError
-    if the grid can't be built.
+    zoning, each zone's `best_ring` (once per zone, in parallel over `workers`), its ring routed
+    alone, and the zoning's totals by the checker mirror under both counting readings (D3),
+    crossings and overlaps between its rings included. J is pass 0's (before the rip-up passes).
+    Raises `Infeasible` or `TooLarge` as `enumerate_zonings` does, and ValueError if the grid
+    can't be built.
 
-    ponytail: every zone's best_ring is routed, ~1.2 s a zone (13344: 63 zones, ~75 s); prune
-    zonings on a lower bound (`rings.shortlist`'s) if the gallery or batch needs it faster.
+    ponytail: every zone's best_ring is routed, ~1.2 s a zone on one core (13344: 63 zones). A
+    lower bound can't prune it: `rings.shortlist`'s sits 18-38 m under 13344's three-hub J (#22
+    review). Speed up the corner scoring (`route._best_corners`) if the gallery needs it faster.
     """
     c = c or Constraints()
     g = eligible_graph(build_graph(plan, c))
     zonings = [z for z in _zonings(plan, g, c) if k is None or len(z) == k]
-    return _ranker(plan, g, LabelGrid.from_plan(plan, cell_m=c.grid_m), c)(zonings)
+    return _ranker(plan, g, LabelGrid.from_plan(plan, cell_m=c.grid_m), c, workers)(zonings)
 
 
 def route(arrangement: Arrangement, plan: Plan, c: Constraints | None = None) -> Routing:
@@ -384,6 +378,15 @@ def _status(violations: Sequence[Violation]) -> str:
 def _rules_reason(violations: Sequence[Violation]) -> str:
     rules = sorted({v.rule for v in violations if v.severity == "error"})
     return "the design breaks " + ", ".join(f"rule {r}" for r in rules)
+
+
+def _proof(k_found: int | None, k_lb: int, fewest: int) -> str:
+    """What `k_found` is proven to be: `lb_met` at the lower bound; `exhaustive` at the fewest
+    hubs any zoning uses (every zoning was enumerated); else `none`: a count with fewer hubs had
+    only strict-only designs, or zonings that couldn't be built (#22 review)."""
+    if k_found == k_lb:
+        return "lb_met"
+    return "exhaustive" if k_found == fewest else "none"
 
 
 def _why_not(violations: Sequence[Violation]) -> str:
@@ -433,6 +436,7 @@ def solve(
     *,
     provenance: Provenance | None = None,
     hub_hook: HubHook | None = None,
+    workers: int | None = None,
 ) -> Result:
     """Design one plan and check it (#16, #22). Never raises for a plan that loaded: anything
     that stops a design (no zoning, a room over the cap, an unroutable leg) ends in the sidecar.
@@ -441,10 +445,13 @@ def solve(
     (H is the first key, so a later count is ranked only if an earlier one has no clean design),
     then the walking skeleton's first cut (#16). Each is fully routed (the rip-up passes) and
     checked; the first with no violation is submitted, else the best-ranked with only `strict`
-    ones (`submitted_strict_only`), else none: the best-ranked failure is reported (C43).
+    ones (`submitted_strict_only`), else none: the best-ranked failure is reported (C43). Once a
+    design with no `error` is found, a clean one is looked for at most one hub count above it
+    (Adi, #22 review), so a plan where everything is strict-only doesn't route every zoning.
 
     `hub_hook` is a test hook: it may change each candidate's hubs before routing (forced
-    failures); it's called once per candidate, in rank order.
+    failures); it's called once per candidate, in rank order. `workers` builds the zones in
+    parallel (`parallel.map_in_order`); a test that monkeypatches the ring builders passes 1.
     """
     c = c or Constraints()
     provenance = provenance or Provenance(version=__version__)
@@ -484,9 +491,7 @@ def solve(
             status=status,
             reason=_rules_reason(violations) if status == "infeasible" else None,
             violations=violations,
-            bounds=Bounds(
-                k_lb=k_lb, k_found=k_found, proof="lb_met" if k_found == k_lb else "exhaustive"
-            ),
+            bounds=Bounds(k_lb=k_lb, k_found=k_found, proof=_proof(k_found, k_lb, fewest)),
             arrangement=None if status == "infeasible" else used,
             cost=CostBreakdown(
                 H=m.H, L=m.L, X=m.X, O=m.O, B=m.B, J=m.J, area_gap=m.area_gap or 0.0
@@ -523,12 +528,16 @@ def solve(
     except ValueError as e:
         return no_design(f"grid failed: {e}")
 
-    rank = _ranker(plan, g, grid, c)
+    fewest = min(len(z) for z in zonings)
+    rank = _ranker(plan, g, grid, c, workers)
     no_skeleton: list[str] = []
+    usable_at: int | None = None  # H of the first design with no `error`
 
     def candidates() -> Iterator[tuple[int | None, str, list[Hub]]]:
         n = 0
         for k in sorted({len(z) for z in zonings}):
+            if usable_at is not None and k > usable_at + 1:
+                return  # a clean design is looked for one hub count up, no further
             for a in rank([z for z in zonings if len(z) == k]):
                 n += 1
                 yield n, a.signature, a.hubs
@@ -545,6 +554,8 @@ def solve(
         if d.submission is not None and not d.violations:
             return designed(d, tried)
         tried.append(d)
+        if usable_at is None and d.submission is not None and _status(d.violations) != "infeasible":
+            usable_at = len(d.hubs)
     for i, d in builtins.enumerate(tried):
         if d.submission is not None and _status(d.violations) != "infeasible":
             return designed(d, tried[:i])
@@ -624,9 +635,11 @@ def submit(result: Result, out_dir: str | Path) -> list[Path]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``python -m hackhive.solve --list <plan.json>``: every arrangement, ranked (#22)."""
+    """``python -m hackhive.solve --list <plan.json>``: every arrangement, ranked (#22). J is pass
+    0's, each ring routed alone: `solve()` submits after the rip-up passes, so its J can differ."""
     p = argparse.ArgumentParser(prog="python -m hackhive.solve")
-    p.add_argument("--list", action="store_true", required=True, help="print the ranked table")
+    help_ = "print the ranked table (J: pass 0, before the rip-up passes)"
+    p.add_argument("--list", action="store_true", required=True, help=help_)
     p.add_argument("plan", type=Path)
     args = p.parse_args(argv)
     c = Constraints()
@@ -635,7 +648,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, Infeasible, TooLarge) as e:
         print(f"{type(e).__name__}: {e}", file=sys.stderr)
         return 1
-    print(f"{'#':>3} {'H':>2} {'J':>9} {'J strict':>9} {'J lenient':>9} {'area gap':>8}  zones")
+    print(f"{'#':>3} {'H':>2} {'J pass 0':>9} {'strict':>9} {'lenient':>9} {'area gap':>8}  zones")
     for i, a in builtins.enumerate(ranked, start=1):
         strict, lenient = a.J_by_reading["strict"], a.J_by_reading["lenient"]
         print(
