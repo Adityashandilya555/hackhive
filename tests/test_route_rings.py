@@ -225,7 +225,7 @@ def test_stubs_never_retrace_at_a_node_unless_legal(routed, plan_id):
     """C15, C40: at a node not in a single-door room (and not within 1 mm of its cell's row or
     column), the incoming and outgoing legs share no stretch inside the stub's box."""
     case = routed[plan_id]
-    single_door = {n.id for n in case.plan.nodes if case.G.degree(n.room_id) == 1}
+    single_door = route.single_door_nodes(case.plan, C)  # the checker's own definition
     for hub, stops in _stops(case):
         ring = next(r for r in case.rings if r.hub_id == hub.hub_id)
         for i, stop in enumerate(stops[1:], start=1):

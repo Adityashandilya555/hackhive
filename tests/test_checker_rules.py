@@ -166,8 +166,17 @@ def test_rule_6_error_versus_strict(location, severity):
     assert [v.severity for v in found] == ([severity] if severity else [])
 
 
+def test_retrace_where_the_only_other_door_is_a_dead_end_bathroom_is_legal():
+    """2026-10-16 (Rohit): 5088's bedroom R02 has a door to the living room and one to a
+    bathroom that leads nowhere else. That bathroom door is no second way out, so R02 counts as
+    single-door and the 1 m retrace at N2 is legal (it was flagged before)."""
+    _, violations = run("5088-retrace-dead-end-bathroom.json")
+    assert violations == []
+
+
 def test_two_door_retrace_is_strict_with_a_where():
-    """C11, C15, #46 Q5: 1 m retraced inside the two-door bedroom."""
+    """C11, C15, #46 Q5: 1 m retraced at N1 inside the two-door living room (bedroom and
+    kitchen doors; its third door, to a dead-end bathroom, doesn't count)."""
     _, violations = run("5088-retrace-two-door.json")
     (v,) = violations
     assert (v.rule, v.severity) == (4, "strict") and len(v.where) == 2
