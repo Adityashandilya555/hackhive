@@ -13,9 +13,11 @@ from hackhive.io import load_plan, room_by_label
 from hackhive.ui import (
     checklist_line,
     load_submission,
+    metrics_line,
     plan_facts,
     solution_label,
     solution_paths,
+    submission_mismatch,
     violation_line,
 )
 from hackhive.viz import LINK_DOOR, LINK_OPENING, draw_graph, draw_layers, draw_nodes
@@ -132,7 +134,7 @@ def test_one_door_line_per_door():
     ax = draw_layers(plan).axes[0]
     draw_graph(plan, G, ax)
     n_doors = sum(len(d.get("door_ids", [])) for _, _, d in G.edges(data=True))
-    assert len(_edges(ax)) == n_doors
+    assert sum(e.split(":")[2].startswith("door") for e in _edges(ax)) == n_doors
 
 
 def test_app_graph_toggle_draws_2814():
@@ -198,3 +200,169 @@ def test_wall_crossing_shows_rule_5_in_red():
     _run(at)
     text = _main_text(at)
     assert ":red[✗ **Rule 5**" in text and ":red[✗ axis-aligned" in text
+
+
+# --------------------------------------------------------------------------- #69 review follow-ups
+
+
+@pytest.mark.parametrize("pid", ["**", "*", "../plans/plan", "[50]88", "5088-valid", ""])
+def test_solution_lookup_treats_the_plan_id_as_text_not_a_pattern(pid):
+    """Follow-up 1: an uploaded plan's id must never act as a glob or a path."""
+    assert solution_paths(pid) == []
+
+
+def test_any_error_while_loading_an_upload_is_shown_not_raised(monkeypatch):
+    """Follow-up 2: the graph build (or anything else) failing is an st.error, not a traceback."""
+    import hackhive.graph
+
+    def boom(*_a, **_k):
+        raise RuntimeError("graph exploded")
+
+    monkeypatch.setattr(hackhive.graph, "build_graph", boom)
+    content = (PLANS / "plan-5088.json").read_bytes() + b"\n "  # a fresh cache key
+    at = _run()
+    at.sidebar.radio(key="source").set_value("Upload")
+    _run(at)
+    at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
+    _run(at)
+    assert at.error and "graph exploded" in at.error[0].value
+    assert not at.main.image
+
+
+def test_a_submission_for_another_plan_is_flagged():
+    """Follow-up 3: the panel warns when the submission's plan_id isn't the plan's."""
+    sub = load_submission(solution_paths("5088")[0])
+    assert submission_mismatch(sub, _plan("5088")) is None
+    msg = submission_mismatch(sub, _plan("5924"))
+    assert msg is not None and "PLAN_5088" in msg and "PLAN_5924" in msg
+
+
+def test_streamlit_secrets_are_git_ignored():
+    """Follow-up 4: .streamlit/ is committed, so its secrets file must be ignored."""
+    lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert ".streamlit/secrets.toml" in lines
+
+
+def _unescaped(text: str, ch: str) -> int:
+    return len([i for i, c in enumerate(text) if c == ch and (i == 0 or text[i - 1] != "\\")])
+
+
+def test_violation_text_cannot_break_out_of_the_red_span():
+    """Follow-up 5: brackets, $, * and _ in a message are escaped inside :red[...]."""
+    v = Violation(
+        rule=4,
+        severity="error",
+        message="closed_sequence must start at H1: ['H1', 'N1'] *x* $5 _y_ ]",
+        hub_id="H[1]",
+    )
+    line = violation_line(v)
+    assert line.startswith(":red[") and line.endswith("]")
+    assert _unescaped(line, "[") == 1 and _unescaped(line, "]") == 1
+    assert _unescaped(line, "$") == 0 and r"\*x\*" in line and r"\_y\_" in line
+    assert "**Rule 4**" in line  # our own markup still works
+
+
+def test_app_and_cli_share_one_metrics_format(capsys):
+    """Follow-up 6: the panel's metrics line is the checker CLI's, character for character."""
+    plan = _plan("5088")
+    rep = checker.report(plan, load_submission(solution_paths("5088")[0]), Constraints())
+    checker.main([str(PLANS / "plan-5088.json"), str(solution_paths("5088")[0])])
+    out = capsys.readouterr().out
+    assert metrics_line(rep.metrics) == checker.metrics_text(rep.metrics)
+    assert checker.metrics_text(rep.metrics) in out
+
+
+@pytest.mark.parametrize("pid", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_hollow_points_stay_off_room_labels(pid):
+    """Follow-up 7: an excluded room's hollow point never sits on its own label."""
+    plan = _plan(pid)
+    fig = draw_layers(plan)
+    ax = fig.axes[0]
+    draw_graph(plan, build_graph(plan), ax)
+    r = fig.canvas.get_renderer()
+    labels = {
+        t.get_gid().removeprefix("label:"): t.get_window_extent(r)
+        for t in ax.texts
+        if (t.get_gid() or "").startswith("label:")
+    }
+    hollows = [ln for ln in ax.lines if (ln.get_gid() or "").startswith("hollow:")]
+    assert hollows
+    for ln in hollows:
+        room = ln.get_gid().removeprefix("hollow:")
+        x, y = ax.transData.transform((ln.get_xdata()[0], ln.get_ydata()[0]))
+        assert not labels[room].contains(x, y), room
+
+
+def test_no_node_legend_entry_only_when_a_hollow_point_is_drawn():
+    plan = _plan("5924")
+    G = build_graph(plan)
+    eligible = G.subgraph([r.id for r in plan.rooms if r.eligible])
+    ax = draw_layers(plan).axes[0]
+    draw_graph(plan, eligible, ax)
+    assert "no node" not in [t.get_text() for t in ax.get_legend().get_texts()]
+    assert not [ln for ln in ax.lines if (ln.get_gid() or "").startswith("hollow:")]
+
+
+@pytest.mark.parametrize("pid", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_node_ids_avoid_the_entrance_and_other_dots(pid):
+    """Follow-up 8: node ids also keep off the "Entrance" tag and every node dot."""
+    plan = _plan(pid)
+    fig = draw_layers(plan)
+    ax = fig.axes[0]
+    draw_nodes(plan, ax)
+    r = fig.canvas.get_renderer()
+    entrance = [t.get_window_extent(r) for t in ax.texts if t.get_gid() == "entrance"]
+    dots = [ln.get_window_extent(r) for ln in ax.lines if (ln.get_gid() or "").startswith("node:")]
+    for t in (t for t in ax.texts if (t.get_gid() or "").startswith("node-label:")):
+        box = t.get_window_extent(r)
+        assert not any(box.overlaps(e) for e in entrance), t.get_text()
+        assert not any(box.overlaps(d) for d in dots), t.get_text()
+
+
+def test_one_passage_line_per_open_passage():
+    """Follow-up 9: door and passage lines are counted separately (1293 has an opening)."""
+    plan = _plan("1293")
+    G = build_graph(plan)
+    ax = draw_layers(plan).axes[0]
+    draw_graph(plan, G, ax)
+    tags = [e.split(":")[2] for e in _edges(ax)]
+    n_doors = sum(len(d.get("door_ids", [])) for _, _, d in G.edges(data=True))
+    n_openings = sum(d["kind"] == "opening" for _, _, d in G.edges(data=True))
+    assert n_openings >= 1
+    assert sum(t.startswith("door") for t in tags) == n_doors
+    assert tags.count("opening") == n_openings
+
+
+def test_an_unknown_edge_kind_is_drawn_and_named_in_the_legend():
+    """Follow-up 10: a future edge kind is visible and labelled, never silently grey."""
+    import networkx as nx
+
+    plan = _plan("5088")
+    G = nx.Graph()
+    G.add_edge("R01", "R02", kind="mystery")
+    ax = draw_layers(plan).axes[0]
+    draw_graph(plan, G, ax)
+    assert _edges(ax) == ["edge:R01-R02:mystery"]
+    assert "mystery" in [t.get_text() for t in ax.get_legend().get_texts()]
+
+
+def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
+    """Follow-up 10: load() keeps the graph, so the picture doesn't build it again."""
+    import hackhive.graph
+
+    calls = []
+    real = hackhive.graph.build_graph
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(hackhive.graph, "build_graph", counting)
+    content = (PLANS / "plan-5924.json").read_bytes() + b"\n\n "  # a fresh cache key
+    at = _run()
+    at.sidebar.toggle(key="show_graph").set_value(True)
+    at.sidebar.radio(key="source").set_value("Upload")
+    _run(at)
+    at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
+    _run(at)
+    assert at.main.image and len(calls) == 1
