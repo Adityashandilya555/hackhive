@@ -1002,6 +1002,7 @@ def checklist(
     area_m2: float,
     n_nodes: int,
     c: Constraints = _DEFAULT,
+    proven_min: int | None = None,
 ) -> list[str]:
     """Slide 5's "What a reviewer confirms": 5 lines, each starting ✓ or ✗ (C26).
 
@@ -1009,6 +1010,8 @@ def checklist(
     how many. Line 5 compares H with the lower bound (a ranking fact, not a violation);
     `metrics` is None when they couldn't be computed. Rule 6 isn't on slide 5's list, so a sixth
     line appears only when it has a violation (#68 review): no error hides behind 5 ✓.
+    `proven_min` is the hub count solve() proved minimal (#24, T7): H > LB at that count is ✓
+    "proven minimum". The checker alone proves nothing, so without it H > LB stays ✗.
     """
     out = [_check_line(rules, text, violations, c) for rules, text in _CHECKLIST]
     facts = f"({area_m2:.1f} m², {n_nodes} nodes)"
@@ -1017,8 +1020,10 @@ def checklist(
     else:
         h = metrics.H
         op = "=" if h == lower_bound else (">" if h > lower_bound else "<")
-        tick = "✓" if h == lower_bound else "✗"
-        out.append(f"{tick} {h} hub{'' if h == 1 else 's'} {op} lower bound {lower_bound} {facts}")
+        proven = h > lower_bound and h == proven_min
+        tick = "✓" if h == lower_bound or proven else "✗"
+        line = f"{tick} {h} hub{'' if h == 1 else 's'} {op} lower bound {lower_bound} {facts}"
+        out.append(line + (" · proven minimum" if proven else ""))
     rules, text = _HUB_LINE
     if any(v.rule in rules for v in violations):
         out.append(_check_line(rules, text, violations, c))
@@ -1092,8 +1097,11 @@ class Report:
     verdict: str
 
 
-def report(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> Report:
-    """The rules, the metrics, the checklist and the verdict for one submission."""
+def report(
+    plan: Plan, submission: Submission, c: Constraints = _DEFAULT, proven_min: int | None = None
+) -> Report:
+    """The rules, the metrics, the checklist and the verdict for one submission; `proven_min` as
+    in `checklist`."""
     violations = check_rules(plan, submission, c)
     rooms = {r.id: r for r in plan.rooms}
     hub_areas = {h.hub_id: assigned_area(h, rooms) for h in submission.hubs}
@@ -1107,7 +1115,7 @@ def report(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> Rep
         violations=violations,
         metrics=m,
         lower_bound=lb,
-        lines=checklist(violations, m, lb, area, len(plan.nodes), c),
+        lines=checklist(violations, m, lb, area, len(plan.nodes), c, proven_min),
         verdict=verdict(violations),
     )
 
