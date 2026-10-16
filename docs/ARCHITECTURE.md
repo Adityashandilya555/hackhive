@@ -344,7 +344,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
     6. hub point (an assigned eligible room, ≥ 0.5 m from walls; may share a node's room).
   - Returns `Violation(rule, severity, message, ids, hub_id, where)` and never raises; `where` feeds the red overlay.
   - Builds the slide-5 checklist.
-  - **The gate (C43):** submit the clean design; else the best strict-only design (`status: submitted_strict_only`); else nothing (`status: infeasible`) (#11, #16, #22, #23).
+  - **The gate (C43):** submit the first clean arrangement in rank order (even at more hubs); else the best-ranked strict-only one (`status: submitted_strict_only`); else nothing (`status: infeasible`) (#11, #16, #22, #23).
   - `hackhive check` exits 1 on any `error`, 0 on strict-only (each printed with a `STRICT` prefix), 4 on strict-only with `--fail-on-strict`, 3 when a file can't be read, and 2 only for a usage error (argparse) (#16). `hackhive solve` exits 0 when it wrote a submission, 1 when it wrote only the sidecar.
 
   | Severity | Meaning | Examples |
@@ -364,8 +364,10 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 
 ### 4.10 `solve.py` and `cli.py`: orchestration
 - **Responsibility:**
-  - `solve(plan, c)`: the best arrangement by (H, J, area gap), routed and checked;
-  - `enumerate(plan, c, k)`: every arrangement with mirror metrics, ranked;
+  - `solve(plan, c)`: the arrangements in rank order, one hub count at a time, each fully routed (rip-up passes) and checked, until the gate is met; the walking skeleton's first cut is the last candidate;
+  - `enumerate(plan, c, k=None)`: every arrangement (or those with `k` hubs): each zone's `best_ring` once, its ring routed alone, totals by the mirror under both counting readings; ranked by `rank_key` = (H, worse J, area gap, zone signature);
+  - `route(arrangement, plan, c)`: one arrangement's full geometry on demand (the rip-up passes);
+  - `python -m hackhive.solve --list <plan.json>`: the ranked table;
   - `submit()`: the gate + writers (slide-8 submission + sidecar);
   - the CLI commands `hackhive solve`, `check`, `batch`, `present`.
 - **In → out:** `Plan`, `Constraints` → `Result` (`Submission` + `Sidecar`) / `Arrangement` list; files → files.
@@ -418,7 +420,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 - `reported_metrics{hub_count, total_length_m}`.
 - Metres, origin lower-left, y up; ids plan-global.
 
-**Sidecar:** status, violations, bounds (`k_lb`, `k_found`, `proof` ∈ exhaustive / lb_met / greedy / none), the J breakdown, per-hub metrics (`hubs[]`: area, nodes, L, X, O, B), area gap, settings, provenance, warnings, folded slivers.
+**Sidecar:** status, violations, bounds (`k_lb`, `k_found`, `proof` ∈ exhaustive / lb_met / greedy / none), the arrangement used (`rank`, zone `signature`, why each better-ranked one was `skipped`), the J breakdown, per-hub metrics (`hubs[]`: area, nodes, L, X, O, B), area gap, settings, provenance, warnings, folded slivers.
 
 Every edge case is decided in `docs/decision_conventions.md`; the format is documented in `docs/output-format.md` (#34).
 
