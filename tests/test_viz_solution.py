@@ -337,7 +337,7 @@ def test_best_tab_follows_the_solution_picker():
 
 def test_best_tab_says_why_when_solve_writes_no_design():
     """C27, C43: 5924 scaled ×4 has a room over 100 m², so solve()'s gate writes no submission;
-    the Best tab says so with the sidecar's status, and the Plan tab still draws the plan."""
+    the Best tab says so with a red #83 banner, and the Plan tab still draws the plan."""
     raw = json.loads((PLANS / "plan-5924.json").read_text(encoding="utf-8"))
     raw["area"] *= 4
     at = _app("5924")
@@ -350,9 +350,7 @@ def test_best_tab_says_why_when_solve_writes_no_design():
     assert not at.exception, [e.value for e in at.exception]
     best = at.tabs[0]
     assert not best.image and not best.dataframe
-    assert any(
-        "no valid design" in w.value.lower() and "infeasible" in w.value for w in best.warning
-    )
+    assert any("infeasible" in e.value and "m²" in e.value for e in best.error)  # #83 banner
     assert len(at.tabs[1].image) == 1  # the Plan tab still draws the plan
 
 
