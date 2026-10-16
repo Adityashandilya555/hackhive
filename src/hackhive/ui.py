@@ -23,7 +23,7 @@ from hackhive.contracts import (
     Violation,
     lower_bound,
 )
-from hackhive.io import load_plan
+from hackhive.io import NODE_CLEARANCE_M, load_plan
 from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -321,11 +321,23 @@ def case_tags(plan: Plan, G: nx.Graph, result: Result) -> list[CaseTag]:
             CaseTag("disconnected", "disconnected groups", "rooms no door joins need own hubs")
         )
     if any(E.degree(r) == 0 for r in E):
-        tags.append(CaseTag("isolated", "isolated eligible room", "a room with no door to another"))
+        tags.append(
+            CaseTag(
+                "isolated",
+                "isolated eligible room",
+                "no door or open passage to another eligible room: it needs its own hub",
+            )
+        )
     if sum(r.type == "living" and r.eligible for r in plan.rooms) > 1:
         tags.append(CaseTag("multi_living", "multi-part living", "each living part has a node"))
-    if any(n.clearance_m is not None and n.clearance_m < 0.5 for n in plan.nodes):
-        tags.append(CaseTag("low_clearance", "node clearance < 0.5 m", "a node close to a wall"))
+    if any(n.clearance_m is not None and n.clearance_m < NODE_CLEARANCE_M for n in plan.nodes):
+        tags.append(
+            CaseTag(
+                "low_clearance",
+                f"node clearance < {NODE_CLEARANCE_M:g} m",
+                "a node close to a wall",
+            )
+        )
     if plan.folded_parts:
         tags.append(CaseTag("folded", "folded sliver", "a living sliver merged into its neighbour"))
     return tags
@@ -361,10 +373,20 @@ def status_banner(side: Sidecar, plan: Plan | None) -> tuple[str, str]:
     if side.status == "ok":
         return "success", "✓ **ok**: a clean design, no violations."
     if side.status == "submitted_strict_only":
-        n = sum(v.rule == 4 and v.severity == "strict" for v in side.violations)
+        strict = [v.rule for v in side.violations if v.severity == "strict"]
+        parts = []
+        if n := strict.count(4):
+            parts.append(
+                f"{n} retrace{'s' * (n != 1)} outside a single-door room (rule 4, [Q2]({Q2_URL}))"
+            )
+        if n := strict.count(6):
+            parts.append(
+                f"{n} hub{'s' * (n != 1)} closer than {Constraints.problem_statement().hub_wall_clearance_m:g} m to a door or passage edge "
+                f"(rule 6, [Q4]({Q2_URL}))"
+            )
         return "warning", (
-            f"⚠ **submitted_strict_only**: {n} retraces outside a single-door room "
-            f"(rule 4, strict). Valid only if the organisers allow it: [Q2]({Q2_URL})."
+            f"⚠ **submitted_strict_only**: {'; '.join(parts) or 'strict readings only'}. "
+            "Valid only if the organisers allow it."
         )
     if side.status == "infeasible":
         return "error", f"✗ **infeasible**: {_infeasible_line(reason, plan)}"

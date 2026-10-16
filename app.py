@@ -281,7 +281,10 @@ with solution_slot:
     solution = pick_solution(plan, Path(best_path) if best_path else None)
 
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
-best_sub = load_submission(Path(best_path)) if best_path else None
+try:
+    best_sub = load_submission(Path(best_path)) if best_path else None
+except ValueError:  # a stale cached path (temp dir cleaned): the design tags just drop out
+    best_sub = None
 if tags := case_tags(plan, G, Result(plan, best_sub, side)):
     st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
 best, plan_tab = st.tabs(["Best", "Plan"])
