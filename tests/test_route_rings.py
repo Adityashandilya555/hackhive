@@ -21,6 +21,7 @@ from hackhive.checker import (
     _overlaps,
     check_rules,
     count_bends,
+    crossing_points,
     metrics,
     segment_length,
 )
@@ -667,6 +668,75 @@ def test_occupancy_no_weight_literals_in_route():
         and "not-a-weight" not in lines[n.lineno - 1]
     ]
     assert found == []
+
+
+# --------------------------------------------------------------------------- crossings (#82)
+
+J80_576 = (3, 61.8995)  # 576's (X, J) after #80's rip-up passes, before crossings were priced
+
+
+def _crossing_search(blocker, src=(3, 0), dst=(3, 6), shape=(7, 7)):
+    """One leg src → dst on an open grid, after `blocker` is committed; X in J weight (5 m)."""
+    occ = Occupancy()
+    occ.commit(blocker)
+    w_x = route.crossing_weight_cells(C, C.grid_m)
+    pen = occ.step_costs(0.0, shape[1], w_x, exempt=[dst])
+    found = route.search(np.zeros(shape, dtype=np.int64), {}, [src], 0.0, [dst], pen)
+    path = route.path_to(found, dst)
+    xs = crossing_points([blocker, path], [blocker[0], blocker[-1], src, dst], TOL)
+    return found.cost(dst), path, len(xs)
+
+
+def test_crossing_detour_under_5_m_avoids_it():
+    """C17, C40: a detour cheaper than w_X (6 extra steps < 50 at 10 cm) is taken: X = 0."""
+    cost, path, x = _crossing_search([(1, 3), (5, 3)])
+    assert x == 0 and cost == 12.0 and route.bends(path) == 2
+
+
+def test_crossing_without_a_cheap_detour_is_kept():
+    """C17: no way around (the cable spans the grid), so the leg crosses once and pays w_X."""
+    cost, path, x = _crossing_search([(0, 3), (6, 3)])
+    assert x == 1 and path == [(3, 0), (3, 6)]
+    assert cost == pytest.approx(6 + route.crossing_weight_cells(C, C.grid_m))
+
+
+def test_crossing_t_touch_costs_w_x():
+    """#43's strict X: entering the cell where another leg ends (a T-touch) costs w_X too."""
+    cost, path, x = _crossing_search([(0, 3), (3, 3)])
+    assert x == 0 and (3, 3) not in route.expand(path) and cost == 8.0
+
+
+def test_crossing_own_endpoint_is_free():
+    """The leg's own endpoint is exempt: ending on a cell another cable crosses costs nothing."""
+    cost, path, _ = _crossing_search([(0, 6), (6, 6)])
+    assert cost == 6.0 and path == [(3, 0), (3, 6)]
+
+
+def test_crossing_parallel_cable_is_no_crossing():
+    """Running alongside on the next row is not a crossing: no w_X."""
+    cost, _, x = _crossing_search([(2, 0), (2, 6)])
+    assert cost == 6.0 and x == 0
+
+
+def test_crossing_clear_undoes_commit():
+    occ = Occupancy()
+    occ.commit([(0, 3), (6, 3)])
+    occ.clear([(0, 3), (6, 3)])
+    assert not occ.count and not occ.step_costs(1.0, 7, 50.0)
+
+
+def test_crossing_weight_comes_from_cost_weights():
+    """C17: w_X in steps is cross / (length · cell) from c.cost_weights, never a literal."""
+    w = C.cost_weights
+    assert route.crossing_weight_cells(C, 0.1) == pytest.approx(w.cross / (w.length * 0.1))
+    dear = Constraints(cost_weights=CostWeights(1.0, 9.0, 1.0, 0.5))
+    assert route.crossing_weight_cells(dear, 0.1) == pytest.approx(90.0)
+
+
+def test_crossing_576_not_above_80(routed):
+    """C17, C33: on 576, X ≤ #80's result and J ≤ it."""
+    m = metrics(submission(routed["576"]).hubs, C)
+    assert m.X <= J80_576[0] and m.J <= J80_576[1] + 1e-4
 
 
 # --------------------------------------------------------------------------- see it
