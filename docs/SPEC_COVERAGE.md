@@ -12,7 +12,7 @@ The C-ids refer to the constraint table in `docs/ARCHITECTURE.md` §1. Edge-case
 
 **Round 2 (2026-10-16).** The slides were re-read against the issue bodies, and each row now carries a **Status**: `covered`, `partial (<why>, <issue>)` or `open question (#46 Qn)`.
 
-Result: **47 covered, 2 partial, 1 open question (2026-10-16).** The first audit (2026-10-15) fixed these issues:
+Result: **46 covered, 3 partial, 1 open question (2026-10-16).** The first audit (2026-10-15) fixed these issues:
 - **#4:** added the slide-4 rule "never use `net_area`; convert once per plan".
 - **#11:** rule 4 now checks that segments start and end at the **given** node points (nodes can't move, slide 2), and that a ring never ends at another hub (slides 1-2).
 - **#2, #12, #14, #20, #21, #22, #31:** stale wording aligned with slides 3/6/7 (J, area gap, checker names).
@@ -73,7 +73,7 @@ Round 2 (2026-10-16) updated #2, #6, #9-#17, #20-#23, #30-#32, #38 and #44 (inpu
 | # | Requirement (organisers' wording, condensed) | C-ids | Issues | Proven by | Status |
 |---|---|---|---|---|---|
 | S5.1 | Overlay legend: hub colour per zone, node, numbered cable, last number = return, excluded room, door gaps | C23 | #5, #7, #12, #17, #25, #44 | `test_viz_base`, `test_viz_solution` | covered |
-| S5.2 | Single-door room: in and back out through the same door (two parallel runs) | C15 | #9, #11, #17, #21, #43 | `test_route -k single_door_choice`; `test_viz_solution` (submitted polylines) | covered |
+| S5.2 | Single-door room: in and back out through the same door (two parallel runs) | C15 | #9, #11, #17, #21, #43 | `test_viz_solution` (submitted polylines) | partial (the J-based choice of retrace vs parallel runs is not built or tested yet, #21) |
 | S5.3 | Per-hub summary: rooms, m², nodes, length, bends | C25 | #17, #44 | `test_viz_solution` summary rows | covered |
 | S5.4 | What a reviewer confirms (5-line checklist incl. hubs = lower bound) | C26 | #11, #12, #16, #18, #24, #26 | `checker.checklist`; app checklist | covered |
 
