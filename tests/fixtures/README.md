@@ -36,8 +36,14 @@ it (`../plans/plan-<id>.json`); every other case has its own `cases/case-<tag>-<
 §4) that shows the case.
 
 Rebuild with `uv run scripts/make_cases.py <plans.jsonl>` (the dataset isn't committed). It keeps
-each case's current plan, so it is idempotent; the grid-failed case stays a regression example and
-#78's PR only re-runs it to flip its `expected`.
+each case's current plan while it still shows its case, so it is idempotent; the grid-failed case
+stays a regression example and #78's PR only re-runs it to flip its `expected`.
+
+**When `solve()` changes** (a routing or ranking win) and `test_case_plan_solves_as_expected`
+fails on `expected`, run `uv run scripts/make_cases.py` with **no** plans file. It recomputes
+every `expected` from the committed plans, so no dataset is needed. Only a plan that stops
+showing its case (as 13693 stopped being strict-only after #101) needs the dataset run to
+re-pick it. The test's message says which of the two it is.
 
 ## Expected numbers
 `expected.json` is keyed by plan id. Each entry keeps the vault's `.metrics` fields `n_nodes`,
