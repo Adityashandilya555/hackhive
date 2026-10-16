@@ -128,3 +128,32 @@ def test_a_directory_of_plan_files_is_a_source_too(tmp_path):
         (d / f"plan-{i}.json").write_bytes((PLANS / f"plan-{i}.json").read_bytes())
     rows = batch.run(d, "test", 20, tmp_path / "b.csv", C)
     assert sorted(r["plan_id"] for r in rows) == ["PLAN_3086", "PLAN_5088"]
+
+
+def test_a_line_that_is_not_json_becomes_an_input_error_row(tmp_path):
+    """#106 review: a truncated or hand-edited line ends as its own row; the batch carries on."""
+    good = (PLANS / "plan-5088.json").read_text("utf-8")
+    src = tmp_path / "plans.jsonl"
+    src.write_text('{"id": 5, "area": \n' + json.dumps(json.loads(good)) + "\n", "utf-8")
+    rows = batch.run(src, "test", 5, tmp_path / "batch.csv", C)
+    assert [r["status"] for r in rows] == ["input_error", "ok"]
+    assert rows[0]["plan_id"] == "line1" and "not JSON" in rows[0]["reason"]
+
+
+def test_a_file_that_is_not_json_becomes_an_input_error_row(tmp_path):
+    """#106 review: the same for a directory source."""
+    (tmp_path / "a.json").write_text("{oops", "utf-8")
+    (tmp_path / "plan-5088.json").write_text((PLANS / "plan-5088.json").read_text("utf-8"), "utf-8")
+    rows = batch.run(tmp_path, "test", 5, tmp_path / "out" / "batch.csv", C)
+    assert [r["status"] for r in rows] == ["input_error", "ok"]
+    assert rows[0]["plan_id"] == "a.json"
+
+
+def test_rows_carry_the_case_tags(tmp_path):
+    """#106 review, for #33's "plans per case tag": a `tags` column of `ui.case_tags` labels."""
+    src = tmp_path / "p"
+    src.mkdir()
+    (src / "plan-576.json").write_text((PLANS / "plan-576.json").read_text("utf-8"), "utf-8")
+    (row,) = batch.run(src, "test", 1, tmp_path / "batch.csv", C)
+    assert batch.COLUMNS[-1] == "tags"
+    assert row["tags"] and isinstance(row["tags"], str)
