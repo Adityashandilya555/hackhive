@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from hackhive.checker import metrics_text, report
+from hackhive.checker import metrics_text, report, reported_mismatches
 from hackhive.contracts import Constraints, Submission, Violation
 from hackhive.io import load_plan
 
@@ -79,6 +79,8 @@ def _check(args: argparse.Namespace) -> int:
         return 3
     if sub.plan_id != plan.plan_id:
         print(f"warning: the submission is for {sub.plan_id}, the plan is {plan.plan_id}")
+    for w in reported_mismatches(sub, c):  # C42: a warning only, never an exit code
+        print(f"warning: {w}")
     r = report(plan, sub, c)
     for line in r.lines:
         print(line)

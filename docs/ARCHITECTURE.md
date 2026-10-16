@@ -270,7 +270,8 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - the stub rule: each leg is `[exact_from] + stub_out + grid_path + stub_in + [exact_to]`, and the incoming and outgoing stubs at a node use different corners (#15).
 - **In → out:** `LabelGrid`, sources → `PathCache`; rings → `Segment` polylines.
 - **Algorithm:** O(4·cells·log) per source; ≤ 9 rings.
-  - The runtime is not measured yet; it is measured in #19. If slow, the fallback order is: ROI → a 20 cm cost grid → numba → closed-form rectangles (#37).
+  - Measured in #19 (`python -m hackhive.route --bench <dir>`: raster + points + `PathCache` with every eligible room's hub candidates): p95 1.6 s per plan on the 7 fixtures, 1.0 s on 18 test-split plans, under ADR-003's 5 s budget, so no ladder step is taken. If it ever is slow, the order is: a 20 cm cost grid → numba → closed-form rectangles (#37).
+  - `PathCache` searches once per node; node–hub costs come from those searches by symmetry (a reversed cable costs the same), since one search per hub candidate would be thousands per plan. Its door-graph ROI is exact by construction: a source falls back to the whole raster when a path leaving the ROI could be cheaper (exact cost inside + 1 + Manhattan outside).
   - Only 42% of eligible rooms are rectangles, so one grid router is simpler than two.
 - **Enforces:** C12-C15, C17, C33.
 - **Issues:** #8, #15, #19, #21 (V1702); #36, #37 Backlog.

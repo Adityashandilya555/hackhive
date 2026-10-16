@@ -359,3 +359,107 @@ def test_a_grid_failure_is_not_reported_as_routing(monkeypatch):
     result = solve(load_plan(PLANS / "plan-5088.json", C), C)
     assert result.sidecar.status == "infeasible"
     assert result.sidecar.reason.startswith("grid failed: ") and "door_3" in result.sidecar.reason
+
+
+# --------------------------------------------------------------------------- #23 the gate's edge cases
+
+
+def _raw(inner, **rooms) -> dict:
+    """A raw plan in drawing units (1 unit = 0.1 m, 0.2 m walls); geometries as given."""
+    raw = {"id": "SYN23", "area": inner.area * 0.01, "wall_depth": 2.0, "inner": mapping(inner)}
+    raw.update({k: mapping(g) for k, g in rooms.items()})
+    return raw
+
+
+def _no_submission(result, tmp_path) -> Sidecar:
+    written = submit(result, tmp_path)
+    pid = result.sidecar.plan_id
+    assert written == [tmp_path / f"{pid}.sidecar.json"], "no submission may be written"
+    side = _sidecar(tmp_path, pid)
+    assert side.status == "infeasible" and result.submission is None
+    return side
+
+
+def test_infeasible_without_a_hub_capable_room(tmp_path):
+    """C27, rule 6: a 0.8 m-wide bedroom has no spot 0.5 m from its walls, so no hub can go in
+    it and no zone can serve it: no submission, and the sidecar names the room."""
+    plan = load_plan(_raw(box(0, 0, 8, 40), bedroom=box(0, 0, 8, 40)), C)
+    side = _no_submission(solve(plan, C), tmp_path)
+    assert "hub-capable" in side.reason and plan.rooms[0].id in side.reason
+
+
+def test_infeasible_when_a_component_is_too_large_for_exact_zoning(tmp_path):
+    """D8, #23 spec: a connected group of more than 16 rooms gets no submission and a "too
+    large" sidecar (the greedy fallback, #49, is in the Backlog: 0 of 16,999 ResPlan plans
+    need it). #23's last criterion predates that decision."""
+    n = 17
+    living = box(0, 0, 10 * n, 20)
+    bedrooms = MultiPolygon([box(10 * i + 1, 22, 10 * i + 9, 60) for i in range(n)])
+    doors = MultiPolygon([box(10 * i + 3, 20, 10 * i + 7, 22) for i in range(n)])
+    walls = MultiPolygon(
+        [box(10 * i + s, 20, 10 * i + e, 22) for i in range(n) for s, e in ((0, 3), (7, 10))]
+        + [box(10 * i + 9, 22, 10 * i + 11, 60) for i in range(n)]
+    )
+    raw = _raw(box(0, 0, 10 * n, 60), living=living, bedroom=bedrooms, door=doors, wall=walls)
+    plan = load_plan(raw, C)
+    side = _no_submission(solve(plan, C), tmp_path)
+    assert "too large" in side.reason and "Backlog" in side.reason and "#49" in side.reason
+
+
+def test_reported_values_that_disagree_are_a_warning_not_an_error(tmp_path):
+    """C42: the organisers recompute every length, so a tampered `length_m` (or ring or total
+    length) breaks no rule; reading the written submission back flags it in the sidecar."""
+    plan = load_plan(PLANS / "plan-5088.json", C)
+    result = solve(plan, C)
+    sub = result.submission.model_copy(deep=True)
+    seg = sub.hubs[0].route_segments[0]
+    seg.length_m += 1.0
+    sub.reported_metrics.total_length_m += 2.0
+    assert not [v for v in check_rules(plan, sub, C) if v.severity == "error"]
+    tampered = Result(result.plan, sub, result.sidecar)
+    written = submit(tampered, tmp_path)
+    assert tmp_path / f"{plan.plan_id}.json" in written  # still submitted
+    warnings = _sidecar(tmp_path, plan.plan_id).warnings
+    reported = [w for w in warnings if w.startswith("reported ")]
+    assert any(f"{seg.from_}→{seg.to}" in w and "length_m" in w for w in reported)
+    assert any("total_length_m" in w for w in reported)
+
+
+def test_reported_values_written_by_solve_agree(tmp_path):
+    """The writer fills every reported value from the mirror, so read back they all agree."""
+    result = solve(load_plan(PLANS / "plan-5924.json", C), C)
+    submit(result, tmp_path)
+    warnings = _sidecar(tmp_path, result.sidecar.plan_id).warnings
+    assert not [w for w in warnings if w.startswith("reported ")]
+
+
+def test_cli_check_warns_about_reported_values(tmp_path, capsys):
+    """`hackhive check` prints the same read-back warnings (exit code unchanged)."""
+    sub = json.loads((SOLUTIONS / "5088-valid.json").read_text("utf-8"))
+    sub["hubs"][0]["ring_length_m"] += 5.0
+    path = tmp_path / "tampered.json"
+    path.write_text(json.dumps(sub), encoding="utf-8")
+    assert cli.main(["check", str(PLANS / "plan-5088.json"), str(path)]) == 0
+    out = capsys.readouterr().out
+    assert "warning: reported H1 ring_length_m" in out
+
+
+def test_warnings_list_a_folded_sliver_in_the_sidecar(tmp_path):
+    """C38: a folded living sliver is listed in `folded_parts` and named in the warnings."""
+    living = MultiPolygon([box(0, 0, 50, 50), box(50, 0, 53, 30)])
+    plan = load_plan(_raw(box(0, 0, 100, 100), living=living), C)
+    assert plan.folded_parts
+    result = solve(plan, C)
+    submit(result, tmp_path)
+    side = _sidecar(tmp_path, result.sidecar.plan_id)
+    (fold,) = side.folded_parts
+    assert (fold.room_id, fold.into_room_id) == ("living_1", "R01")
+    assert any("living_1" in w and "folded" in w and "R01" in w for w in side.warnings)
+
+
+def test_warnings_carry_a_low_clearance_node_even_without_a_design(tmp_path):
+    """A2: a node under 0.5 m from the walls is a sidecar warning, design or not."""
+    plan = load_plan(_raw(box(0, 0, 8, 40), bedroom=box(0, 0, 8, 40)), C)
+    assert any("clearance" in w for w in plan.warnings)
+    side = _no_submission(solve(plan, C), tmp_path)
+    assert any("clearance" in w and "< 0.5 m" in w for w in side.warnings)
