@@ -268,7 +268,8 @@ def _assert_solved_in_the_nodes_frame(raw: dict, result) -> None:
     ends = _leg_ends(sub)
     for nid, xy in given.items():
         assert len(ends[nid]) == 2
-        assert all(e == pytest.approx(xy, abs=1e-9) for e in ends[nid]), nid
+        # T6 (#34): the writer rounds to 4 decimals, so "exactly" is within half a 0.1 mm step
+        assert all(e == pytest.approx(xy, abs=0.5e-4 + 1e-12) for e in ends[nid]), nid
     errors = [v for v in check_rules(load_plan(raw), sub) if v.severity == "error"]
     assert not errors and side.violations == check_rules(load_plan(raw), sub)
 
