@@ -1,6 +1,8 @@
-"""Acceptance tests for #16: `solve()`, the submit gate, the slide-8 writer and the CLI."""
+"""Acceptance tests for #16: `solve()`, the submit gate, the slide-8 writer and the CLI; #22:
+`enumerate()`, `rank_key` and the fallback down the ranked list."""
 
 import dataclasses
+import functools
 import json
 from itertools import pairwise
 from pathlib import Path
@@ -8,10 +10,12 @@ from pathlib import Path
 import pytest
 from shapely.geometry import MultiPolygon, Point, box, mapping
 
+import hackhive.solve as solve_mod
 from hackhive import cli
 from hackhive.checker import check_rules
 from hackhive.contracts import Constraints, Sidecar, Submission, lower_bound
 from hackhive.io import load_plan
+from hackhive.rings import Hub
 from hackhive.solve import Result, solve, solve_file, submit
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -30,6 +34,13 @@ def _submission(out: Path, plan_id: str) -> Submission:
     return Submission.model_validate_json((out / f"{plan_id}.json").read_text("utf-8"))
 
 
+@functools.cache
+def _solved(plan_id: str) -> Result:
+    """One `solve_file` per fixture for this module: 13344 takes ~36 s since #22 ranks every
+    3-hub arrangement. `Result` is frozen and `submit` never changes it, so sharing is safe."""
+    return solve_file(PLANS / f"plan-{plan_id}.json", C)
+
+
 # --------------------------------------------------------------------------- the 7 fixtures
 
 
@@ -37,7 +48,7 @@ def _submission(out: Path, plan_id: str) -> Submission:
 def test_each_fixture_solves_to_a_valid_submission(plan_id, tmp_path):
     """C16, C22, C24, C39: a submission that passes the six rules (no `error`), at min hubs."""
     path = PLANS / f"plan-{plan_id}.json"
-    result = solve_file(path, C)
+    result = _solved(plan_id)
     written = submit(result, tmp_path)
     pid = result.sidecar.plan_id
     assert tmp_path / f"{pid}.json" in written
@@ -50,7 +61,8 @@ def test_each_fixture_solves_to_a_valid_submission(plan_id, tmp_path):
     assert side.violations == violations
     assert side.bounds.k_found == len(sub.hubs) == EXPECTED[plan_id]["min_hubs5"]
     assert side.bounds.k_lb == EXPECTED[plan_id]["lb5"]
-    assert side.bounds.proof == "exhaustive"
+    lb_met = side.bounds.k_found == side.bounds.k_lb
+    assert side.bounds.proof == ("lb_met" if lb_met else "exhaustive")
     assert side.cost.H == len(sub.hubs)
     assert sub.reported_metrics.hub_count == len(sub.hubs)
     assert sub.reported_metrics.total_length_m == pytest.approx(side.cost.L)
@@ -59,7 +71,7 @@ def test_each_fixture_solves_to_a_valid_submission(plan_id, tmp_path):
 @pytest.mark.parametrize("plan_id", ["5924", "13344"])
 def test_the_writer_follows_slide_8(plan_id):
     """C48: assigned_rooms starts with the hub's room, nodes sorted, segments in ring order."""
-    result = solve_file(PLANS / f"plan-{plan_id}.json", C)
+    result = _solved(plan_id)
     for hub in result.submission.hubs:
         assert hub.assigned_rooms[0] == hub.room_id
         assert len(set(hub.assigned_rooms)) == len(hub.assigned_rooms)
@@ -71,8 +83,8 @@ def test_the_writer_follows_slide_8(plan_id):
 
 
 def test_solve_is_deterministic():
-    a = solve_file(PLANS / "plan-13344.json", C)
-    b = solve_file(PLANS / "plan-13344.json", C)
+    a = _solved("13344")
+    b = solve_file(PLANS / "plan-13344.json", C)  # a second, fresh run
     assert a.submission == b.submission and a.sidecar == b.sidecar
 
 
@@ -337,13 +349,14 @@ def test_cli_check_strict_only_under_fail_on_strict_exits_4_not_argparse_2(capsy
 
 def test_a_ring_that_cant_be_ordered_ends_in_the_sidecar(monkeypatch):
     """#72 review: `order_ring` raises ValueError past 8 nodes (reachable with max_nodes raised
-    toward the ≤ 20 what-if); solve() reports it instead of raising."""
-    import hackhive.solve as solve_mod
+    toward the ≤ 20 what-if); solve() reports it instead of raising. Every ring is ordered there:
+    best_ring's (#22's ranking) and the walking skeleton's first_ring."""
+    import hackhive.rings as rings_mod
 
     def too_many(*args, **kwargs):
         raise ValueError("9 nodes > 8: use Held-Karp (#28)")
 
-    monkeypatch.setattr(solve_mod, "first_ring", too_many)
+    monkeypatch.setattr(rings_mod, "order_ring", too_many)
     result = solve(load_plan(PLANS / "plan-5088.json", C), C)
     assert result.sidecar.status == "infeasible" and result.submission is None
     assert "Held-Karp" in result.sidecar.reason
@@ -463,3 +476,164 @@ def test_warnings_carry_a_low_clearance_node_even_without_a_design(tmp_path):
     assert any("clearance" in w for w in plan.warnings)
     side = _no_submission(solve(plan, C), tmp_path)
     assert any("clearance" in w and "< 0.5 m" in w for w in side.warnings)
+
+
+# --------------------------------------------------------------------------- #22 rank every arrangement
+
+
+@pytest.fixture(scope="module")
+def ranked_13344():
+    """Every arrangement of the node-cap fixture (57 zonings), built once: ~75 s (#22 runtime,
+    accepted by Adi; `solve()` ranks one hub count at a time instead)."""
+    return solve_mod.enumerate(load_plan(PLANS / "plan-13344.json", C), C)
+
+
+def test_enumerate_13344_lists_every_zoning(ranked_13344):
+    """C29: one arrangement per feasible zoning."""
+    assert len(ranked_13344) == EXPECTED["13344"]["n_all5"] == 57
+    assert len({a.signature for a in ranked_13344}) == 57
+
+
+def test_enumerate_is_sorted_by_hubs_j_area_gap_signature(ranked_13344):
+    """C16, C47: (H, J, area gap, signature), 3-hub rows first; J is the worse reading's (D3)."""
+    keys = [solve_mod.rank_key(a) for a in ranked_13344]
+    assert keys == sorted(keys)
+    for a, key in zip(ranked_13344, keys, strict=True):
+        assert key == (a.H, round(a.J, 6), a.area_gap, a.signature)
+        assert a.H == len(a.hubs) == len(a.rings) == len(a.zoning)
+        assert a.J == max(a.J_by_reading.values())
+        assert set(a.J_by_reading) == {"strict", "lenient"}
+    assert ranked_13344[0].H == EXPECTED["13344"]["min_hubs5"] == 3
+
+
+def test_enumerate_is_deterministic():
+    """C16: two runs give the same order and the same numbers."""
+    plan = load_plan(PLANS / "plan-5924.json", C)
+    a = solve_mod.enumerate(plan, C)
+    b = solve_mod.enumerate(load_plan(PLANS / "plan-5924.json", C), C)
+    assert [solve_mod.rank_key(x) for x in a] == [solve_mod.rank_key(x) for x in b]
+    assert [x.hubs for x in a] == [x.hubs for x in b]
+
+
+def test_enumerate_k_keeps_only_that_hub_count():
+    plan = load_plan(PLANS / "plan-5088.json", C)
+    every = solve_mod.enumerate(plan, C)
+    two = solve_mod.enumerate(plan, C, k=2)
+    assert {a.H for a in two} == {2}
+    assert [a.signature for a in two] == [a.signature for a in every if a.H == 2]
+
+
+@pytest.mark.parametrize("plan_id", ["5088", "5924"])
+def test_solve_submits_enumerate_first_fully_routed(plan_id):
+    """C7, C16: solve() is enumerate()[0] after the rip-up passes (`route`), passing every rule,
+    with k_lb, k_found and proof right."""
+    plan = load_plan(PLANS / f"plan-{plan_id}.json", C)
+    top = solve_mod.enumerate(plan, C)[0]
+    result = solve(load_plan(PLANS / f"plan-{plan_id}.json", C), C)
+    side, sub = result.sidecar, result.submission
+    assert [(h.hub_id, h.room_id, (h.location.x, h.location.y)) for h in sub.hubs] == [
+        (h.hub_id, h.room_id, h.location) for h in top.hubs
+    ]
+    assert [h.closed_sequence for h in sub.hubs] == [h.ring for h in top.hubs]
+    assert [h.assigned_rooms for h in sub.hubs] == [h.assigned_rooms for h in top.hubs]
+    routed = solve_mod.route(top, plan, C)
+    assert [h.route_segments for h in sub.hubs] == [r.segments for r in routed.rings]
+    assert check_rules(plan, sub, C) == [] and side.status == "ok"
+    assert (side.arrangement.rank, side.arrangement.signature) == (1, top.signature)
+    assert side.arrangement.skipped == []
+    assert side.bounds.k_lb == EXPECTED[plan_id]["lb5"]
+    assert side.bounds.k_found == top.H
+    assert side.bounds.proof == ("lb_met" if top.H == side.bounds.k_lb else "exhaustive")
+
+
+def _arrangement(H: int, strict: float, lenient: float, gap: float, signature: str):
+    hubs = [Hub(f"H{i}", "r", (0.0, 0.0), [f"H{i}", "N1", f"H{i}"], ["r"]) for i in range(H)]
+    return solve_mod.Arrangement(
+        zoning=tuple(frozenset({f"r{i}"}) for i in range(H)),
+        hubs=hubs,
+        rings=[[] for _ in range(H)],
+        J_by_reading={"strict": strict, "lenient": lenient},
+        area_gap=gap,
+        signature=signature,
+    )
+
+
+def test_rank_key_breaks_equal_hubs_and_j_on_the_smaller_area_gap():
+    """C47: equal H and J (to 1e-6 m), so the smaller max − min assigned area ranks first."""
+    wide = _arrangement(2, 30.0, 28.0, gap=12.0, signature="a")
+    even = _arrangement(2, 30.0 + 1e-9, 28.0, gap=3.0, signature="b")
+    assert sorted([wide, even], key=solve_mod.rank_key) == [even, wide]
+
+
+def test_rank_key_uses_the_worse_counting_reading():
+    """C17, C40, D3: A is lower under the lenient reading but higher in its worse case: B first."""
+    a = _arrangement(2, strict=12.0, lenient=8.0, gap=0.0, signature="a")
+    b = _arrangement(2, strict=11.0, lenient=10.0, gap=0.0, signature="b")
+    assert (a.J, b.J) == (12.0, 11.0)
+    assert sorted([a, b], key=solve_mod.rank_key) == [b, a]
+
+
+def test_rank_key_puts_fewer_hubs_first_whatever_j():
+    """C16: a 3-hub design beats any 4-hub one, even with a higher J."""
+    three = _arrangement(3, 90.0, 90.0, gap=0.0, signature="b")
+    four = _arrangement(4, 40.0, 40.0, gap=0.0, signature="a")
+    assert sorted([four, three], key=solve_mod.rank_key) == [three, four]
+
+
+def _first_call_only(hook):
+    """`hook` on the best-ranked arrangement only: solve() calls the hub hook once per candidate,
+    in rank order."""
+    calls = []
+
+    def once(hubs):
+        calls.append(None)
+        return hook(hubs) if len(calls) == 1 else hubs
+
+    return once
+
+
+def test_a_best_arrangement_that_fails_rule_6_falls_back_to_the_next(tmp_path):
+    """C43: the hook puts the best arrangement's H1 in a wall; the next one is clean, submitted,
+    and the sidecar says which and why."""
+    plan = load_plan(PLANS / "plan-5088.json", C)
+    ranked = solve_mod.enumerate(plan, C)
+    wall = max(plan.walls, key=lambda w: w.area).representative_point()
+    hook = _first_call_only(_move_first_hub((wall.x, wall.y)))
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C, hub_hook=hook)
+    written = submit(result, tmp_path)
+    side = _sidecar(tmp_path, result.sidecar.plan_id)
+    assert tmp_path / f"{side.plan_id}.json" in written
+    assert side.status == "ok" and side.violations == []
+    assert (side.arrangement.rank, side.arrangement.signature) == (2, ranked[1].signature)
+    (skipped,) = side.arrangement.skipped
+    assert skipped.startswith(f"#1 {ranked[0].signature}") and "rule 6" in skipped
+    assert [h.closed_sequence for h in result.submission.hubs] == [h.ring for h in ranked[1].hubs]
+
+
+def test_a_best_arrangement_with_an_error_falls_back_to_a_clean_one(tmp_path):
+    """C43: the best arrangement routes but breaks rule 6 (H1 0.3 m from a wall, an `error`), the
+    next is clean: the clean one is submitted."""
+    plan = load_plan(PLANS / "plan-5088.json", C)
+    ranked = solve_mod.enumerate(plan, C)
+    xy = _point_near_a_wall(plan, ranked[0].hubs[0].room_id, 0.30)
+    hook = _first_call_only(_move_first_hub(xy))
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C, hub_hook=hook)
+    submit(result, tmp_path)
+    side = _sidecar(tmp_path, result.sidecar.plan_id)
+    assert (tmp_path / f"{side.plan_id}.json").exists()
+    assert side.status == "ok" and side.violations == []
+    assert side.arrangement.rank == 2
+    assert "rule 6" in side.arrangement.skipped[0]
+
+
+def test_cli_list_prints_the_ranked_table(capsys):
+    """`python -m hackhive.solve --list <plan.json>`: a header and one row per arrangement."""
+    path = PLANS / "plan-5088.json"
+    ranked = solve_mod.enumerate(load_plan(path, C), C)
+    assert solve_mod.main(["--list", str(path)]) == 0
+    rows = capsys.readouterr().out.strip().splitlines()[1:]
+    assert len(rows) == len(ranked) == EXPECTED["5088"]["n_all5"]
+    for i, (row, a) in enumerate(zip(rows, ranked, strict=True), start=1):
+        cells = row.split()
+        assert cells[:3] == [str(i), str(a.H), f"{a.J:.3f}"]
+        assert cells[-1] == a.signature
