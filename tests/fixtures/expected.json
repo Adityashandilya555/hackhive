@@ -20,14 +20,14 @@
     "elig_m2": 188.67715564815268,
     "lb5": 2,
     "lb20": 2,
-    "min_hubs5": 2,
-    "min_hubs20": 2,
-    "n_all5": 12,
-    "n_all20": 12,
+    "min_hubs5": 3,
+    "min_hubs20": 3,
+    "n_all5": 6,
+    "n_all20": 6,
     "comp_direct": 1,
     "single_door_elig": 0,
     "zero_door_elig": 0,
-    "e_via_opening": 0
+    "e_via_opening": 1
   },
   "2814": {
     "label": "interior-window",

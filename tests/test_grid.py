@@ -8,12 +8,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 import shapely
-from shapely.geometry import Point
+from shapely.affinity import translate
+from shapely.geometry import MultiPolygon, Point, box, mapping
 from shapely.ops import unary_union
 
 from hackhive.contracts import Constraints, Opening
-from hackhive.grid import BLOCKED, LabelGrid
-from hackhive.io import load_plan
+from hackhive.graph import build_graph
+from hackhive.grid import BLOCKED, LabelGrid, door_gap
+from hackhive.io import load_plan, room_by_label
 from hackhive.rings import CELL_CENTRE_OFFSET
 from hackhive.route import expand, path_to, search
 
@@ -193,6 +195,8 @@ def test_debug_png_cli(tmp_path):
     )
     assert r.returncode == 0, r.stderr
     assert out.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+    # the picture is painted from #9's graph, so 3086's open kitchen shows as a passage
+    assert "4 doors, 1 opening" in r.stdout
 
 
 def test_default_cell_size_is_the_preset_grid():
@@ -241,3 +245,105 @@ def test_no_legal_door_crossing_cuts_real_wall(pid):
     bad = [c for c in cuts if c[3] > 1e-6]
     assert cuts, "every fixture has door crossings"
     assert not bad, f"{len(bad)} crossings cut wall, worst {max(c[3] for c in bad):.3f} m"
+
+
+# --------------------------------------------------------------------------- #9's graph decides
+
+
+def _graph_plan(pid: str):
+    plan = _plan(pid)
+    build_graph(plan)
+    return plan
+
+
+@pytest.mark.parametrize("pid", PLAN_IDS)
+def test_passages_join_the_rooms_build_graph_names(pid):
+    """Door.rooms and Opening.rooms (filled by #9's build_graph) decide each passage's rooms;
+    the raster only checks them. Openings default to plan.openings."""
+    plan = _graph_plan(pid)
+    grid = LabelGrid.from_plan(plan)
+    named = {d.id: d.rooms for d in plan.doors} | {o.id: o.rooms for o in plan.openings}
+    assert grid.passage_ids == [*(d.id for d in plan.doors), *(o.id for o in plan.openings)]
+    n = len(grid.room_ids)
+    for label, pair in grid.door_rooms.items():
+        pid_ = grid.passage_ids[label - n]
+        assert {grid.room_ids[i] for i in pair} == set(named[pid_]), pid_
+    for door in grid.exterior_doors:  # only a door whose other room lies outside `inner`
+        assert any(not (grid.labels == grid.room_label(r)).any() for r in named[door]), door
+    assert len(grid.door_rooms) + len(grid.exterior_doors) == len(named)
+
+
+def _three_rooms_at_one_door() -> dict:
+    """A door whose kitchen side is one room but whose other side is split between a bedroom
+    and a storage room (1 unit = 0.1 m): raster contact alone can't tell which two it joins."""
+    return {
+        "id": "SYN",
+        "area": 100.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 100)),
+        "bedroom": mapping(box(0, 0, 40, 15)),
+        "storage": mapping(box(0, 15, 40, 40)),
+        "kitchen": mapping(box(42, 0, 82, 40)),
+        "wall": mapping(MultiPolygon([box(40, -2, 42, 10), box(40, 20, 42, 42)])),
+        "door": mapping(box(40, 10, 42, 20)),
+    }
+
+
+def test_door_rooms_beat_raster_contact():
+    plan = load_plan(_three_rooms_at_one_door())
+    kitchen, storage = (room_by_label(plan, x).id for x in ("kitchen_0", "storage_0"))
+    with pytest.raises(ValueError, match="3\\+ rooms"):  # contact alone is ambiguous
+        LabelGrid.from_plan(plan)
+    plan.doors[0].rooms = (kitchen, storage)
+    grid = LabelGrid.from_plan(plan)
+    (pair,) = grid.door_rooms.values()
+    assert {grid.room_ids[i] for i in pair} == {kitchen, storage}
+
+
+def test_a_named_room_the_door_doesnt_reach_is_an_error():
+    plan = _graph_plan("5924")
+    door = next(d for d in plan.doors if d.rooms)
+    far = max(
+        (r for r in plan.rooms if r.eligible and r.id not in door.rooms),
+        key=lambda r: r.polygon.distance(door.polygon),
+    )
+    door.rooms = (door.rooms[0], far.id)
+    with pytest.raises(ValueError, match=f"{door.id}.*{far.id}"):
+        LabelGrid.from_plan(plan)
+
+
+def test_a_named_room_the_plan_lacks_is_an_error():
+    plan = _graph_plan("5924")
+    door = next(d for d in plan.doors if d.rooms)
+    door.rooms = (door.rooms[0], "no_such_room")
+    with pytest.raises(ValueError, match=f"{door.id}.*no_such_room"):
+        LabelGrid.from_plan(plan)
+
+
+def test_doors_are_painted_over_openings():
+    """An opening band next to a door never takes the door's cells (576's living–storage band
+    touches door_8's gap): doors are painted last."""
+    plan = _graph_plan("5924")
+    door = next(d for d in plan.doors if d.rooms)
+    gap = door_gap(door.polygon, plan.wall_depth_m, Constraints().grid_m)
+    x0, y0, x1, y1 = gap.bounds  # 5924's doors are axis-aligned
+    half = ((x1 - x0) / 2, 0.0) if x1 - x0 > y1 - y0 else (0.0, (y1 - y0) / 2)
+    # a band over the door's far half, like 576's living–storage band at door_8
+    band = Opening(id="opening_0", polygon=translate(gap, *half), rooms=door.rooms)
+    grid = LabelGrid.from_plan(plan, openings=[band])
+    xs, ys = grid.centres()
+    in_gap = shapely.contains_xy(gap, xs, ys) & (grid.labels != BLOCKED)
+    assert in_gap.any()
+    assert (grid.labels[in_gap] == grid.passage_ids.index(door.id) + len(grid.room_ids)).all()
+
+
+def test_3086_rooms_meet_through_build_graphs_opening():
+    plan = _graph_plan("3086")
+    (opening,) = plan.openings
+    grid = LabelGrid.from_plan(plan)
+    la, lb = (grid.room_label(r) for r in opening.rooms)
+    op_label = grid.passage_ids.index(opening.id) + len(grid.room_ids)
+    assert set(grid.door_rooms[op_label]) == {la, lb}
+    only = np.where(np.isin(grid.labels, [la, lb, op_label]), grid.labels, BLOCKED)
+    src, dst = tuple(np.argwhere(only == la)[0]), tuple(np.argwhere(only == lb)[0])
+    assert path_to(search(only, {op_label: (la, lb)}, [src], 1.0), dst)
