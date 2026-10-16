@@ -13,7 +13,7 @@ from shapely.geometry import MultiPolygon, Point, box, mapping
 import hackhive.solve as solve_mod
 from hackhive import cli
 from hackhive.checker import check_rules
-from hackhive.contracts import Constraints, Sidecar, Submission, lower_bound
+from hackhive.contracts import Constraints, Sidecar, Submission, Violation, lower_bound
 from hackhive.io import load_plan
 from hackhive.rings import Hub
 from hackhive.solve import Result, solve, solve_file, submit
@@ -36,8 +36,9 @@ def _submission(out: Path, plan_id: str) -> Submission:
 
 @functools.cache
 def _solved(plan_id: str) -> Result:
-    """One `solve_file` per fixture for this module: 13344 takes ~36 s since #22 ranks every
-    3-hub arrangement. `Result` is frozen and `submit` never changes it, so sharing is safe."""
+    """One `solve_file` per fixture for this module: 13344 takes ~12 s on 4 workers (~34 s on one
+    core) since #22 ranks every 3-hub arrangement. `Result` is frozen and `submit` never changes
+    it, so sharing is safe."""
     return solve_file(PLANS / f"plan-{plan_id}.json", C)
 
 
@@ -357,7 +358,8 @@ def test_a_ring_that_cant_be_ordered_ends_in_the_sidecar(monkeypatch):
         raise ValueError("9 nodes > 8: use Held-Karp (#28)")
 
     monkeypatch.setattr(rings_mod, "order_ring", too_many)
-    result = solve(load_plan(PLANS / "plan-5088.json", C), C)
+    # inline: a monkeypatch doesn't reach worker processes
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C, workers=1)
     assert result.sidecar.status == "infeasible" and result.submission is None
     assert "Held-Karp" in result.sidecar.reason
 
@@ -483,8 +485,8 @@ def test_warnings_carry_a_low_clearance_node_even_without_a_design(tmp_path):
 
 @pytest.fixture(scope="module")
 def ranked_13344():
-    """Every arrangement of the node-cap fixture (57 zonings), built once: ~75 s (#22 runtime,
-    accepted by Adi; `solve()` ranks one hub count at a time instead)."""
+    """Every arrangement of the node-cap fixture (57 zonings, 63 zones), built once: the slowest
+    enumerate here (`solve()` ranks one hub count at a time instead)."""
     return solve_mod.enumerate(load_plan(PLANS / "plan-13344.json", C), C)
 
 
@@ -507,12 +509,11 @@ def test_enumerate_is_sorted_by_hubs_j_area_gap_signature(ranked_13344):
 
 
 def test_enumerate_is_deterministic():
-    """C16: two runs give the same order and the same numbers."""
-    plan = load_plan(PLANS / "plan-5924.json", C)
-    a = solve_mod.enumerate(plan, C)
-    b = solve_mod.enumerate(load_plan(PLANS / "plan-5924.json", C), C)
+    """C16: two runs give the same order and the same numbers, inline or over worker processes."""
+    a = solve_mod.enumerate(load_plan(PLANS / "plan-5924.json", C), C, workers=1)
+    b = solve_mod.enumerate(load_plan(PLANS / "plan-5924.json", C), C, workers=2)
     assert [solve_mod.rank_key(x) for x in a] == [solve_mod.rank_key(x) for x in b]
-    assert [x.hubs for x in a] == [x.hubs for x in b]
+    assert [(x.hubs, x.rings) for x in a] == [(x.hubs, x.rings) for x in b]
 
 
 def test_enumerate_k_keeps_only_that_hub_count():
@@ -637,3 +638,73 @@ def test_cli_list_prints_the_ranked_table(capsys):
         cells = row.split()
         assert cells[:3] == [str(i), str(a.H), f"{a.J:.3f}"]
         assert cells[-1] == a.signature
+
+
+def _strict_for(hub_counts: set[int]):
+    """A `check_rules` that adds a rule-4 `strict` flag to every design with one of these hub
+    counts, so the gate's choice across hub counts is pinned without building such plans; and the
+    hub counts it was called for, in order (one call per routed candidate)."""
+    real = solve_mod.check_rules
+    seen: list[int] = []
+
+    def fake(plan, sub, c):
+        seen.append(len(sub.hubs))
+        out = real(plan, sub, c)
+        if len(sub.hubs) in hub_counts:
+            out = [*out, Violation(rule=4, severity="strict", message="test: a retrace")]
+        return out
+
+    return fake, seen
+
+
+def test_a_clean_design_one_hub_count_up_beats_a_strict_only_one(monkeypatch):
+    """C43 (Adi, 2026-10-16): 5088's 1-hub design is strict-only and its first 2-hub one clean, so
+    the clean one is submitted; 2 hubs isn't then a proven minimum (#22 review)."""
+    fake, seen = _strict_for({1})
+    monkeypatch.setattr(solve_mod, "check_rules", fake)
+    ranked = solve_mod.enumerate(load_plan(PLANS / "plan-5088.json", C), C)
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C)
+    side = result.sidecar
+    assert side.status == "ok" and len(result.submission.hubs) == 2
+    assert (side.arrangement.rank, side.arrangement.signature) == (2, ranked[1].signature)
+    assert side.arrangement.skipped == [f"#1 {ranked[0].signature}: strict only: rule 4"]
+    assert (side.bounds.k_lb, side.bounds.k_found, side.bounds.proof) == (1, 2, "none")
+    assert seen == [1, 2]
+
+
+def test_the_gate_looks_one_hub_count_up_and_no_further(monkeypatch):
+    """#22 review: every 1- and 2-hub design is strict-only, the 3-hub one clean. The clean search
+    stops after 2 hubs, so the best strict-only one (1 hub) is submitted, and neither the 3-hub
+    arrangement nor the walking skeleton is routed."""
+    fake, seen = _strict_for({1, 2})
+    monkeypatch.setattr(solve_mod, "check_rules", fake)
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C)
+    side = result.sidecar
+    assert side.status == "submitted_strict_only" and len(result.submission.hubs) == 1
+    assert (side.arrangement.rank, side.arrangement.skipped) == (1, [])
+    assert seen == [1, 2, 2]
+    assert side.bounds.proof == "lb_met"
+
+
+def test_the_walking_skeleton_is_submitted_when_every_ranked_design_fails():
+    """C43: a hook puts H1 in a wall in each of 5088's 4 ranked arrangements, so the walking
+    skeleton's first cut, tried last, is submitted, with no rank."""
+    plan = load_plan(PLANS / "plan-5088.json", C)
+    ranked = solve_mod.enumerate(plan, C)
+    wall = max(plan.walls, key=lambda w: w.area).representative_point()
+    in_wall = _move_first_hub((wall.x, wall.y))
+    calls = []
+
+    def hook(hubs):
+        calls.append(None)
+        return in_wall(hubs) if len(calls) <= len(ranked) else hubs
+
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C, hub_hook=hook)
+    side = result.sidecar
+    assert len(calls) == len(ranked) + 1 == 5
+    assert side.status == "ok" and result.submittable
+    assert (side.arrangement.rank, side.arrangement.signature) == (None, ranked[0].signature)
+    assert [s.split(":")[0] for s in side.arrangement.skipped] == [
+        f"#{i} {a.signature}" for i, a in enumerate(ranked, start=1)
+    ]
+    assert all("rule 6" in s for s in side.arrangement.skipped)
