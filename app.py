@@ -31,27 +31,36 @@ from hackhive.solve import (
 )
 from hackhive.solve import enumerate as enumerate_arrangements
 from hackhive.ui import (
+    BATCH_COLUMNS,
+    BATCH_COMMAND,
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
+    ROOT,
+    batch_summary,
     best_by_hub_count,
     case_tags,
     checklist_line,
     filter_by_hubs,
+    find_batch_csv,
     fixture_ids,
     fixture_label,
     fixture_path,
     hub_counts,
+    hub_gap_counts,
     hub_table,
     load_submission,
     md_text,
     metrics_line,
+    open_target,
     optimality_badge,
     page_count,
     page_of,
     plan_facts,
     plan_from_bytes,
+    plans_by_tag,
     preset_rows,
     proven_min_hubs,
+    read_batch,
     readings_rows,
     resplan_raw,
     room_counts,
@@ -61,12 +70,14 @@ from hackhive.ui import (
     step_caption,
     submission_mismatch,
     tag_chips,
+    tag_label,
     tile_caption,
     tile_verdict,
     verdict_line,
     violation_line,
 )
 from hackhive.viz import (
+    draw_gap_histogram,
     draw_graph,
     draw_layers,
     draw_nodes,
@@ -247,18 +258,15 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
     st.header("Plan")
     sources = [FIXTURE, *([RESPLAN] if RESPLAN_JSONL.exists() else []), UPLOAD]
     source = st.radio("Source", sources, key="source", horizontal=True)
+    # defaults through session state, not `index` / `value`: the Batch tab (#33) sets these keys
+    # to open a plan, and Streamlit warns when a widget gets both
+    st.session_state.setdefault("fixture", DEFAULT_FIXTURE)
+    st.session_state.setdefault("resplan_id", DEFAULT_FIXTURE)
     if source == FIXTURE:
-        ids = fixture_ids()
-        plan_id = st.selectbox(
-            "Test plan",
-            ids,
-            index=ids.index(DEFAULT_FIXTURE),
-            format_func=fixture_label,
-            key="fixture",
-        )
+        plan_id = st.selectbox("Test plan", fixture_ids(), format_func=fixture_label, key="fixture")
         return source, plan_id, None
     if source == RESPLAN:
-        plan_id = st.text_input("ResPlan plan id", value=DEFAULT_FIXTURE, key="resplan_id")
+        plan_id = st.text_input("ResPlan plan id", key="resplan_id")
         return source, plan_id.strip(), None
     up = st.file_uploader("Plan JSON", type=["json"], key="upload")
     if up is None:
@@ -365,7 +373,9 @@ def best_tab(
         if png is not None:
             st.image(png, width="stretch")
         st.caption(step_caption(sub, step))
-        if path.is_relative_to(SOLVED_DIR):  # solve()'s design, not a hand-made fixture
+        # solve()'s design only: its badge and violations come from solve()'s sidecar, so never
+        # over a gallery arrangement or a hand-made file (#107 x #111, nexuszephyr's review)
+        if is_best:
             what_if = "" if side.settings.is_problem_statement else ".what-if"
             st.download_button(
                 "Download presentation image",
@@ -515,6 +525,102 @@ def what_if_banner(c: Constraints) -> None:
         )
 
 
+# --------------------------------------------------------------------------- batch (#33)
+
+
+@st.cache_data(max_entries=4, show_spinner=False)
+def batch_rows(path: str, mtime: float) -> list[dict]:
+    """#32's CSV, read once per file version (the mtime is only the cache key)."""
+    return read_batch(Path(path))
+
+
+def _open_plan(plan_id: str) -> None:
+    """A Batch row's open action: point the sidebar's plan picker at it (#33)."""
+    target = open_target(plan_id)
+    if target is None:
+        return
+    source, key = target
+    st.session_state["source"] = source
+    st.session_state["fixture" if source == FIXTURE else "resplan_id"] = key
+    st.toast(f"Opened {plan_id}: its design is on the Best tab.")
+
+
+def _open_button(plan_id: str, key: str, status: str | None = None) -> None:
+    """A batch row's open button: disabled when the app can't open the plan, or when it didn't
+    even load in the batch (`input_error`: nothing to show, #99 review)."""
+    st.button(
+        plan_id,
+        key=key,
+        on_click=_open_plan,
+        args=(plan_id,),
+        disabled=open_target(plan_id) is None or status == "input_error",
+        help="Open this plan (a test plan, or a ResPlan id when data/resplan is here).",
+    )
+
+
+def batch_tab() -> None:
+    """The batch leaderboard (#33): #32's CSV, read only. Summary cards, the H − LB histogram,
+    the sortable table, a row to open in the Best tab, and the plans per case tag (#83)."""
+    path = find_batch_csv()
+    if path is None:
+        st.info("No batch results yet. Run the batch over the test split, then reload:")
+        st.code(BATCH_COMMAND, language="bash")
+        return
+    try:
+        rows = batch_rows(str(path), path.stat().st_mtime)
+    except (OSError, ValueError, UnicodeDecodeError) as e:
+        st.error(f"Can't read {path.name}. {e}")
+        st.code(BATCH_COMMAND, language="bash")
+        return
+    if not rows:  # `hackhive batch --n 0`, or a split with no plans: only the header (#99 review)
+        st.info(f"{path.name} has no plans yet. Run the batch over the test split, then reload:")
+        st.code(BATCH_COMMAND, language="bash")
+        return
+    s = batch_summary(rows)
+    st.caption(f"{path.relative_to(ROOT) if ROOT in path.parents else path} · {s.n} plans")
+    cards = st.columns(4)
+    cards[0].metric("Plans", f"{s.n}")
+    cards[1].metric(
+        "Valid submissions",
+        "–" if s.valid_pct is None else f"{s.valid_pct:.1f}%",
+        help=f"Of the {s.feasible} feasible plans (loaded, not infeasible), as `hackhive batch` "
+        f"counts: {s.ok} ok, {s.strict_only} strict-only (valid if the organisers agree, Q2). "
+        f"Also {s.infeasible} infeasible, {s.input_error} input error.",
+    )
+    cards[2].metric(
+        "Hubs at the lower bound",
+        "–" if s.at_lb_pct is None else f"{s.at_lb_pct:.1f}%",
+        help="Of the submitted plans, those using LB hubs: no zoning can use fewer.",
+    )
+    cards[3].metric("Mean J (submitted)", "–" if s.mean_J is None else f"{s.mean_J:.2f}")
+    picture_col, open_col = st.columns([3, 2], gap="large")
+    with picture_col:
+        if gaps := hub_gap_counts(rows):
+            st.image(to_png(draw_gap_histogram(gaps)), width="stretch")
+            st.caption("Submitted plans by H − LB: 0 means the fewest hubs possible.")
+    with open_col:
+        st.subheader("Open a plan")
+        status = {r["plan_id"]: r["status"] for r in rows}
+        pick = st.selectbox("Plan", list(status), key="batch_open")
+        _open_button(pick, "batch_open_go", status[pick])
+        if status[pick] == "input_error":
+            st.caption("This plan didn't load in the batch, so there is nothing to open.")
+        elif open_target(pick) is None:
+            st.caption("Only test plans open here, or any id once data/resplan/plans.jsonl is in.")
+    columns = [c for c in BATCH_COLUMNS if c in rows[0]]  # `tags` only when the CSV has it
+    st.dataframe([{c: r.get(c) for c in columns} for r in rows], hide_index=True)
+    st.subheader("Plans per case tag")
+    tags = plans_by_tag(rows)
+    if not tags:
+        st.caption("Case tags appear when the CSV has a `tags` column (#83's ids, from #32).")
+    for tag, plan_ids in tags.items():  # keyed by id, so the buttons' keys stay stable (#108)
+        with st.expander(f"{md_text(tag_label(tag))} · {len(plan_ids)}"):
+            cols = st.columns(4)
+            for i, pid in enumerate(plan_ids):  # every plan, 4 to a row (#99 review)
+                with cols[i % 4]:
+                    _open_button(pid, f"tag_{tag}_{pid}")
+
+
 # --------------------------------------------------------------------------- arrangements (#26)
 
 
@@ -614,19 +720,25 @@ def page() -> None:
 
     st.title("HackHive")
     what_if_banner(settings_c)
+    header = st.container()  # the plan's caption and chips, or why there is no plan
+    best, plan_tab, arr_tab, batch_t = st.tabs(["Best", "Plan", "Arrangements", "Batch"])
+    with batch_t:  # first, and never behind the plan: it reads a CSV, it solves nothing (#99)
+        batch_tab()
     if choice is None:
-        st.caption("Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files.")
-        st.stop()
+        with header:
+            st.caption(
+                "Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files."
+            )
+        return
 
     source, key, content = choice
     try:
         plan, G = load(source, key, content)
-    except (OSError, ValueError) as e:
-        banner(Sidecar(plan_id=key, status="input_error", reason=str(e)), None)
-        st.stop()
-    except Exception as e:  # a plan we can parse but not handle further: say so, never a traceback
-        banner(Sidecar(plan_id=key, status="input_error", reason=f"{type(e).__name__}: {e}"), None)
-        st.stop()
+    except Exception as e:  # a plan we can't read or handle: say so, never a traceback
+        reason = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
+        with header:
+            banner(Sidecar(plan_id=key, status="input_error", reason=reason), None)
+        return
 
     try:
         best_path, side_json = solved(source, key, content, settings_c.model_dump_json())
@@ -651,14 +763,14 @@ def page() -> None:
     with solution_slot:
         solution = pick_solution(plan, Path(best_path) if best_path else None, opened_path)
 
-    st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
-    try:
-        best_sub = load_submission(Path(best_path)) if best_path else None
-    except ValueError:  # a stale cached path (temp dir cleaned): the design tags just drop out
-        best_sub = None
-    if tags := case_tags(plan, G, Result(plan, best_sub, side)):
-        st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
-    best, plan_tab, arr_tab = st.tabs(["Best", "Plan", "Arrangements"])
+    with header:
+        st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
+        try:
+            best_sub = load_submission(Path(best_path)) if best_path else None
+        except ValueError:  # a stale cached path (temp dir cleaned): the design tags drop out
+            best_sub = None
+        if tags := case_tags(plan, G, Result(plan, best_sub, side)):
+            st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
     with best:
         is_best = solution is None or (best_path is not None and Path(best_path) == solution)
         best_tab(source, key, content, plan, G, solution, side, settings_c, counting, is_best)
