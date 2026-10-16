@@ -265,6 +265,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - `search`: one-to-all Dijkstra over (cell, heading), with costs in J weights (bend 0.5, overlap 1/m, crossing 5, crossings inside one ring included); no U-turns;
   - `PathCache`: pairwise paths between nodes and hub candidates, once per plan;
   - `route_rings`: an occupancy penalty + 2 rip-up passes, keeping the lowest J (from the checker mirror); per-pass snapshots;
+  - each ring searches only its own zone's rooms and their doors/openings (D7, #79); `route_through_other_rooms` is the WHAT-IF;
   - single-door rooms and one-node rings: same-line retrace vs parallel runs, whichever J prefers (ADR-005 amendment); same-line retraces only into single-door rooms or one-node rings (#21, #46 Q5);
   - crossings priced during search at `w_X` = 5, including T-touches (#21);
   - the stub rule: each leg is `[exact_from] + stub_out + grid_path + stub_in + [exact_to]`, and the incoming and outgoing stubs at a node use different corners (#15).

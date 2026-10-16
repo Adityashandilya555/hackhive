@@ -23,7 +23,7 @@ import sys
 import time
 from collections import OrderedDict
 from collections.abc import Callable, Collection, Hashable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar
 
@@ -887,11 +887,26 @@ def single_door_nodes(plan: Plan, c: Constraints = _DEFAULT) -> frozenset[str]:
     return frozenset(n.id for n in plan.nodes if n.room_id in one_door)
 
 
+def own_rooms_grid(grid: LabelGrid, rooms: Collection[str]) -> LabelGrid:
+    """The grid with every room outside `rooms` blocked, and every door/opening that doesn't
+    join two of them (D7, #79). A ring routed on it stays in its own hub's rooms."""
+    own = {grid.room_label(r) for r in rooms}
+    allowed = own | {p for p, (a, b) in grid.door_rooms.items() if a in own and b in own}
+    labels = np.where(np.isin(grid.labels, list(allowed)), grid.labels, BLOCKED)
+    return replace(grid, labels=labels.astype(grid.labels.dtype))
+
+
 def route_rings(
     grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
 ) -> list[RoutedRing]:
-    """Every hub's ring, routed independently in hub order (no rip-up yet, #21)."""
+    """Every hub's ring, routed independently in hub order (no rip-up yet, #21), each inside its
+    hub's `assigned_rooms` unless `c.route_through_other_rooms` (D7)."""
     from hackhive.checker import _free_space, metrics  # checker imports grid, which imports us
+    from hackhive.graph import build_graph
+
+    # a zone may be joined only through a bathroom/stair (#46 Q2); its ring needs that room
+    edges = build_graph(plan, c).edges(data=True) if c.zone_links_via_excluded else []
+    via = [(a, b, d["via"]) for a, b, d in edges if d["kind"] == "via_excluded"]
 
     retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings _free_space needs
     free = _free_space(plan, c).free  # rule 5's own geometry, so stubs and checker agree
@@ -902,13 +917,23 @@ def route_rings(
             Stop(hub.hub_id, hub.location, hub.room_id),
             *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
         ]
-        segments = route_ring(grid, stops, c, retrace_ok=retrace_ok, free=free)
+        if c.route_through_other_rooms:
+            segments = route_ring(grid, stops, c, retrace_ok=retrace_ok, free=free)
+        else:
+            zone = set(hub.assigned_rooms)
+            rooms = zone.union(*(v for a, b, v in via if a in zone and b in zone))
+            try:
+                segments = route_ring(
+                    own_rooms_grid(grid, rooms), stops, c, retrace_ok=retrace_ok, free=free
+                )
+            except ValueError as e:  # never falls back to other rooms
+                raise ValueError(f"{e} within {hub.hub_id}'s rooms (D7)") from e
         hub_out = HubOut.model_validate(
             {
                 "hub_id": hub.hub_id,
                 "room_id": hub.room_id,
                 "location": {"x": hub.location[0], "y": hub.location[1]},
-                "assigned_rooms": [hub.room_id],
+                "assigned_rooms": hub.assigned_rooms,
                 "assigned_nodes": hub.ring[1:-1],
                 "closed_sequence": hub.ring,
                 "route_segments": [s.model_dump(by_alias=True) for s in segments],
