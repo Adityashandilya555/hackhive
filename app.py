@@ -36,11 +36,19 @@ from hackhive.ui import (
     room_counts,
     solution_label,
     solution_paths,
+    step_caption,
     submission_mismatch,
     verdict_line,
     violation_line,
 )
-from hackhive.viz import draw_graph, draw_layers, draw_nodes, draw_solution, to_png
+from hackhive.viz import (
+    draw_graph,
+    draw_layers,
+    draw_nodes,
+    draw_solution,
+    segment_count,
+    to_png,
+)
 
 PRESET = Constraints.problem_statement()
 FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
@@ -92,12 +100,16 @@ def solved(source: str, key: str, content: bytes | None) -> tuple[str | None, st
     ), f"{side.status}: {side.reason}" if side.reason else side.status
 
 
-@st.cache_data(max_entries=64, show_spinner="Drawing the solution…")
-def overlay(source: str, key: str, content: bytes | None, solution: str) -> bytes:
-    """`viz.draw_solution` of a solution file, with the checker's violations in red (#17)."""
+@st.cache_data(max_entries=256, show_spinner="Drawing the solution…")
+def overlay(
+    source: str, key: str, content: bytes | None, solution: str, step: int | None = None
+) -> bytes:
+    """`viz.draw_solution` of a solution file, with the checker's violations in red (#17), up to
+    `step` segments (#25). Each step's PNG is cached, so sliding back and forth is instant."""
     plan, _ = load(source, key, content)
     rep = checked(source, key, content, solution)
-    return to_png(draw_solution(plan, load_submission(Path(solution)), rep.violations))
+    sub = load_submission(Path(solution))
+    return to_png(draw_solution(plan, sub, rep.violations, step=step))
 
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
@@ -174,19 +186,29 @@ def best_tab(
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
-    try:
-        png = overlay(source, key, content, str(path))
-    except (
-        Exception
-    ) as e:  # Best is the landing tab: a drawing error is a message, never a traceback
-        st.error(f"Can't draw this solution. {type(e).__name__}: {e}")
-        png = None
     picture_col, panel = st.columns([5, 3], gap="large")
     with picture_col:
         if mismatch := submission_mismatch(sub, plan):
             st.warning(mismatch)
+        total = segment_count(sub)
+        # #25: walk the rings one segment at a time; the default is the full design
+        step = st.slider(
+            "Step through the rings",
+            min_value=0,
+            max_value=max(total, 1),
+            value=max(total, 1),
+            key="step",
+            help="0 = hubs and nodes only; each step adds one cable segment, ring by ring.",
+            disabled=total == 0,
+        )
+        try:
+            png = overlay(source, key, content, str(path), None if step >= total else step)
+        except Exception as e:  # Best is the landing tab: a drawing error is never a traceback
+            st.error(f"Can't draw this solution. {type(e).__name__}: {e}")
+            png = None
         if png is not None:
             st.image(png, width="stretch")
+        st.caption(step_caption(sub, step))
         st.subheader("Per-hub summary")
         if rep.metrics is None:
             st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")

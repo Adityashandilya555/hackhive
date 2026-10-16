@@ -428,14 +428,15 @@ def test_best_tab_step_slider_walks_the_rings():
     at = _app("5088")
     best = at.tabs[0]
     slider = best.slider(key="step")
-    assert slider.min == 0 and slider.value == slider.max >= 1
-    assert any(f"of {slider.max} · the full design" in c.value for c in best.caption)
+    total = int(slider.max)  # AppTest reports a slider's bounds as floats
+    assert slider.min == 0 and slider.value == total >= 1
+    assert any(f"Step {total} of {total} · the full design" in c.value for c in best.caption)
     slider.set_value(0)
     at.run()
     assert not at.exception
     best = at.tabs[0]
     assert len(best.image) == 1
-    assert any(f"Step 0 of {slider.max} · hubs and nodes only" in c.value for c in best.caption)
+    assert any(f"Step 0 of {total} · hubs and nodes only" in c.value for c in best.caption)
 
 
 def test_best_tab_follows_the_solution_picker():

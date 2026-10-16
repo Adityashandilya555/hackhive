@@ -263,3 +263,16 @@ def hub_table(plan: Plan, sub: Submission, m: checker.Metrics) -> list[dict[str,
             }
         )
     return rows
+
+
+def step_caption(sub: Submission, step: int) -> str:
+    """`Step 3 of 9 · H1: N2 → N1`: what the step-through slider (#25) has just drawn."""
+    order = [(h.hub_id, s) for h in sub.hubs for s in h.route_segments]
+    total = len(order)
+    if step <= 0:
+        return f"Step 0 of {total} · hubs and nodes only"
+    if step >= total:
+        return f"Step {total} of {total} · the full design"
+    hub_id, seg = order[step - 1]
+    back = ", back to its hub" if seg.to == hub_id else ""
+    return f"Step {step} of {total} · {hub_id}: {seg.from_} → {seg.to}{back}"
