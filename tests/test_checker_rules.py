@@ -174,6 +174,40 @@ def test_retrace_where_the_only_other_door_is_a_dead_end_bathroom_is_legal():
     assert violations == []
 
 
+def test_one_node_ring_out_and_back_is_legal():
+    """#81, decision_conventions §5 (one-node ring row): H → N → H on one line is the same legal
+    choice as a single-door room, even when N's room has two ways out (5088's living room:
+    bedroom and kitchen doors). Only this ring is submitted, so rule 1's errors are expected."""
+    plan = load_plan(plan_path("5088-valid.json"))
+    n1 = plan.nodes[0]
+    hub = (n1.xy[0] + 1.0, n1.xy[1])
+    sub = Submission.model_validate(
+        {
+            "plan_id": plan.plan_id,
+            "units": "m",
+            "hubs": [
+                {
+                    "hub_id": "H1",
+                    "room_id": n1.room_id,
+                    "location": {"x": hub[0], "y": hub[1]},
+                    "assigned_rooms": [n1.room_id],
+                    "assigned_nodes": [n1.id],
+                    "closed_sequence": ["H1", n1.id, "H1"],
+                    "route_segments": [
+                        {"from": "H1", "to": n1.id, "length_m": 1.0, "polyline": [hub, n1.xy]},
+                        {"from": n1.id, "to": "H1", "length_m": 1.0, "polyline": [n1.xy, hub]},
+                    ],
+                    "ring_length_m": 2.0,
+                }
+            ],
+            "reported_metrics": {"hub_count": 1, "total_length_m": 2.0},
+        }
+    )
+    found = check_rules(plan, sub)
+    assert not [v for v in found if v.rule == 4], found
+    assert {v.rule for v in found} == {1}
+
+
 def test_two_door_retrace_is_strict_with_a_where():
     """C11, C15, #46 Q5: 1 m retraced at N1 inside the two-door living room (bedroom and
     kitchen doors; its third door, to a dead-end bathroom, doesn't count)."""

@@ -545,10 +545,14 @@ def _sequential(case) -> SimpleNamespace:
 
 
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
-def test_own_rooms_j_against_main(routed, plan_id):
+def test_own_rooms_j_against_main(routed, plan_id, monkeypatch):
     """C13, C17: the sequential pass's J matches main on every fixture except the recorded D7
-    cost, and rule 5 passes; with the WHAT-IF on, J is main's exactly."""
-    case = _sequential(routed[plan_id])
+    cost, and rule 5 passes; with the WHAT-IF on, J is main's exactly. Main routed one layout
+    per ring, so #81's parallel-run variant is off here."""
+    assert not [v for v in check_rules(routed[plan_id].plan, submission(routed[plan_id]), C)
+                if v.rule == 5]  # fmt: skip
+    monkeypatch.setattr(route, "_both_layouts", lambda stops, retrace_ok: False)
+    case = _sequential(_route(plan_id))
     j = metrics(submission(case).hubs, C).J
     assert j == pytest.approx(J_MAIN[plan_id] + D7_COST.get(plan_id, 0.0), abs=TOL)
     assert not [v for v in check_rules(case.plan, submission(case), C) if v.rule == 5]
@@ -667,6 +671,158 @@ def test_occupancy_no_weight_literals_in_route():
         and "not-a-weight" not in lines[n.lineno - 1]
     ]
     assert found == []
+
+
+# --------------------------------------------------------------------------- single-door rooms (#81)
+
+
+def _synthetic(**geoms):
+    from shapely.geometry import mapping
+
+    raw = {"id": "SYN", "area": 100.0, "wall_depth": 2.0, "inner": mapping(box(0, 0, 100, 100))}
+    return load_plan(raw | {k: mapping(g) for k, g in geoms.items()})
+
+
+def _one_door_plan(x0: float = 45, x1: float = 55):
+    """A living room (10.1 × 5.1 m) under a bedroom (4.1 × 4.1 m) whose only door spans x0..x1
+    (units, 1 unit = 0.1 m). Odd sizes put both nodes on cell centres: N1 in the living room's
+    middle, N2 2 m inside the bedroom."""
+    from shapely.geometry import MultiPolygon
+
+    walls = [box(28, 51, x0, 53), box(x1, 51, 73, 53)]
+    walls += [box(28, 51, 30, 96), box(71, 51, 73, 96), box(28, 94, 73, 96)]
+    return _synthetic(
+        living=box(0, 0, 101, 51),
+        bedroom=box(30, 53, 71, 94),
+        wall=MultiPolygon(walls),
+        door=box(x0, 51, x1, 53),
+    )
+
+
+def _ring(plan, hub_xy, ring, **kw):
+    """Route hub → ring nodes → hub as route_passes' pass 0 does; the HubOut and its metrics."""
+    retrace_ok = route.single_door_nodes(plan, C)  # its build_graph fills openings first
+    free = _free_space(plan, C).free
+    nodes = {n.id: n for n in plan.nodes}
+    room = next(r.id for r in plan.rooms if r.polygon.contains(shapely.Point(hub_xy)))
+    stops = [Stop("H1", hub_xy, room), *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in ring)]
+    segs = route_ring(LabelGrid.from_plan(plan), stops, C, retrace_ok=retrace_ok, free=free, **kw)
+    hub = HubOut.model_validate(
+        {
+            "hub_id": "H1",
+            "room_id": room,
+            "location": {"x": hub_xy[0], "y": hub_xy[1]},
+            "assigned_rooms": [room, *sorted({nodes[n].room_id for n in ring} - {room})],
+            "assigned_nodes": sorted(ring),
+            "closed_sequence": ["H1", *ring, "H1"],
+            "route_segments": [s.model_dump(by_alias=True) for s in segs],
+            "ring_length_m": sum(s.length_m for s in segs),
+        }
+    )
+    return hub, metrics([hub], C)
+
+
+def _today(monkeypatch):
+    """Route one layout per ring, as main did before #81."""
+    monkeypatch.setattr(route, "_both_layouts", lambda stops, retrace_ok: False)
+
+
+def _one_node(d: float, monkeypatch=None):
+    plan = _synthetic(living=box(0, 0, 81, 81))  # node on a cell centre (4.05, 4.05)
+    (n1,) = plan.nodes
+    if monkeypatch is not None:
+        _today(monkeypatch)
+    return plan, *_ring(plan, (n1.xy[0] - d, n1.xy[1]), [n1.id])
+
+
+def test_single_door_one_node_ring_long_takes_parallel(monkeypatch):
+    """C15, C17, C40: d = 3 m: two parallel runs (O = 0) beat the out-and-back (3d + 1 = 10),
+    at about 2d + 2.2 (§5's one-node ring row)."""
+    d = 3.0
+    _, _, m = _one_node(d)
+    _, _, back = _one_node(d, monkeypatch)
+    assert m.O <= TOL and back.O > 1.0
+    assert m.J < back.J and m.J < 3 * d + 1
+    assert m.J == pytest.approx(2 * d + 2.2, abs=0.3)
+
+
+def test_single_door_one_node_ring_short_takes_retrace():
+    """C15, C17, C40: d = 0.8 m: the out-and-back wins (3d + 1 = 3.4 < 2d + 2.2 = 3.8), and the
+    checker mirror takes it as legal (no error, no rule-4 strict)."""
+    d = 0.8
+    plan, hub, m = _one_node(d)
+    assert m.O > 0.5
+    assert m.J == pytest.approx(3 * d + 1, abs=0.3)
+    sub = Submission(
+        plan_id=plan.plan_id,
+        units="m",
+        hubs=[hub],
+        reported_metrics={"hub_count": 1, "total_length_m": m.L},
+    )
+    found = check_rules(plan, sub, C)
+    assert not [v for v in found if v.severity == "error"], found
+    assert not [v for v in found if v.rule == 4 and v.severity == "strict"], found
+
+
+def _door_pieces(hub, door):
+    return [
+        shapely.LineString(s.polyline).intersection(door)
+        for s in hub.route_segments
+        if shapely.LineString(s.polyline).intersects(door)
+    ]
+
+
+def test_single_door_node_legs_run_parallel_through_its_door(monkeypatch):
+    """C15, C17: hub → N2 (2 m inside the single-door bedroom) → N1: the legs in and out of the
+    bedroom go through its door on two lines at least a cell apart, with no overlap, and J is
+    below the retraced layout's."""
+    plan = _one_door_plan()
+    n1, n2 = plan.nodes
+    hub_xy = (n1.xy[0] - 3.0, n1.xy[1])
+    door = next(iter(plan.doors)).polygon
+    hub, m = _ring(plan, hub_xy, [n2.id, n1.id])
+    a, b = _door_pieces(hub, door)
+    assert a.distance(b) >= C.grid_m - TOL
+    assert m.O <= TOL
+    _today(monkeypatch)
+    _, back = _ring(plan, hub_xy, [n2.id, n1.id])
+    assert back.O > 1.0 and m.J < back.J
+
+
+def test_single_door_narrow_door_falls_back_to_retrace():
+    """A door that fits one lane (0.15 m: one raster column): routing succeeds, the legs share
+    its line (the retrace), nothing raises."""
+    plan = _one_door_plan(50, 51.5)
+    n1, n2 = plan.nodes
+    hub, m = _ring(plan, (n1.xy[0] - 3.0, n1.xy[1]), [n2.id, n1.id])
+    assert m.O > 1.0
+    a, b = _door_pieces(hub, next(iter(plan.doors)).polygon)
+    assert a.distance(b) <= TOL
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_single_door_retraces_only_where_legal(routed, plan_id):
+    """C15: after the passes, the only same-line retraces left are legal ones (into a
+    single-door room or in a one-node ring): no rule-4 strict retrace flag."""
+    assert _retraces(routed[plan_id]) == 0
+
+
+# main @ fa9853c (#80 merged): J of route_passes' best pass per fixture
+J_MAIN_BEST = {
+    "5088": 38.907734,
+    "576": 61.899546,
+    "1293": 73.579815,
+    "2814": 90.270451,
+    "3086": 84.124317,
+    "5924": 64.467449,
+    "13344": 98.332113,
+}
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_single_door_j_not_above_main(routed, plan_id):
+    """C17: the parallel-run variant only adds a choice, so J never goes up."""
+    assert metrics(submission(routed[plan_id]).hubs, C).J <= J_MAIN_BEST[plan_id] + TOL
 
 
 # --------------------------------------------------------------------------- see it
