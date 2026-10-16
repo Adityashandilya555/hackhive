@@ -154,3 +154,24 @@ def test_label_what_if_does_nothing_for_the_preset():
     fig = draw_solution(result.plan, result.submission)
     label_what_if(fig, [])
     assert not [t for t in fig.findobj() if getattr(t, "get_gid", lambda: None)() == WHAT_IF_GID]
+
+
+# --------------------------------------------------------------------------- #31 interior windows
+
+
+def test_interior_window_2814_one_hub_and_never_submitted(tmp_path):
+    """#31, C37, C39, C43: strict 2814 needs 2 hubs and writes a valid submission; with interior
+    windows as doors the kitchen joins living, 1 hub, WHAT-IF, and no submission is written."""
+    strict = solved("2814")
+    assert strict.submission is not None and len(strict.submission.hubs) == 2
+    assert strict.submittable
+    written = submit(strict, tmp_path / "strict")
+    assert any(p.name == "PLAN_2814.json" for p in written)
+
+    on = solve_file(PLANS / "plan-2814.json", Constraints(interior_windows_as_doors=True))
+    assert on.submission is not None and len(on.submission.hubs) == 1
+    assert on.sidecar.settings.is_problem_statement is False and on.what_if
+    assert not [v for v in on.sidecar.violations if v.severity == "error"]
+    assert "windows on interior walls as doors" in " ".join(on.sidecar.warnings)
+    written = submit(on, tmp_path / "on")
+    assert [p.name for p in written] == ["PLAN_2814.sidecar.json"]
