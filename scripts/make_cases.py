@@ -6,8 +6,10 @@ Writes `tests/fixtures/cases/cases.json`, one row per case in `ui.CASES` with it
 `solve()` gives, and a verbatim `case-<tag>-<id>.json` for each case that no committed fixture
 (`tests/fixtures/plans/`) shows. Each case's plan is, in order:
 
-1. the plan `cases.json` already names, if its file exists (so #78 can flip the grid-failed
-   case's status without losing the plan);
+1. the plan `cases.json` already names, if its file exists and it still shows the case: a
+   `solve()` change can move a plan out of its case (#101 made 13693 clean, no longer
+   strict-only). The grid-failed plan is kept regardless, so #78 can flip its status without
+   losing the regression example (`ui.REGRESSION_CASES`);
 2. the smallest fixture that shows the case;
 3. the smallest plan of the scan that shows it: the same 600 plans as the plan's §4 scan
    (`random.Random(5).sample`, `--n 600 --seed 5`; `--n 0` scans every plan).
@@ -90,10 +92,10 @@ def build(
     old = {r["case"]: r["plan"] for r in ui.case_rows(index)} if index.exists() else {}
     picks: dict[str, tuple[Path, ui.CaseFacts]] = {}
 
-    for case in ui.CASES:  # 1. keep what cases.json already names
+    for case in ui.CASES:  # 1. keep what cases.json already names, if it still shows the case
         if case.id in old and (path := out / old[case.id]).exists():
             facts = _facts(path)
-            if facts is not None:
+            if facts is not None and (case.match(facts) or case.id in ui.REGRESSION_CASES):
                 picks[case.id] = (path, facts)
 
     def take(path: Path, facts: ui.CaseFacts) -> None:

@@ -414,6 +414,8 @@ def status_banner(side: Sidecar, plan: Plan | None) -> tuple[str, str]:
 
 CASE_DIR = ROOT / "tests" / "fixtures" / "cases"
 CASES_JSON = CASE_DIR / "cases.json"
+# kept as regression examples once a fix makes their plan stop showing the case (#84, #78)
+REGRESSION_CASES = frozenset({"grid_failed"})
 
 
 @dataclass(frozen=True)
