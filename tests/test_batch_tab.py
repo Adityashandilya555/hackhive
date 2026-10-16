@@ -11,12 +11,15 @@ from hackhive import ui
 from hackhive.ui import (
     BATCH_COLUMNS,
     BATCH_COMMAND,
+    OPTIONAL_COLUMNS,
+    TAG_LABELS,
     batch_summary,
     find_batch_csv,
     hub_gap_counts,
     open_target,
     plans_by_tag,
     read_batch,
+    tag_label,
 )
 from hackhive.viz import draw_gap_histogram
 
@@ -41,6 +44,7 @@ def test_the_columns_are_32s_own_list():
     from hackhive import batch
 
     assert tuple(batch.COLUMNS) == BATCH_COLUMNS
+    assert "tags" in BATCH_COLUMNS and "tags" in OPTIONAL_COLUMNS  # #108's; older CSVs lack it
 
 
 def test_the_tab_reads_what_hackhive_batch_writes(tmp_path):
@@ -129,9 +133,49 @@ def test_gap_histogram_draws_one_bar_per_gap():
 
 
 def test_plans_by_tag_from_the_tags_column():
+    """#108 writes `cases.case_tags` ids (stable keys); the tab shows each as its label."""
     tags = plans_by_tag(read_batch(SMALL))
-    assert tags["en-suite single-door"] == ["PLAN_1293", "PLAN_2814", "PLAN_3086", "PLAN_5088"]
-    assert tags["4+ hubs"] == ["PLAN_576"]
+    assert tags["en_suite"] == ["PLAN_1293", "PLAN_2814", "PLAN_3086", "PLAN_5088"]
+    assert tags["many_hubs"] == ["PLAN_576"]
+    assert tag_label("en_suite") == "en-suite single-door" and tag_label("many_hubs") == "4+ hubs"
+    assert tag_label("above_lb") == "hubs > lower bound"
+    assert tag_label("a_new_tag") == "a_new_tag"  # an id the tab doesn't know yet: shown as is
+
+
+def test_every_tag_id_the_batch_writes_has_a_label():
+    from hackhive import cases
+
+    src = (Path(cases.__file__)).read_text(encoding="utf-8")
+    written = set(__import__("re").findall(r'CaseTag\(\s*"([a-z_]+)"', src))
+    assert written and written <= set(TAG_LABELS), written - set(TAG_LABELS)
+
+
+def test_a_csv_without_the_tags_column_still_reads(tmp_path):
+    """`tags` is optional: a CSV from before #108 (or another tool) still loads."""
+    lines = SMALL.read_text(encoding="utf-8").splitlines()
+    header = lines[0].split(",")
+    cut = header.index("tags")
+    old = tmp_path / "batch.csv"
+    old.write_text(
+        "\n".join(",".join(c for i, c in enumerate(_split(line)) if i != cut) for line in lines)
+        + "\n",
+        encoding="utf-8",
+    )
+    rows = read_batch(old)
+    assert len(rows) == 9 and "tags" not in rows[0] and plans_by_tag(rows) == {}
+
+
+def _split(line: str) -> list[str]:
+    import csv
+
+    return next(csv.reader([line]))
+
+
+def test_a_header_only_csv_reads_as_no_rows(tmp_path):
+    """`hackhive batch --n 0`, or a split with no plans, writes only the header (#99 review)."""
+    empty = tmp_path / "batch.csv"
+    empty.write_text(SMALL.read_text(encoding="utf-8").splitlines()[0] + "\n", encoding="utf-8")
+    assert read_batch(empty) == []
 
 
 def test_plans_by_tag_without_the_column_is_empty(tmp_path):
@@ -194,9 +238,26 @@ def test_a_broken_csv_is_an_error_message_not_a_traceback(monkeypatch, tmp_path)
 def test_opening_a_row_switches_the_plan(monkeypatch):
     monkeypatch.setattr(ui, "BATCH_PATHS", (SMALL,))
     at = _run()
-    _batch_tab(at).selectbox(key="batch_open").set_value("PLAN_13344")
+    _batch_tab(at).selectbox(key="batch_open").set_value("PLAN_3086")  # quick to solve (#99 review)
     _run(at)
     _batch_tab(at).button(key="batch_open_go").click()
     _run(at)
-    assert at.sidebar.selectbox(key="fixture").value == "13344"
-    assert any("PLAN_13344" in c.value for c in at.main.caption)
+    assert at.sidebar.selectbox(key="fixture").value == "3086"
+    assert any("PLAN_3086" in c.value for c in at.main.caption)
+
+
+def test_a_tag_with_more_than_four_plans_shows_every_plan(monkeypatch):
+    """#99 review: "open passage" has 5 plans; each gets its open button (13344 was dropped)."""
+    monkeypatch.setattr(ui, "BATCH_PATHS", (SMALL,))
+    tab = _batch_tab(_run())
+    keys = {b.key for b in tab.button if (b.key or "").startswith("tag_open_passage_")}
+    want = {f"tag_open_passage_{p}" for p in plans_by_tag(read_batch(SMALL))["open_passage"]}
+    assert len(want) == 5 and keys == want
+
+
+def test_a_header_only_csv_says_so_instead_of_failing(monkeypatch, tmp_path):
+    empty = tmp_path / "batch.csv"
+    empty.write_text(SMALL.read_text(encoding="utf-8").splitlines()[0] + "\n", encoding="utf-8")
+    monkeypatch.setattr(ui, "BATCH_PATHS", (empty,))
+    tab = _batch_tab(_run())
+    assert any("no plans" in i.value.lower() for i in tab.info) and not tab.dataframe

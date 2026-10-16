@@ -1,10 +1,10 @@
 plan_id,n_nodes,area_m2,k_lb,H,L,X,O,B,J,area_gap,submitted,rules_failed,fallback_used,ms,status,reason,tags
-PLAN_576,8,193.601,2,6,28.071,0,0.288,44,50.359,87.139,True,,,6541,ok,,"open passage;one-node ring;hubs > lower bound (+4, proven minimum);4+ hubs;disconnected groups;isolated eligible room;multi-part living"
-PLAN_1293,5,188.677,2,3,33.825,0,0.0,30,48.825,69.923,True,,,6703,ok,,"open passage;en-suite single-door;one-node ring;hubs > lower bound (+1, proven minimum)"
-PLAN_2814,4,97.155,1,2,30.469,1,0.0,28,49.469,58.868,True,,,5054,ok,,"en-suite single-door;one-node ring;hubs > lower bound (+1, proven minimum);disconnected groups;isolated eligible room"
-PLAN_3086,4,95.005,1,1,36.524,0,0.0,28,50.524,0.0,True,,,7433,ok,,open passage;en-suite single-door;hubs = lower bound
-PLAN_5088,3,49.996,1,1,20.929,1,0.0,16,33.929,0.0,True,,,3118,ok,,open passage;en-suite single-door;hubs = lower bound
-PLAN_5924,5,150.006,2,3,31.495,0,0.0,30,46.495,62.037,True,,,6345,ok,,"one-node ring;hubs > lower bound (+1, proven minimum)"
-PLAN_13344,7,91.544,2,3,43.634,3,0.153,44,80.787,69.578,True,,,10236,ok,,"open passage;one-node ring;hubs > lower bound (+1, proven minimum)"
+PLAN_576,8,193.601,2,6,28.071,0,0.288,44,50.359,87.139,True,,,6541,ok,,open_passage;one_node_ring;above_lb;many_hubs;disconnected;isolated;multi_living
+PLAN_1293,5,188.677,2,3,33.825,0,0.0,30,48.825,69.923,True,,,6703,ok,,open_passage;en_suite;one_node_ring;above_lb
+PLAN_2814,4,97.155,1,2,30.469,1,0.0,28,49.469,58.868,True,,,5054,ok,,en_suite;one_node_ring;above_lb;disconnected;isolated
+PLAN_3086,4,95.005,1,1,36.524,0,0.0,28,50.524,0.0,True,,,7433,ok,,open_passage;en_suite;lb_met
+PLAN_5088,3,49.996,1,1,20.929,1,0.0,16,33.929,0.0,True,,,3118,ok,,open_passage;en_suite;lb_met
+PLAN_5924,5,150.006,2,3,31.495,0,0.0,30,46.495,62.037,True,,,6345,ok,,one_node_ring;above_lb
+PLAN_13344,7,91.544,2,3,43.634,3,0.153,44,80.787,69.578,True,,,10236,ok,,open_passage;one_node_ring;above_lb
 PLAN_BIG,2,148.0,2,,,,,,,,False,,,41,infeasible,infeasible: room R01 is 120.0 m² > 100 m²,
 PLAN_BAD,,,,,,,,,,,False,,,3,input_error,"input_error: node N2 of R02 (bedroom_0) lies outside inner, so no cable can reach it",
