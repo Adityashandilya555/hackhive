@@ -137,3 +137,16 @@ def test_every_room_label_fits_inside_its_room(plan_id):
         assert box.y0 >= dy0 - 1 and box.y1 <= dy1 + 1, (room.id, text.get_text())
         if room.eligible:
             assert text.get_text().startswith(room.id)
+
+
+@pytest.mark.parametrize("plan_id", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_no_room_label_sits_on_its_node(plan_id):
+    """A label that falls back to the room's middle moves off the node point (#69 review, 576 R01)."""
+    plan = load_plan(FIXTURES / f"plan-{plan_id}.json")
+    fig = draw_layers(plan)
+    ax = fig.axes[0]
+    r = fig.canvas.get_renderer()
+    labels = {t.get_gid(): t.get_window_extent(r).padded(4) for t in ax.texts if t.get_gid()}
+    for n in plan.nodes:
+        x, y = ax.transData.transform(n.xy)
+        assert not labels[f"label:{n.room_id}"].contains(x, y), (n.id, n.room_id)

@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import networkx as nx
 import streamlit as st
 
-from hackhive import checker
+from hackhive import checker, graph
 from hackhive.contracts import Constraints, Plan
-from hackhive.graph import build_graph
 from hackhive.io import load_plan
 from hackhive.ui import (
     DEFAULT_FIXTURE,
@@ -31,6 +31,7 @@ from hackhive.ui import (
     room_counts,
     solution_label,
     solution_paths,
+    submission_mismatch,
     verdict_line,
     violation_line,
 )
@@ -46,32 +47,35 @@ FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
 
 
 @st.cache_data(max_entries=64, show_spinner="Loading the plan…")
-def load(source: str, key: str, content: bytes | None = None) -> Plan:
+def load(source: str, key: str, content: bytes | None = None) -> tuple[Plan, nx.Graph]:
+    """The plan and its room graph, built once: `build_graph` also fills the plan's openings,
+    door rooms and graph warnings, so both are cached together."""
     if source == UPLOAD:
         plan = plan_from_bytes(content or b"")
     elif source == RESPLAN:
         plan = load_plan(resplan_raw(RESPLAN_JSONL, key))
     else:
         plan = load_plan(fixture_path(key))
-    build_graph(plan)  # fills openings, door rooms and graph warnings into the cached plan
-    return plan
+    return plan, graph.build_graph(plan)
 
 
 @st.cache_data(max_entries=64, show_spinner="Drawing…")
-def picture(source: str, key: str, content: bytes | None = None, graph: bool = False) -> bytes:
-    plan = load(source, key, content)
+def picture(source: str, key: str, content: bytes | None = None, show: bool = False) -> bytes:
+    plan, G = load(source, key, content)
     fig = draw_layers(plan)
     ax = fig.axes[0]
-    if graph:
-        draw_graph(plan, build_graph(plan), ax)
+    if show:
+        draw_graph(plan, G, ax)
     draw_nodes(plan, ax)
     return to_png(fig)
 
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
 def checked(source: str, key: str, content: bytes | None, solution: str) -> checker.Report:
-    """`checker.report` on a solution file: the six rules, the metrics, the checklist."""
-    return checker.report(load(source, key, content), load_submission(Path(solution)), PRESET)
+    """`checker.report` on a solution file: the six rules, the metrics, the checklist. The
+    checker builds its own room graph from the plan, on purpose: it trusts nothing of ours."""
+    plan, _ = load(source, key, content)
+    return checker.report(plan, load_submission(Path(solution)), PRESET)
 
 
 # --------------------------------------------------------------------------- sidebar
@@ -117,10 +121,13 @@ def reviewer_panel(source: str, key: str, content: bytes | None, plan: Plan) -> 
         help="5088's valid submission and one broken variant per rule, from the checker's tests.",
     )
     try:
+        mismatch = submission_mismatch(load_submission(path), plan)
         rep = checked(source, key, content, str(path))
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
+    if mismatch:
+        st.warning(mismatch)
     for line in rep.lines:
         st.markdown(checklist_line(line))
     st.markdown(verdict_line(rep.verdict))
@@ -177,9 +184,12 @@ if choice is None:
 
 source, key, content = choice
 try:
-    plan = load(source, key, content)
+    plan, _ = load(source, key, content)
 except (OSError, ValueError) as e:
     st.error(f"Can't draw this plan. {e}")
+    st.stop()
+except Exception as e:  # a plan we can parse but not handle further: say so, never a traceback
+    st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
     st.stop()
 
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
@@ -187,10 +197,10 @@ drawing, panel = st.columns([5, 3], gap="large")
 with drawing:
     try:
         st.image(picture(source, key, content, show_graph), width="stretch")
-    except ValueError as e:
-        st.error(f"Can't draw this plan. {e}")
+    except Exception as e:  # drawing a plan we loaded: never a traceback
+        st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
     if plan.warnings:
-        with st.expander(f"{len(plan.warnings)} input warning(s)"):
+        with st.expander(f"{len(plan.warnings)} plan warning(s)"):
             for w in plan.warnings:
                 st.markdown(f"- {w}")
 with panel:

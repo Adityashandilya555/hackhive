@@ -890,6 +890,14 @@ def verdict(violations: Sequence[Violation]) -> str:
     return "valid (strict only)" if violations else "valid"
 
 
+def metrics_text(m: Metrics | None) -> str:
+    """`H 1 · L 24.805 m · X 0 · O 0.000 m · B 12 · J 30.805`: the one format the CLI and the
+    app's reviewer panel (#12) both print."""
+    if m is None:
+        return "not computed (non-finite coordinates)"
+    return f"H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}"
+
+
 @dataclass(frozen=True)
 class Report:
     """Everything a reviewer sees: what the CLI prints and the app's panel renders (#12)."""
@@ -953,11 +961,7 @@ def main(argv: list[str] | None = None) -> int:
     r = report(plan, sub, c)
     for line in r.lines:
         print(line)
-    m = r.metrics
-    if m is None:
-        print("metrics: not computed (non-finite coordinates)")
-    else:
-        print(f"metrics: H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}")
+    print(f"metrics: {metrics_text(r.metrics)}")
     for v in r.violations:
         print(f"rule {v.rule} [{v.severity}] {v.hub_id or 'plan'}: {v.message}")
     print(r.verdict)

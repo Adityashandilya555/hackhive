@@ -131,8 +131,12 @@ def room_counts(plan: Plan) -> str:
 
 def solution_paths(plan_id: str) -> list[Path]:
     """The hand-made solution fixtures (#11) for a test plan: `<id>-valid.json` first, then the
-    broken variants by name. Empty when the plan has none."""
-    paths = sorted(SOLUTION_DIR.glob(f"{plan_id}-*.json"))
+    broken variants by name. Empty when the plan has none. The id is matched as plain text,
+    never as a glob or a path, because an uploaded plan chooses its own id (#69 review)."""
+    if not plan_id:
+        return []
+    prefix = f"{plan_id}-"
+    paths = [p for p in SOLUTION_DIR.glob("*.json") if p.name.startswith(prefix)]
     return sorted(paths, key=lambda p: (p.stem != f"{plan_id}-valid", p.name))
 
 
@@ -149,17 +153,35 @@ def load_submission(path: Path) -> Submission:
         raise ValueError(f"can't read {path.name}: {e}") from e
 
 
+def submission_mismatch(sub: Submission, plan: Plan) -> str | None:
+    """A warning when the submission names another plan (the checker CLI warns too), else None."""
+    if sub.plan_id == plan.plan_id:
+        return None
+    return f"This submission is for {sub.plan_id}, but the plan is {plan.plan_id}."
+
+
+_MARKDOWN_SPECIALS = "\\`*_[]$~<>#|"
+
+
+def md_text(text: str) -> str:
+    """Text shown literally in Streamlit markdown: every character that could start markup, a
+    LaTeX span or end a `:red[...]` span early is backslash-escaped (#69 review)."""
+    return "".join(f"\\{ch}" if ch in _MARKDOWN_SPECIALS else ch for ch in text)
+
+
 def checklist_line(line: str) -> str:
     """One line of `checker.checklist`, verbatim; a ✗ line is also coloured red."""
-    return f":red[{line}]" if line.startswith("✗") else line
+    text = md_text(line)
+    return f":red[{text}]" if line.startswith("✗") else text
 
 
 def violation_line(v: Violation) -> str:
     """One violation as coloured markdown: red ✗ for an error, orange ⚠ for a strict-only one.
-    The rule number and the severity are always written out, so colour never carries it alone."""
+    The rule number and the severity are always written out, so colour never carries it alone.
+    The checker's own text (hub id, message) is escaped, so it can't end the span early."""
     colour, mark = ("red", "✗") if v.severity == "error" else ("orange", "⚠")
-    hub = f" · {v.hub_id}" if v.hub_id else ""
-    return f":{colour}[{mark} **Rule {v.rule}**{hub} · {v.severity}: {v.message}]"
+    hub = f" · {md_text(v.hub_id)}" if v.hub_id else ""
+    return f":{colour}[{mark} **Rule {v.rule}**{hub} · {v.severity}: {md_text(v.message)}]"
 
 
 def verdict_line(verdict: str) -> str:
@@ -172,7 +194,5 @@ def verdict_line(verdict: str) -> str:
 
 
 def metrics_line(m: checker.Metrics | None) -> str:
-    """`H 1 · L 24.805 m · X 0 · O 0.000 m · B 12 · J 30.805`, as the checker CLI prints it."""
-    if m is None:
-        return "metrics not computed (non-finite coordinates)"
-    return f"H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}"
+    """The checker CLI's metrics line, from the one shared formatter (`checker.metrics_text`)."""
+    return md_text(checker.metrics_text(m))
