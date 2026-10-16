@@ -7,12 +7,21 @@ import json
 from pathlib import Path
 from typing import Any
 
-from hackhive.contracts import Constraints, CostWeights, Plan, lower_bound
+from hackhive import checker
+from hackhive.contracts import (
+    Constraints,
+    CostWeights,
+    Plan,
+    Submission,
+    Violation,
+    lower_bound,
+)
 from hackhive.io import load_plan
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "plans"
 RAW_DIR = ROOT / "tests" / "fixtures" / "raw"
+SOLUTION_DIR = ROOT / "tests" / "fixtures" / "solutions"  # #11's hand-made submissions
 RESPLAN_JSONL = ROOT / "data" / "resplan" / "plans.jsonl"  # optional, never committed
 DEFAULT_FIXTURE = "5924"
 
@@ -105,13 +114,85 @@ def preset_rows(c: Constraints) -> list[tuple[str, str]]:
     ]
 
 
-def plan_summary(plan: Plan, c: Constraints) -> str:
-    """One line under the title: rooms, eligible area, nodes and the hub lower bound."""
-    eligible = [r for r in plan.rooms if r.eligible]
-    area = sum(r.area_m2 for r in eligible)
-    lb = lower_bound(area, len(plan.nodes), c)
-    rooms = sum(r.type != "land" for r in plan.rooms)
-    return (
-        f"{rooms} rooms ({len(eligible)} eligible) · {area:.1f} m² eligible · "
-        f"{len(plan.nodes)} nodes · at least {lb} hub{'s' if lb != 1 else ''}"
-    )
+def plan_facts(plan: Plan, c: Constraints) -> str:
+    """`150.0 m² · 5 nodes · LB 2`: eligible area, nodes and the hub lower bound (C7)."""
+    area = sum(r.area_m2 for r in plan.rooms if r.eligible)
+    return f"{area:.1f} m² · {len(plan.nodes)} nodes · LB {lower_bound(area, len(plan.nodes), c)}"
+
+
+def room_counts(plan: Plan) -> str:
+    """`8 rooms (5 eligible)`; the plot outline (`land`) isn't a room."""
+    rooms = [r for r in plan.rooms if r.type != "land"]
+    return f"{len(rooms)} rooms ({sum(r.eligible for r in rooms)} eligible)"
+
+
+# --------------------------------------------------------------------------- reviewer panel
+
+
+def solution_paths(plan_id: str) -> list[Path]:
+    """The hand-made solution fixtures (#11) for a test plan: `<id>-valid.json` first, then the
+    broken variants by name. Empty when the plan has none. The id is matched as plain text,
+    never as a glob or a path, because an uploaded plan chooses its own id (#69 review)."""
+    if not plan_id:
+        return []
+    prefix = f"{plan_id}-"
+    paths = [p for p in SOLUTION_DIR.glob("*.json") if p.name.startswith(prefix)]
+    return sorted(paths, key=lambda p: (p.stem != f"{plan_id}-valid", p.name))
+
+
+def solution_label(path: Path) -> str:
+    """`5088-hub-0.3m-from-wall.json` → `hub 0.3m from wall`."""
+    return path.stem.split("-", 1)[1].replace("-", " ")
+
+
+def load_submission(path: Path) -> Submission:
+    """A slide-8 submission file. Raises ValueError (pydantic's ValidationError is one)."""
+    try:
+        return Submission.model_validate_json(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        raise ValueError(f"can't read {path.name}: {e}") from e
+
+
+def submission_mismatch(sub: Submission, plan: Plan) -> str | None:
+    """A warning when the submission names another plan (the checker CLI warns too), else None."""
+    if sub.plan_id == plan.plan_id:
+        return None
+    return f"This submission is for {sub.plan_id}, but the plan is {plan.plan_id}."
+
+
+_MARKDOWN_SPECIALS = "\\`*_[]$~<>#|"
+
+
+def md_text(text: str) -> str:
+    """Text shown literally in Streamlit markdown: every character that could start markup, a
+    LaTeX span or end a `:red[...]` span early is backslash-escaped (#69 review)."""
+    return "".join(f"\\{ch}" if ch in _MARKDOWN_SPECIALS else ch for ch in text)
+
+
+def checklist_line(line: str) -> str:
+    """One line of `checker.checklist`, verbatim; a ✗ line is also coloured red."""
+    text = md_text(line)
+    return f":red[{text}]" if line.startswith("✗") else text
+
+
+def violation_line(v: Violation) -> str:
+    """One violation as coloured markdown: red ✗ for an error, orange ⚠ for a strict-only one.
+    The rule number and the severity are always written out, so colour never carries it alone.
+    The checker's own text (hub id, message) is escaped, so it can't end the span early."""
+    colour, mark = ("red", "✗") if v.severity == "error" else ("orange", "⚠")
+    hub = f" · {md_text(v.hub_id)}" if v.hub_id else ""
+    return f":{colour}[{mark} **Rule {v.rule}**{hub} · {v.severity}: {md_text(v.message)}]"
+
+
+def verdict_line(verdict: str) -> str:
+    """`checker.verdict` with a mark and a colour: ✓ valid, ⚠ valid (strict only), ✗ invalid."""
+    if verdict == "valid":
+        return f":green[✓ **{verdict}**]"
+    if verdict == "invalid":
+        return f":red[✗ **{verdict}**]"
+    return f":orange[⚠ **{verdict}**]"
+
+
+def metrics_line(m: checker.Metrics | None) -> str:
+    """The checker CLI's metrics line, from the one shared formatter (`checker.metrics_text`)."""
+    return md_text(checker.metrics_text(m))

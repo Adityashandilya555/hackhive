@@ -1,0 +1,3 @@
+[browser]
+# No usage statistics leave our laptops (Streamlit sends them by default).
+gatherUsageStats = false
