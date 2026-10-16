@@ -537,13 +537,15 @@ def _open_plan(plan_id: str) -> None:
     st.toast(f"Opened {plan_id}: its design is on the Best tab.")
 
 
-def _open_button(plan_id: str, key: str) -> None:
+def _open_button(plan_id: str, key: str, status: str | None = None) -> None:
+    """A batch row's open button: disabled when the app can't open the plan, or when it didn't
+    even load in the batch (`input_error`: nothing to show, #99 review)."""
     st.button(
         plan_id,
         key=key,
         on_click=_open_plan,
         args=(plan_id,),
-        disabled=open_target(plan_id) is None,
+        disabled=open_target(plan_id) is None or status == "input_error",
         help="Open this plan (a test plan, or a ResPlan id when data/resplan is here).",
     )
 
@@ -590,10 +592,12 @@ def batch_tab() -> None:
             st.caption("Submitted plans by H − LB: 0 means the fewest hubs possible.")
     with open_col:
         st.subheader("Open a plan")
-        ids = [r["plan_id"] for r in rows]
-        pick = st.selectbox("Plan", ids, key="batch_open")
-        _open_button(pick, "batch_open_go")
-        if open_target(pick) is None:
+        status = {r["plan_id"]: r["status"] for r in rows}
+        pick = st.selectbox("Plan", list(status), key="batch_open")
+        _open_button(pick, "batch_open_go", status[pick])
+        if status[pick] == "input_error":
+            st.caption("This plan didn't load in the batch, so there is nothing to open.")
+        elif open_target(pick) is None:
             st.caption("Only test plans open here, or any id once data/resplan/plans.jsonl is in.")
     columns = [c for c in BATCH_COLUMNS if c in rows[0]]  # `tags` only when the CSV has it
     st.dataframe([{c: r.get(c) for c in columns} for r in rows], hide_index=True)
@@ -708,19 +712,25 @@ def page() -> None:
 
     st.title("HackHive")
     what_if_banner(settings_c)
+    header = st.container()  # the plan's caption and chips, or why there is no plan
+    best, plan_tab, arr_tab, batch_t = st.tabs(["Best", "Plan", "Arrangements", "Batch"])
+    with batch_t:  # first, and never behind the plan: it reads a CSV, it solves nothing (#99)
+        batch_tab()
     if choice is None:
-        st.caption("Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files.")
-        st.stop()
+        with header:
+            st.caption(
+                "Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files."
+            )
+        return
 
     source, key, content = choice
     try:
         plan, G = load(source, key, content)
-    except (OSError, ValueError) as e:
-        banner(Sidecar(plan_id=key, status="input_error", reason=str(e)), None)
-        st.stop()
-    except Exception as e:  # a plan we can parse but not handle further: say so, never a traceback
-        banner(Sidecar(plan_id=key, status="input_error", reason=f"{type(e).__name__}: {e}"), None)
-        st.stop()
+    except Exception as e:  # a plan we can't read or handle: say so, never a traceback
+        reason = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
+        with header:
+            banner(Sidecar(plan_id=key, status="input_error", reason=reason), None)
+        return
 
     try:
         best_path, side_json = solved(source, key, content, settings_c.model_dump_json())
@@ -745,21 +755,19 @@ def page() -> None:
     with solution_slot:
         solution = pick_solution(plan, Path(best_path) if best_path else None, opened_path)
 
-    st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
-    try:
-        best_sub = load_submission(Path(best_path)) if best_path else None
-    except ValueError:  # a stale cached path (temp dir cleaned): the design tags just drop out
-        best_sub = None
-    if tags := case_tags(plan, G, Result(plan, best_sub, side)):
-        st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
-    best, plan_tab, arr_tab, batch_t = st.tabs(["Best", "Plan", "Arrangements", "Batch"])
+    with header:
+        st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
+        try:
+            best_sub = load_submission(Path(best_path)) if best_path else None
+        except ValueError:  # a stale cached path (temp dir cleaned): the design tags drop out
+            best_sub = None
+        if tags := case_tags(plan, G, Result(plan, best_sub, side)):
+            st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
     with best:
         is_best = solution is None or (best_path is not None and Path(best_path) == solution)
         best_tab(source, key, content, plan, G, solution, side, settings_c, counting, is_best)
     with arr_tab:
         arrangements_tab(source, key, content, plan, settings_c)
-    with batch_t:
-        batch_tab()
     with plan_tab:
         drawing, panel = st.columns([5, 3], gap="large")
         with drawing:
