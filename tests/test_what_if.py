@@ -175,3 +175,32 @@ def test_interior_window_2814_one_hub_and_never_submitted(tmp_path):
     assert "windows on interior walls as doors" in " ".join(on.sidecar.warnings)
     written = submit(on, tmp_path / "on")
     assert [p.name for p in written] == ["PLAN_2814.sidecar.json"]
+
+
+def test_interior_window_route_on_a_plan_built_with_the_default_graph():
+    """#116 review 1: `solve.route` (the gallery's Open, through `routed_submission`) builds the
+    room graph for its own settings, so a plan whose graph was built with the default (as the
+    app's `load()` hands it) still routes through the window."""
+    from hackhive.checker import check_rules
+    from hackhive.graph import build_graph
+    from hackhive.solve import enumerate as enumerate_arrangements
+    from hackhive.solve import routed_submission
+
+    on = Constraints(interior_windows_as_doors=True)
+    best = enumerate_arrangements(load_plan(PLANS / "plan-2814.json"), on)[0]
+    assert best.H == 1
+    fresh = load_plan(PLANS / "plan-2814.json")
+    build_graph(fresh)
+    sub = routed_submission(fresh, best, on)
+    assert len(sub.hubs) == 1
+    assert not [v for v in check_rules(fresh, sub, on) if v.severity == "error"]
+
+
+def test_cli_interior_windows_flag(tmp_path, capsys):
+    """#116 review nit: the CLI reaches this what-if too; 2814 gets one hub, no submission."""
+    args = ["solve", str(PLANS / "plan-2814.json"), "--out", str(tmp_path)]
+    assert cli.main([*args, "--interior-windows-as-doors"]) == 0, capsys.readouterr().out
+    assert not (tmp_path / "PLAN_2814.json").exists()
+    side = Sidecar.model_validate_json((tmp_path / "PLAN_2814.sidecar.json").read_text("utf-8"))
+    assert side.settings == Constraints(interior_windows_as_doors=True)
+    assert len(side.hubs) == 1

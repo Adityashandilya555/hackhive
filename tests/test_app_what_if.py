@@ -166,3 +166,19 @@ def test_interior_window_checkbox_resolves_2814_and_unticking_restores():
     at.sidebar.checkbox(key="wi_interior_windows_as_doors").uncheck()
     _run(at)
     assert not _what_if_banner(at) and _hubs_shown(at) == 2
+
+
+def test_interior_window_chips_follow_the_setting():
+    """#116 review 2: the case chips (and the badge and the Plan tab's room graph) read the room
+    graph for the active settings: 2814's kitchen is isolated only while the box is unticked."""
+
+    def chips(at: AppTest) -> str:
+        return "\n".join(m.value for m in at.main.markdown)
+
+    at = _pick_2814(_run())
+    assert "isolated eligible room" in chips(at)
+    at.sidebar.checkbox(key="wi_interior_windows_as_doors").check()
+    at.sidebar.toggle(key="show_graph").set_value(True)
+    _run(at)
+    assert "isolated eligible room" not in chips(at)
+    assert "disconnected groups" not in chips(at)
