@@ -21,7 +21,7 @@ The organisers' slides (all 8) win every conflict with the Honeywell text. The f
 - **Routes:** axis-aligned only.
   - They change rooms only through doors and open passages, never cross walls or windows, and never leave `inner`.
   - Each leg joins the exact node or hub point to the grid with an axis-aligned L-stub; incoming and outgoing stubs at a node use different corners.
-  - They may pass through any room, including other zones and excluded rooms. Overlaps and crossings (between rings or inside one ring) are cost, not violations.
+  - By default a ring stays in its own hub's rooms: never through an excluded room (bathroom, stair) or another hub's room (D7 in `docs/clarifying_questions.md`). This is always possible, because a zone is connected by its own doors. Allowing it is a labelled WHAT-IF, never the default. Overlaps and crossings (between rings or inside one ring) are cost, not violations.
   - In a **single-door room** the cable goes in and back out through the same door, either retracing the same line (that length counts as overlap) or as two parallel runs on different lines (no overlap, more bends). The router picks the lower J.
   - Windows drawn on interior walls are obstacles; a UI checkbox can show them as doors (WHAT-IF, never submitted).
 - **Ranking (slides 3, 6, 7):** fewest hubs H first, then the lowest **J = L + 5X + O + 0.5B** (metres; weights are the organisers' starting values, kept as settings), then the smaller assigned-area gap (max − min). The organisers' checker recomputes every metric from our polylines at 1 mm tolerance; our `checker.py` mirrors it.
