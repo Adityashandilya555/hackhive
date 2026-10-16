@@ -876,9 +876,10 @@ def label_what_if(fig: Figure, changes: Sequence[str]) -> Figure:
     so a what-if picture can't pass for a submitted design. Nothing for the preset (no changes).
     The text is white on red, and the word WHAT-IF carries it, never the colour alone."""
     if changes:
-        fig.text(
-            _MIDWAY,  # the figure's horizontal centre
-            1.0,
+        ax = fig.axes[0]  # on the drawing's own top edge: the figure's has empty space above it
+        ax.text(
+            _MIDWAY,  # the drawing's horizontal centre
+            1.01,
             "WHAT-IF: " + "; ".join(changes) + " · never submitted",
             ha="center",
             va="bottom",
@@ -887,7 +888,9 @@ def label_what_if(fig: Figure, changes: Sequence[str]) -> Figure:
             color=SURFACE,
             gid=WHAT_IF_GID,
             bbox={"boxstyle": "square,pad=0.4", "fc": STATUS_CRITICAL, "ec": "none"},
-            wrap=True,
+            transform=ax.transAxes,
+            zorder=20,
+            clip_on=False,
         )
     return fig
 
