@@ -299,10 +299,11 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 - **Responsibility:**
   - hub candidates: grid cell centres in the zone's rooms, ≥ 0.51 m from the room boundary (slide 3 rule 6 + 1 cm margin), with a fallback to ≥ 0.51 m from walls tagged `wall_clearance_only` (#14); ≥ 0.10 m from node points; a hub may share a node's room;
   - the first-cut ring (Sprint 1);
-  - the exact joint choice of hub + order: every node cycle (k!/2 ≤ 60), the hub inserted into each edge, a matrix-cost lower bound, a true routed-cost rescore in LB order, stopping at LB ≥ best;
+  - the joint choice of hub + order (`best_ring`, #20): every hub candidate × every node cycle (k!/2 ≤ 60) gets a lower bound from the `PathCache` (leg costs on the zone's grid, less each stub's slack); a shortlist is routed with `route_ring` and ranked by `RingCost` (rule-4-6 flags, then J), stopping at LB ≥ a flag-free best;
+  - the shortlist, not the full space: 3086's zone alone is 5,544 spots × 12 orders, a routed ring costs 10-350 ms, and crossings (5 each) dominate J where the bound can't see them. It holds first_ring's own pair (so it never loses to it), the 2 lowest-bound orders, and spots round-robin over the zone's rooms ≥ 0.2 m apart, up to 48 routed legs per zone;
   - Held-Karp for k ≤ 10 (the ≤ 20 what-if).
-- **In → out:** zone, `PathCache` → `Hub` (xy, ring `[H, N…, H]`).
-- **Algorithm:** exact on the cached paths. ≤ 60 × 5 evaluations per zone at k ≤ 5; ~10⁵ at k = 10.
+- **In → out:** zone, room graph, `LabelGrid` → `Hub` (xy, ring `[H, N…, H]`).
+- **Algorithm:** bounds for every (spot, order) pair with numpy; 8-24 routed rings per zone. Measured in #20 (`solve` on the 7 fixtures): 6 of 7 plans `ok` (was 1), rule-4 retrace flags 11 → 1, J lower on 6 plans; 13344's `solve` 4.0 s → 7.5 s.
 - **Enforces:** C10, C11, C15, C18; C6 (cap-20 what-if).
 - **Issues:** #14, #20, #28 (Adityashandilya555).
 - **Derived from:**

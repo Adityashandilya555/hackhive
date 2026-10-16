@@ -393,10 +393,18 @@ def _upload_raw(at: AppTest, name: str, content: bytes) -> AppTest:
     return _run(at)
 
 
-def test_banner_5924_is_strict_only_and_chips_show():
+def test_banner_5924_is_ok_and_chips_show():
+    """The default plan: ok since #20's ring choice, with its case chips."""
     at = _run()
-    assert any("strict" in w.value and "retraces" in w.value for w in at.main.warning)
+    assert any("✓" in s.value for s in at.main.success)
     assert any("one-node ring" in m.value for m in at.main.markdown)
+
+
+def test_banner_13344_is_strict_only():
+    at = _run()
+    at.sidebar.selectbox(key="fixture").set_value("13344")
+    _run(at)
+    assert any("strict" in w.value and "retrace" in w.value for w in at.main.warning)
 
 
 def test_banner_5088_is_ok():

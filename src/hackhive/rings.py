@@ -1,4 +1,5 @@
-"""Hub placement and ring order, first cut (#14; #20 makes it exact, #28 adds Held-Karp).
+"""Hub placement and ring order: a first cut on Manhattan distance (#14), and the routed choice
+over a lower-bound shortlist (#20; #28 adds Held-Karp).
 
 Grid convention (shared with #10's raster): cell k spans ``[k, k + 1) · grid_m`` on each axis,
 anchored at the plan origin, and its centre sits half a cell in, so a hub placed on a centre
@@ -11,6 +12,7 @@ import itertools
 import math
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
@@ -20,11 +22,26 @@ from shapely.geometry.base import BaseGeometry
 from hackhive.contracts import Constraints, Plan
 from hackhive.zoning import HUB_MARGIN_M, Infeasible, wall_geometry
 
+if TYPE_CHECKING:  # grid imports this module, so these are for type hints only
+    from hackhive.checker import RuleContext
+    from hackhive.grid import LabelGrid
+
 Point2 = tuple[float, float]
 
 CELL_CENTRE_OFFSET = 0.5  # not-a-weight: a cell centre is half a cell in from its edge
 NODE_KEEP_OFF_M = 0.10  # a hub may share a node's room but never its point (conventions §4)
 MAX_BRUTE_FORCE_NODES = 8  # 8! = 40,320 orders; beyond that is #28's Held-Karp
+# best_ring (#20): every ring order is bounded up to this many nodes (6!/2 = 360; the cap is 5);
+# past it (the ≤ 20-node what-if, #28) only first_ring's order is
+MAX_ORDER_NODES = 6
+SHORTLIST_ORDERS = 2  # the ring orders with the lowest bound that are routed (#20)
+# legs routed per zone: (spot, order) pairs = this // (k + 1), first_ring's own included, so a
+# one-node ring tries 24 spots (~10 ms each) and a five-node ring 8 (~0.35 s each)
+ROUTE_BUDGET_LEGS = 48
+# spots of one room and order on the shortlist sit ≥ this far apart (L∞): a hub a few cells
+# along can turn a crossing ring into a clean one (5924's one-node rings: J 7.9 → 4.0)
+SPOT_SPACING_M = 0.2
+LEG_SLOP_M = 0.01  # per leg: what squaring and cleaning a polyline can change its length by
 
 
 @dataclass(frozen=True)
@@ -46,6 +63,11 @@ class Hub:
 
 def manhattan(a: Point2, b: Point2) -> float:
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
+
+
+def manhattan_inf(a: Point2, b: Point2) -> float:
+    """The L∞ distance: the larger of the two axis offsets."""
+    return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
 
 
 def hub_candidates(zone: Collection[str], plan: Plan, c: Constraints) -> list[Candidate]:
@@ -149,3 +171,216 @@ def _centres_in(region: BaseGeometry, nodes: np.ndarray, grid_m: float) -> list[
         d = np.hypot(xs[:, None] - nodes[None, :, 0], ys[:, None] - nodes[None, :, 1])
         keep &= d.min(axis=1) >= NODE_KEEP_OFF_M
     return [(float(x), float(y)) for x, y in zip(xs[keep], ys[keep], strict=True)]
+
+
+# --------------------------------------------------------------------------- best_ring (#20)
+
+
+@dataclass(frozen=True, order=True)
+class RingCost:
+    """A routed ring's cost, compared in this order: validity first (the plan scores zero if a
+    flag stands), then J (#93 review's ranking, per ring)."""
+
+    errors: int  # this hub's rule-4-6 `error` flags (check_rules)
+    strict: int  # this hub's rule-4-6 `strict` flags: valid only if the organisers agree
+    J: float  # checker.metrics on the routed polylines, stubs and junction bends included
+
+
+@dataclass
+class _Routing:
+    """What every ring of one zone is routed and checked with: the zone's grid (D7), the
+    single-door nodes, the checker's rule context (its free space is rule 5's, so stubs and
+    checker agree) and the legs routed so far (`route._prepare`'s memo)."""
+
+    grid: LabelGrid
+    retrace_ok: frozenset[str]
+    rules: RuleContext
+    memo: dict = field(default_factory=dict)
+
+
+def _routing(zone: Collection[str], plan: Plan, grid: LabelGrid, c: Constraints) -> _Routing:
+    from hackhive.checker import RuleContext  # checker imports grid, which imports us
+    from hackhive.route import single_door_nodes, zone_grid
+
+    retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings rule 5 needs
+    return _Routing(zone_grid(grid, plan, zone, c), retrace_ok, RuleContext(plan, c))
+
+
+def _cost(hub: Hub, plan: Plan, c: Constraints, r: _Routing) -> RingCost:
+    from hackhive.checker import hub_rules, metrics  # checker imports grid, which imports us
+    from hackhive.contracts import HubOut
+    from hackhive.route import Stop, _route_ring
+
+    nodes = {n.id: n for n in plan.nodes}
+    stops = [
+        Stop(hub.hub_id, hub.location, hub.room_id),
+        *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
+    ]
+    segments, _ = _route_ring(r.grid, stops, c, r.retrace_ok, r.rules.space.free, None, r.memo)
+    out = HubOut.model_validate(
+        {
+            "hub_id": hub.hub_id,
+            "room_id": hub.room_id,
+            "location": {"x": hub.location[0], "y": hub.location[1]},
+            "assigned_rooms": hub.assigned_rooms,
+            "assigned_nodes": sorted(hub.ring[1:-1]),
+            "closed_sequence": hub.ring,
+            "route_segments": [s.model_dump(by_alias=True) for s in segments],
+            "ring_length_m": 0.0,
+        }
+    )
+    # rules 1-3 are the zoning's, the same for every ring of the zone; rules 4-6 are the ring's
+    flags = [v for v in hub_rules(out, r.rules) if v.rule >= 4]
+    return RingCost(
+        sum(v.severity == "error" for v in flags),
+        sum(v.severity == "strict" for v in flags),
+        metrics([out], c).J,
+    )
+
+
+def ring_cost(hub: Hub, plan: Plan, grid: LabelGrid, c: Constraints) -> RingCost:
+    """The hub's ring routed alone on its zone's grid (`route.route_ring`, D7), and its cost."""
+    return _cost(hub, plan, c, _routing(hub.assigned_rooms, plan, grid, c))
+
+
+def _orders(nodes: Sequence[str]) -> list[tuple[str, ...]]:
+    """Every closed ring order over ``nodes`` once: a ring and its reverse are the same cable, so
+    only the direction whose first node sorts first (k!/2 orders; one for k ≤ 2)."""
+    return [p for p in itertools.permutations(sorted(nodes)) if len(p) < 2 or p[0] <= p[-1]]
+
+
+def shortlist(
+    zone: Collection[str],
+    plan: Plan,
+    g: nx.Graph,
+    grid: LabelGrid,
+    c: Constraints,
+    hub_id: str = "H1",
+    *,
+    first: Hub | None = None,
+) -> list[tuple[float, Hub]]:
+    """The (spot, order) pairs `best_ring` routes, as (lower bound, hub), lowest bound first.
+
+    Every hub candidate (`hub_candidates`) and every ring order (k!/2) is bounded by the sum of
+    its legs' cached costs (`route.PathCache` on the zone's grid: steps and bends inside a leg,
+    in J metres), less what each leg's two stubs can save (the L1 offset of an exact point from
+    its cell centre, plus `LEG_SLOP_M`). Crossings, overlaps and bends at nodes and the hub only
+    add to J, so the bound never exceeds the routed J. They also dominate it (a crossing is 5),
+    so the bound can't prune the full space; the shortlist is the `SHORTLIST_ORDERS` orders with
+    the lowest bound, each with its lowest-bound spot in every zone room, and first_ring's own
+    pair (so `best_ring` never loses to it). The rest of the budget (`ROUTE_BUDGET_LEGS` legs,
+    so `// (k + 1)` pairs) is filled round-robin:
+    every (order, room)'s lowest-bound spot, then each one's next spot at least `SPOT_SPACING_M`
+    from those already taken, and so on, since a spot a few cells along can avoid a crossing.
+    """
+    from hackhive.route import PathCache
+
+    zone = frozenset(zone)
+    first = first or first_ring(zone, plan, g, c, hub_id=hub_id)
+    r = _routing(zone, plan, grid, c)
+    nodes = {n.id: n for n in plan.nodes if n.room_id in zone}
+    w = c.cost_weights.length
+    try:
+        node_cells = {nid: r.grid.snap(n.xy, n.room_id)[0] for nid, n in nodes.items()}
+    except ValueError:  # routing would fail on this node anyway: let route_rings say why
+        return [(-math.inf, first)]
+    spots: list[Candidate] = []
+    spot_cells = {}
+    for cand in hub_candidates(zone, plan, c):
+        try:
+            spot_cells[cand] = r.grid.snap(cand.xy, cand.room_id)[0]
+        except ValueError:
+            continue
+        spots.append(cand)
+
+    def slack(xy: Point2, cell: tuple[int, int]) -> float:
+        cx, cy = r.grid.to_xy(cell)
+        return w * (abs(xy[0] - cx) + abs(xy[1] - cy))
+
+    cache = PathCache.cached(r.grid, node_cells, c, targets=spot_cells)
+    node_slack = {nid: slack(n.xy, node_cells[nid]) for nid, n in nodes.items()}
+    spot_slack = np.array([slack(s.xy, spot_cells[s]) for s in spots])
+    hub_leg = {  # a hub leg's bound to node n, per spot (inf where unreachable)
+        nid: np.array([cache.cost_m(nid, s) for s in spots]) - spot_slack - node_slack[nid]
+        for nid in nodes
+    }
+
+    def leg(a: str, b: str) -> float:
+        return cache.cost_m(a, b) - node_slack[a] - node_slack[b]
+
+    def bounds(order: Sequence[str]) -> np.ndarray:
+        inner = sum(leg(a, b) for a, b in itertools.pairwise(order))
+        slop = w * LEG_SLOP_M * (len(order) + 1)
+        return inner + hub_leg[order[0]] + hub_leg[order[-1]] - slop
+
+    first_order = tuple(first.ring[1:-1])
+    orders = _orders(list(nodes)) if len(nodes) <= MAX_ORDER_NODES else [first_order]
+    per_order = {o: bounds(o) for o in orders} if spots else {}
+    ranked = sorted(per_order, key=lambda o: (float(per_order[o].min()), o))
+    rooms = sorted({s.room_id for s in spots})
+    picked: dict[tuple[tuple[str, ...], Candidate], float] = {}
+    at = [i for i, s in enumerate(spots) if (s.room_id, s.xy) == (first.room_id, first.location)]
+    if at:
+        picked[first_order, spots[at[0]]] = float(bounds(first_order)[at[0]])
+    else:  # its spot can't snap: route it anyway, first, so route_rings reports why
+        wc = "wall_clearance_only" in first.warnings
+        picked[first_order, Candidate(first.room_id, first.location, wc)] = -math.inf
+    queues = []  # per (order, room): its spots, lowest bound first
+    for order in ranked[:SHORTLIST_ORDERS]:
+        lb = per_order[order]
+        for room in rooms:
+            idx = [i for i, s in enumerate(spots) if s.room_id == room and math.isfinite(lb[i])]
+            queues.append((order, lb, sorted(idx, key=lambda i: (lb[i], spots[i].xy))))
+    budget = max(1, ROUTE_BUDGET_LEGS // (len(nodes) + 1))
+    taken: dict[tuple[tuple[str, ...], str], list[Point2]] = {}
+    while len(picked) < budget and any(q for _, _, q in queues):
+        for order, lb, queue in queues:
+            while queue and len(picked) < budget:
+                spot = spots[queue.pop(0)]
+                near = taken.setdefault((order, spot.room_id), [])
+                if any(manhattan_inf(spot.xy, xy) < SPOT_SPACING_M - 1e-9 for xy in near):
+                    continue
+                near.append(spot.xy)
+                picked.setdefault((order, spot), float(lb[spots.index(spot)]))
+                break
+
+    def hub(order: tuple[str, ...], spot: Candidate) -> Hub:
+        warnings = ["wall_clearance_only"] if spot.wall_clearance_only else []
+        assigned = [spot.room_id, *sorted(zone - {spot.room_id})]
+        return Hub(hub_id, spot.room_id, spot.xy, [hub_id, *order, hub_id], assigned, warnings)
+
+    keyed = sorted(picked.items(), key=lambda kv: (kv[1], kv[0][0], kv[0][1].xy))
+    return [(lb, hub(order, spot)) for (order, spot), lb in keyed]
+
+
+def best_ring(
+    zone: Collection[str],
+    plan: Plan,
+    g: nx.Graph,
+    grid: LabelGrid,
+    c: Constraints,
+    hub_id: str = "H1",
+    *,
+    prune: bool = True,
+) -> Hub:
+    """The zone's hub spot and ring order with the lowest routed cost (`RingCost`: rule-4-6 flags,
+    then J of the ring `route.route_ring` writes, stubs and junction bends included) over
+    `shortlist`. Pairs are routed in lower-bound order; with `prune`, routing stops once a
+    flag-free ring's J is ≤ the next bound, which changes nothing (the bound never exceeds J).
+    Never worse than first_ring, whose pair is on the shortlist; a pair that can't be routed is
+    skipped, and first_ring's hub comes back if none can.
+    """
+    first = first_ring(zone, plan, g, c, hub_id=hub_id)
+    r = _routing(zone, plan, grid, c)
+    best: tuple[RingCost, Hub] | None = None
+    for lb, hub in shortlist(zone, plan, g, grid, c, hub_id, first=first):
+        # a later pair costs J ≥ its bound ≥ lb and ≥ 0 flags: it can't beat a flag-free best
+        if prune and best is not None and best[0] <= RingCost(0, 0, lb):
+            break
+        try:
+            cost = _cost(hub, plan, c, r)
+        except ValueError:  # this pair can't be routed (a stub through a wall, a cut-off leg)
+            continue
+        if best is None or cost < best[0]:
+            best = (cost, hub)
+    return first if best is None else best[1]

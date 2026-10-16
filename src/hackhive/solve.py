@@ -37,7 +37,7 @@ from hackhive.contracts import (
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
 from hackhive.io import InputFormatError, load_plan
-from hackhive.rings import Hub, first_ring, manhattan
+from hackhive.rings import Hub, best_ring, first_ring, manhattan
 from hackhive.route import RoutedRing, route_rings
 from hackhive.zoning import (
     Infeasible,
@@ -260,15 +260,20 @@ def solve(
             f"too large for exact zoning: {e}; the greedy fallback (#49) is in the Backlog"
         )
 
+    try:
+        grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
+    except ValueError as e:
+        return no_design(f"grid failed: {e}")
+    # the routed choice of each zone's hub spot and ring order (#20); first_ring's is its floor
+    hubs = [
+        best_ring(zone, plan, g, grid, c, hub_id=hub.hub_id)
+        for zone, hub in zip(_zone_order(zoning), hubs, strict=True)
+    ]
     if hub_hook is not None:
         hubs = hub_hook(list(hubs))
     blocked = _hub_point_errors(plan, hubs, c)
     if blocked:
         return no_design(_rules_reason(blocked), blocked)
-    try:
-        grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
-    except ValueError as e:
-        return no_design(f"grid failed: {e}")
     try:
         rings = route_rings(grid, plan, hubs, c)
     except ValueError as e:
