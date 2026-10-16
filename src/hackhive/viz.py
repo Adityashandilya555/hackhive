@@ -911,7 +911,7 @@ _SLIDE_DPI = 200
 
 def hub_count_badge(bounds: Any) -> str:
     """`6 hubs, proven minimal against a lower bound of 2`: H against the lower bound, from the
-    sidecar's `bounds`. Seam: #22's ranking and #24's badge wording replace this text later."""
+    sidecar's `bounds` (#22's proof). #24's badge wording can replace this text."""
     h, lb = bounds.k_found, bounds.k_lb
     hubs = f"{h} hub{'' if h == 1 else 's'}"
     if h == lb:
@@ -1002,13 +1002,22 @@ def export_presentation(plan: Plan, result: Any, out_dir: str | Path) -> list[Pa
 
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    fig = draw_presentation(plan, result)
     stem = f"{file_stem(result.sidecar.plan_id)}.presentation"
-    paths = [out / f"{stem}.png", out / f"{stem}.svg"]
-    for p in paths:  # no bbox_inches="tight": it would break the 16:9 frame
-        fig.savefig(p, dpi=_SLIDE_DPI, facecolor=fig.get_facecolor())
+    png, svg = out / f"{stem}.png", out / f"{stem}.svg"
+    png.write_bytes(presentation_png(plan, result))
+    fig = draw_presentation(plan, result)
+    fig.savefig(svg, facecolor=fig.get_facecolor())
     fig.clear()
-    return paths
+    return [png, svg]
+
+
+def presentation_png(plan: Plan, result: Any) -> bytes:
+    """`draw_presentation` as PNG bytes at dpi 200: the exported file and the app's download."""
+    fig = draw_presentation(plan, result)
+    buf = io.BytesIO()  # no bbox_inches="tight": it would break the 16:9 frame
+    fig.savefig(buf, format="png", dpi=_SLIDE_DPI, facecolor=fig.get_facecolor())
+    fig.clear()
+    return buf.getvalue()
 
 
 # --------------------------------------------------------------------------- CLI

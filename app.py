@@ -53,6 +53,7 @@ from hackhive.viz import (
     draw_nodes,
     draw_solution,
     label_what_if,
+    presentation_png,
     segment_count,
     to_png,
 )
@@ -142,6 +143,17 @@ def overlay(
     fig = draw_solution(plan, sub, rep.violations, step=step)
     label_what_if(fig, what_if_changes(Constraints.model_validate_json(settings)))
     return to_png(fig)
+
+
+@st.cache_data(max_entries=64, show_spinner="Drawing the presentation image…")
+def presentation(
+    source: str, key: str, content: bytes | None, solution: str, side_json: str
+) -> bytes:
+    """`viz.presentation_png` of solve()'s design (#44): the same bytes `hackhive present`
+    writes."""
+    plan, _ = load(source, key, content)
+    side = Sidecar.model_validate_json(side_json)
+    return presentation_png(plan, Result(plan, load_submission(Path(solution)), side))
 
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
@@ -259,6 +271,17 @@ def best_tab(
         if png is not None:
             st.image(png, width="stretch")
         st.caption(step_caption(sub, step))
+        if path.is_relative_to(SOLVED_DIR):  # solve()'s design, not a hand-made fixture
+            try:
+                slide = presentation(source, key, content, str(path), side.model_dump_json())
+                st.download_button(
+                    "Download presentation image",
+                    slide,
+                    file_name=f"{file_stem(side.plan_id)}.presentation.png",
+                    mime="image/png",
+                )
+            except Exception as e:  # never a traceback on the landing tab
+                st.error(f"Can't draw the presentation image. {type(e).__name__}: {e}")
         st.subheader("Per-hub summary")
         if rep.metrics is None:
             st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
