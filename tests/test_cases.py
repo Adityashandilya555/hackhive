@@ -46,13 +46,32 @@ def test_every_case_has_a_plan():
     assert {c.id for c in ui.CASES} <= {r["case"] for r in ROWS}
 
 
-@pytest.mark.parametrize("row", ROWS, ids=[r["case"] for r in ROWS])
+def _params() -> list:
+    """One param per row. The grid-failed plan (2332, also `folded`'s) is a degenerate shape that
+    makes shapely warn `divide by zero` / `invalid value encountered in buffer`: harmless, so
+    silenced there only (#104 review)."""
+    regression = {r["plan"] for r in ROWS if r["case"] in ui.REGRESSION_CASES}
+    quiet = pytest.mark.filterwarnings("ignore:.*encountered in buffer:RuntimeWarning")
+    return [
+        pytest.param(r, id=r["case"], marks=quiet if r["plan"] in regression else ()) for r in ROWS
+    ]
+
+
+# strict-only (15333) is the slow row, ~60-90 s: solve() routes every arrangement at H and H + 1
+# looking for a clean design (#101). Speeding up `route._best_corners` is the fix, not this test.
+@pytest.mark.parametrize("row", _params())
 def test_case_plan_solves_as_expected(row):
     facts = _facts(ui.case_plan_path(row))
-    assert facts.expected() == row["expected"]
     if row["case"] not in ui.REGRESSION_CASES:  # e.g. grid failed, once #78 paints it (#84)
         case = next(c for c in ui.CASES if c.id == row["case"])
-        assert case.match(facts), f"{row['plan']} no longer shows {row['case']}"
+        assert case.match(facts), (
+            f"{row['plan']} no longer shows {row['case']}: re-pick it with the dataset, "
+            f"`{_script().DATASET_HINT}`"
+        )
+    assert facts.expected() == row["expected"], (
+        f"solve() changed {row['case']}'s expected; the plan still shows the case, so refresh "
+        "cases.json with `uv run scripts/make_cases.py` (no dataset needed)"
+    )
 
 
 def test_library_is_under_2_mb():
@@ -108,3 +127,19 @@ def test_script_repicks_a_named_plan_that_no_longer_shows_its_case(tmp_path):
     make_cases.build(jsonl, out=out, fixtures=fixtures, n=0)
     rows = {r["case"]: r for r in ui.case_rows(index)}
     assert rows["one_node_ring"]["plan"] == "case-one-node-ring-5924.json"
+
+
+def test_script_without_a_plans_file_refreshes_expected(tmp_path):
+    """#104 review: after a `solve()` change, `make_cases.py` with no `plans.jsonl` keeps every
+    named plan that still shows its case and recomputes its `expected`: no dataset needed."""
+    jsonl, out, fixtures, _ = _small_set(tmp_path)
+    make_cases = _script()
+    missing = make_cases.build(jsonl, out=out, fixtures=fixtures, n=0)
+    fresh = _snapshot(out)
+    index = out / "cases.json"
+    rows = ui.case_rows(index)
+    rows[0]["expected"]["tags"].append("stale")  # what a solve() change leaves behind
+    index.write_text(json.dumps(rows), encoding="utf-8")
+
+    assert make_cases.build(None, out=out, fixtures=fixtures, n=0) == missing
+    assert _snapshot(out) == fresh
