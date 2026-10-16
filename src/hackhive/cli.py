@@ -145,10 +145,10 @@ def _batch(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 3
-    rows = run(source, args.split, args.n, args.out, Constraints())
+    rows = run(source, args.split, args.n, args.out, Constraints(), workers=args.workers)
     print(summary(rows))
     print(f"wrote {args.out}")
-    return 0
+    return 0 if any(r["status"] != "input_error" for r in rows) else 1  # nothing loaded
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -200,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--out", type=Path, required=True, help="the CSV file; designs go beside it")
     b.add_argument(
         "--plans", type=Path, help="a .jsonl(.gz) of plans or a directory of plan JSON files"
+    )
+    b.add_argument(
+        "--workers",
+        type=int,
+        help="plans solved at once (default: up to 4 once there are 4 plans each; 1: one at a time)",
     )
     b.set_defaults(run=_batch)
     args = p.parse_args(argv)
