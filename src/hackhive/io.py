@@ -348,13 +348,24 @@ def read_layers(raw: dict, c: Constraints | None = None) -> Layers:
 
 NODE_CLEARANCE_M = 0.5  # slide 2: node clearance, 0.5 m from walls
 _GAP_EPS_M = 1e-6  # closes float-sized gaps when a folded sliver's union isn't one polygon
+_MIC_TOL_M = 1e-4  # max clearance to 0.1 mm; points that close to it count as tied
 
 
 def _mic(g: Any) -> tuple[tuple[float, float], float]:
-    """g's max-clearance point and its distance to g's boundary (any parts: the largest circle)."""
-    line = shapely.maximum_inscribed_circle(g)
-    x, y = line.coords[0]
-    return (float(x), float(y)), float(line.length)
+    """g's max-clearance point and its distance to g's boundary (any parts: the largest circle).
+
+    Many rooms have a plateau of equally clear points (a rectangle's centre line), and GEOS picks
+    a different one on macOS arm64 than on Linux (up to 0.73 m apart, #38), so take the plateau's
+    centre: a function of the geometry alone, the same on every platform.
+    """
+    line = shapely.maximum_inscribed_circle(g, _MIC_TOL_M)
+    r = line.length
+    top = g.buffer(-(r - _MIC_TOL_M)) if r > _MIC_TOL_M else shapely.Point()
+    if top.is_empty:
+        p = shapely.Point(line.coords[0])
+    else:
+        p = top.centroid if top.contains(top.centroid) else top.point_on_surface()
+    return (float(p.x), float(p.y)), float(g.boundary.distance(p))
 
 
 def _node_spot(room: Polygon, obstacles: Any) -> tuple[tuple[float, float], float]:
