@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from hackhive.contracts import Constraints, Sidecar
+from hackhive.contracts import Constraints, Sidecar, Violation
 from hackhive.graph import build_graph
 from hackhive.io import load_plan
 from hackhive.solve import solve
@@ -68,6 +68,25 @@ def test_banner_strict_only_5924_names_its_retraces():
     kind, text = status_banner(res.sidecar, plan)
     assert kind == "warning"
     assert "3 retraces" in text and "Q2" in text
+
+
+def test_banner_strict_only_names_each_rule_present():
+    """#90 review: a rule-6-only strict design names rule 6 and Q4, never "0 retraces"."""
+    hub = Violation(rule=6, severity="strict", message="H1 0.450 m from R01's edge")
+    kind, text = status_banner(
+        Sidecar(plan_id="P", status="submitted_strict_only", violations=[hub]), None
+    )
+    assert kind == "warning"
+    assert "1 hub" in text and "rule 6" in text and "Q4" in text
+    assert "retrace" not in text and "Q2" not in text
+
+
+def test_banner_strict_only_says_one_retrace_in_the_singular():
+    retrace = Violation(rule=4, severity="strict", message="N1 retrace")
+    _, text = status_banner(
+        Sidecar(plan_id="P", status="submitted_strict_only", violations=[retrace]), None
+    )
+    assert "1 retrace " in text and "rule 4" in text and "Q2" in text
 
 
 def test_banner_room_over_100_names_the_room_and_area():
