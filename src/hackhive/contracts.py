@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 from pydantic.dataclasses import dataclass
 from shapely.geometry import MultiPolygon, Polygon
 
@@ -56,9 +56,28 @@ class Constraints(BaseModel):
     def problem_statement(cls) -> Constraints:
         return cls()
 
+    @computed_field  # type: ignore[prop-decorator]
     @property
     def is_problem_statement(self) -> bool:
-        return self == Constraints.problem_statement()
+        """True only for the organisers' preset. Written to the JSON (#30: a WHAT-IF sidecar says
+        `false`), never read from it: it's recomputed from the settings on every load."""
+        return self.model_dump(exclude={"is_problem_statement"}) == _PRESET_FIELDS
+
+    @model_validator(mode="before")
+    @classmethod
+    def _flag_is_output_only(cls, data: Any) -> Any:
+        """A written sidecar reads back; a flag that disagrees with its settings is an error."""
+        if not isinstance(data, dict) or "is_problem_statement" not in data:
+            return data
+        data = dict(data)
+        claimed = data.pop("is_problem_statement")
+        actual = cls(**data).is_problem_statement
+        if claimed is not actual:
+            raise ValueError(f"is_problem_statement is {claimed}, but these settings give {actual}")
+        return data
+
+
+_PRESET_FIELDS = Constraints.model_construct().model_dump(exclude={"is_problem_statement"})
 
 
 # Summed polygon areas carry float noise (100 m² can come out as 100.00000000001). Every
@@ -261,7 +280,8 @@ SCHEMAS: dict[str, type[BaseModel]] = {
 def render_schemas() -> dict[str, str]:
     out = {}
     for name, model in SCHEMAS.items():
-        schema: dict[str, Any] = model.model_json_schema(by_alias=True)
+        # what we write (mode="serialization"): settings' read-only is_problem_statement (#30)
+        schema: dict[str, Any] = model.model_json_schema(by_alias=True, mode="serialization")
         out[name] = json.dumps(schema, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     return out
 

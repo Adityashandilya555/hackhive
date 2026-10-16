@@ -393,11 +393,33 @@ def _upload_raw(at: AppTest, name: str, content: bytes) -> AppTest:
     return _run(at)
 
 
-def test_banner_13344_is_strict_only_and_chips_show():
-    # 13344 keeps a two-door retrace; 5924's went with #81's parallel runs
-    at = _pick(_run(), "13344")
-    assert any("strict" in w.value and "retrace" in w.value for w in at.main.warning)
+def test_banner_5924_is_ok_and_chips_show():
+    """The default plan: ok since #20's ring choice, with its case chips."""
+    at = _run()
+    assert any("✓" in s.value for s in at.main.success)
     assert any("one-node ring" in m.value for m in at.main.markdown)
+
+
+def test_banner_strict_only_shows_in_the_app(monkeypatch):
+    """solve() made strict-only, so the UI path is pinned without pinning a fixture's routing
+    (#95 review)."""
+    import hackhive.solve
+    from hackhive.contracts import Violation
+
+    real = hackhive.solve.solve
+
+    def strict_only(plan, c=None, **kw):
+        res = real(plan, c, **kw)
+        retrace = Violation(rule=4, severity="strict", hub_id="H1", message="N1 retrace (#46 Q5)")
+        side = res.sidecar.model_copy(
+            update={"status": "submitted_strict_only", "violations": [retrace]}
+        )
+        return type(res)(res.plan, res.submission, side)
+
+    monkeypatch.setattr(hackhive.solve, "solve", strict_only)
+    content = (PLANS / "plan-5088.json").read_bytes() + b"\n\n\n "  # a fresh cache key
+    at = _upload_raw(_run(), "strict.json", content)
+    assert any("strict" in w.value and "1 retrace" in w.value for w in at.main.warning)
 
 
 def test_banner_5088_is_ok():

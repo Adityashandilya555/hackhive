@@ -762,13 +762,19 @@ class _Prepared:
 
 
 def _prepare(
-    grid: LabelGrid, stops: Sequence[Stop], c: Constraints, occupancy: Occupancy | None = None
+    grid: LabelGrid,
+    stops: Sequence[Stop],
+    c: Constraints,
+    occupancy: Occupancy | None = None,
+    memo: dict[tuple[Cell, Cell], list[Cell]] | None = None,
 ) -> _Prepared:
     """Snap every stop to its cell and route every leg on the grid (one search per stop).
 
     With ``occupancy``, each leg pays ``overlap_weight_cells(c)`` per use of an occupied cell edge
     and ``crossing_weight_cells`` per cable it crosses or T-touches (#82), and is committed once
-    routed, so later legs, this ring's own included, see it (#80)."""
+    routed, so later legs, this ring's own included, see it (#80). Without it, ``memo`` keeps each
+    leg's path by its (from, to) cells for the next ring on the same grid: the search is
+    deterministic, so a kept path is the one it would find (#20)."""
     if len(stops) < 2:
         raise ValueError(f"a ring needs at least 2 stops, got {len(stops)}")
     tol = c.tolerance_m
@@ -789,9 +795,15 @@ def _prepare(
     cols = grid.labels.shape[1]
     paths, routed = [], []
     for a, b in zip(snapped, [*snapped[1:], snapped[0]], strict=True):
-        pen = occupancy.step_costs(w_overlap, cols, w_cross, {b.cell}) if occupancy else None
-        found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
-        cells = path_to(found, b.cell)
+        kept = memo is not None and occupancy is None
+        if kept and (a.cell, b.cell) in memo:
+            cells = memo[a.cell, b.cell]
+        else:
+            pen = occupancy.step_costs(w_overlap, cols, w_cross, {b.cell}) if occupancy else None
+            found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
+            cells = path_to(found, b.cell)
+            if kept:
+                memo[a.cell, b.cell] = cells
         if not cells:
             raise ValueError(f"{a.stop.id}→{b.stop.id} unreachable")
         if occupancy is not None:
@@ -986,15 +998,17 @@ def _route_ring(
     retrace_ok: Collection[str],
     free: shapely.Geometry | None,
     occupancy: Occupancy | None,
+    memo: dict[tuple[Cell, Cell], list[Cell]] | None = None,
 ) -> tuple[list[RouteSegment], list[list[Cell]]]:
-    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed).
+    """`route_ring`, plus each leg's grid path in cells (what `occupancy` committed); `memo` as
+    in `_prepare`.
 
     In pass 0 (no `occupancy`), a ring whose legs share a cell edge is routed twice: (a) every
     leg on its own shortest path, so legs may share a line (a retrace, scored as O), and (b)
     with a fresh `Occupancy` of its own legs, so a leg takes a parallel line a cell away when
     J's overlap costs more than its bends. The lower ring J wins; (a) on a tie
     (decision_conventions §5, #81)."""
-    prep = _prepare(grid, stops, c, occupancy)
+    prep = _prepare(grid, stops, c, occupancy, memo)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
     j, best = _best_corners(prep, options)
     if occupancy is None and _shares_an_edge(prep.cells):
@@ -1091,6 +1105,24 @@ class Routing:
     best: int  # the index of `rings`' snapshot
 
 
+def zone_grid(
+    grid: LabelGrid, plan: Plan, rooms: Collection[str], c: Constraints = _DEFAULT
+) -> LabelGrid:
+    """The grid one zone's ring is routed on (D7, #79): its own rooms, plus a bathroom or stair
+    that alone joins two of them under the `zone_links_via_excluded` WHAT-IF (#46 Q2); the
+    whole grid under `route_through_other_rooms`."""
+    from hackhive.graph import build_graph
+
+    if c.route_through_other_rooms:
+        return grid
+    zone = set(rooms)
+    if c.zone_links_via_excluded:
+        edges = build_graph(plan, c).edges(data=True)
+        via = [d["via"] for a, b, d in edges if d["kind"] == "via_excluded" and {a, b} <= zone]
+        zone = zone.union(*via)
+    return own_rooms_grid(grid, zone)
+
+
 def route_rings(
     grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
 ) -> list[RoutedRing]:
@@ -1118,14 +1150,9 @@ def route_passes(
     never above pass 0's unless pass 0 has more `error` or `strict` flags.
     """
     from hackhive.checker import _free_space  # checker imports grid, which imports us
-    from hackhive.graph import build_graph
 
     if passes < 0:
         raise ValueError(f"passes must be >= 0, got {passes}")
-    # a zone may be joined only through a bathroom/stair (#46 Q2); its ring needs that room
-    edges = build_graph(plan, c).edges(data=True) if c.zone_links_via_excluded else []
-    via = [(a, b, d["via"]) for a, b, d in edges if d["kind"] == "via_excluded"]
-
     retrace_ok = single_door_nodes(plan, c)  # its build_graph fills the openings _free_space needs
     free = _free_space(plan, c).free  # rule 5's own geometry, so stubs and checker agree
     nodes = {n.id: n for n in plan.nodes}
@@ -1137,12 +1164,7 @@ def route_passes(
                 *(Stop(n, nodes[n].xy, nodes[n].room_id) for n in hub.ring[1:-1]),
             ]
         )
-        if c.route_through_other_rooms:
-            grids.append(grid)
-        else:
-            zone = set(hub.assigned_rooms)
-            rooms = zone.union(*(v for a, b, v in via if a in zone and b in zone))
-            grids.append(own_rooms_grid(grid, rooms))
+        grids.append(zone_grid(grid, plan, hub.assigned_rooms, c))
 
     def route(i: int, occupancy: Occupancy | None) -> tuple[list[RouteSegment], list[list[Cell]]]:
         try:

@@ -37,8 +37,9 @@ from hackhive.contracts import (
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
 from hackhive.io import InputFormatError, load_plan
-from hackhive.rings import Hub, first_ring, manhattan
+from hackhive.rings import Hub, best_ring, first_ring, manhattan
 from hackhive.route import RoutedRing, route_rings
+from hackhive.what_if import what_if_note
 from hackhive.zoning import (
     Infeasible,
     TooLarge,
@@ -81,7 +82,8 @@ def _name_notes(plan_id: str) -> list[str]:
 @dataclass(frozen=True)
 class Result:
     """One plan's outcome. `submission` is the design (None if none was built); `submit` writes
-    it only when `sidecar.status` allows."""
+    it only when `sidecar.status` allows and the settings are the problem statement: a WHAT-IF
+    design is shown, never submitted (#30, C29)."""
 
     plan: Plan | None
     submission: Submission | None
@@ -89,10 +91,16 @@ class Result:
 
     @property
     def submittable(self) -> bool:
-        return self.submission is not None and self.sidecar.status in (
-            "ok",
-            "submitted_strict_only",
+        return (
+            self.submission is not None
+            and self.sidecar.status in ("ok", "submitted_strict_only")
+            and self.sidecar.settings.is_problem_statement
         )
+
+    @property
+    def what_if(self) -> bool:
+        """The settings leave the problem statement (#30): never a submission."""
+        return not self.sidecar.settings.is_problem_statement
 
 
 # --------------------------------------------------------------------------- stages
@@ -234,6 +242,8 @@ def solve(
     area, nodes = eligible_area_and_nodes(plan)
     k_lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
     notes = [*plan.warnings, *_fold_notes(plan), *_name_notes(plan.plan_id)]
+    if note := what_if_note(c):  # #30: labelled, and `Result.submittable` keeps it unwritten
+        notes.insert(0, note)
     base = {"warnings": notes, "folded_parts": list(plan.folded_parts), "frame": plan.frame}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
@@ -260,15 +270,20 @@ def solve(
             f"too large for exact zoning: {e}; the greedy fallback (#49) is in the Backlog"
         )
 
+    try:
+        grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
+    except ValueError as e:
+        return no_design(f"grid failed: {e}")
+    # the routed choice of each zone's hub spot and ring order (#20); first_ring's is its floor
+    hubs = [
+        best_ring(zone, plan, g, grid, c, hub_id=hub.hub_id)
+        for zone, hub in zip(_zone_order(zoning), hubs, strict=True)
+    ]
     if hub_hook is not None:
         hubs = hub_hook(list(hubs))
     blocked = _hub_point_errors(plan, hubs, c)
     if blocked:
         return no_design(_rules_reason(blocked), blocked)
-    try:
-        grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
-    except ValueError as e:
-        return no_design(f"grid failed: {e}")
     try:
         rings = route_rings(grid, plan, hubs, c)
     except ValueError as e:

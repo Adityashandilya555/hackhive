@@ -100,6 +100,32 @@ def test_constraints_frozen_and_hashable():
         c.max_nodes = 20
 
 
+def test_settings_json_says_whether_it_is_the_problem_statement():
+    """#30: the sidecar's `settings` carry `is_problem_statement`, true only for the preset."""
+    assert json.loads(Constraints().model_dump_json())["is_problem_statement"] is True
+    what_if = json.loads(Constraints(max_area_m2=400).model_dump_json())
+    assert what_if["is_problem_statement"] is False
+
+
+@pytest.mark.parametrize("c", [Constraints(), Constraints(hub_wall_clearance_m=0.3)])
+def test_settings_json_reads_back(c):
+    """A written sidecar reads back: the flag is output only, recomputed from the settings."""
+    assert Constraints.model_validate_json(c.model_dump_json()) == c
+
+
+def test_settings_json_with_a_false_flag_is_rejected():
+    """A hand-edited flag that disagrees with the settings is an error, never trusted."""
+    raw = json.loads(Constraints(max_area_m2=400).model_dump_json())
+    raw["is_problem_statement"] = True
+    with pytest.raises(ValidationError, match="is_problem_statement"):
+        Constraints.model_validate(raw)
+
+
+def test_sidecar_schema_lists_the_flag():
+    schema = json.loads((ROOT / "schemas" / "sidecar.schema.json").read_text(encoding="utf-8"))
+    assert "is_problem_statement" in schema["$defs"]["Constraints"]["properties"]
+
+
 def test_zone_links_via_excluded_default_false():
     assert Constraints().zone_links_via_excluded is False
     assert not Constraints(zone_links_via_excluded=True).is_problem_statement

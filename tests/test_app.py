@@ -66,12 +66,13 @@ def test_starts_with_fixture_5924_drawn():
 
 def test_problem_statement_is_locked_at_the_organisers_values():
     at = _run()
-    locked = {w.key: w for w in at.sidebar.number_input}
+    # the locked panel's own inputs; #30's What-if expander adds editable ones beside it
+    locked = {w.key: w for w in at.sidebar.number_input if w.key.startswith("ps_")}
     assert locked["ps_max_area_m2"].value == 100
     assert locked["ps_max_nodes"].value == 5
     assert locked["ps_hub_wall_clearance_m"].value == pytest.approx(0.5)
     assert locked["ps_tolerance_mm"].value == pytest.approx(1)
-    assert all(w.disabled for w in locked.values())
+    assert len(locked) == 4 and all(w.disabled for w in locked.values())
     text = _sidebar_text(at)
     assert "J = L + 5X + O + 0.5B" in text
     assert "100 m²" in text and "5 nodes" in text

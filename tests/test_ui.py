@@ -63,15 +63,14 @@ def test_banner_ok_5088():
     assert kind == "success" and "✓" in text and "ok" in text
 
 
-def test_banner_strict_only_13344_names_its_retraces():
-    # 13344 keeps a two-door retrace; 5924's went with #81's parallel runs
-    plan, _, res = _case("13344")
-    kind, text = status_banner(res.sidecar, plan)
+def test_banner_strict_only_names_its_retraces():
+    """A strict-only sidecar of its own, so the test doesn't move each time a fixture's routing
+    improves (5924, then 13344; #95 review)."""
+    retrace = Violation(rule=4, severity="strict", hub_id="H1", message="N1 retrace (#46 Q5)")
+    side = Sidecar(plan_id="P", status="submitted_strict_only", violations=[retrace] * 2)
+    kind, text = status_banner(side, None)
     assert kind == "warning"
-    # the count is the sidecar's own rule-4 flags (#80's rip-up passes change it)
-    n = sum(v.rule == 4 and v.severity == "strict" for v in res.sidecar.violations)
-    assert n >= 1
-    assert f"{n} retrace" in text and "Q2" in text
+    assert "2 retraces" in text and "rule 4" in text and "Q2" in text
 
 
 def test_banner_strict_only_names_each_rule_present():
