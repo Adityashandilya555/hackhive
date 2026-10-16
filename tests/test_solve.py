@@ -248,13 +248,13 @@ def test_cli_check_exits_1_on_an_error(capsys):
 
 
 def test_cli_check_strict_only_exits_0_with_strict_lines(capsys):
-    """C26, C43: strict-only exits 0 and prints `STRICT (rule n, #46 Qm):`; 2 on request."""
+    """C26, C43: strict-only exits 0 and prints `STRICT (rule n, #46 Qm):`; 4 on request."""
     args = ["check", str(PLANS / "plan-5088.json"), str(SOLUTIONS / "5088-retrace-two-door.json")]
     assert cli.main(args) == 0
     out = capsys.readouterr().out
     strict = [line for line in out.splitlines() if line.startswith("STRICT ")]
     assert strict and all(line.startswith("STRICT (rule 4, #46 Q5): ") for line in strict)
-    assert cli.main([*args, "--fail-on-strict"]) == 2
+    assert cli.main([*args, "--fail-on-strict"]) == 4  # not 2: argparse's usage error (#72)
 
 
 def test_cli_check_on_an_unreadable_submission_exits_3(tmp_path, capsys):

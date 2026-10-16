@@ -17,6 +17,9 @@ from hackhive.io import load_plan
 # Which open organiser question each strict reading waits on (decision_conventions §6):
 # rule 4's same-line retrace is #46 Q5, rule 6's distance to a door or open-passage edge #46 Q3.
 STRICT_QUESTION = {4: "Q5", 6: "Q3"}
+# `check --fail-on-strict` on a strict-only submission. Not 2: argparse exits 2 on a usage error,
+# and a CI step must tell "strict only" from "called wrong" (#72 review).
+STRICT_EXIT = 4
 _QUESTION = re.compile(r"#46 (Q\d+)")
 
 
@@ -34,7 +37,7 @@ def _utf8() -> None:
 
 
 def _solve(args: argparse.Namespace) -> int:
-    from hackhive.solve import solve_file, submit
+    from hackhive.solve import file_stem, solve_file, submit
     from hackhive.viz import draw_layers, draw_nodes, draw_solution, to_png
 
     if not args.plan.is_file():
@@ -50,7 +53,7 @@ def _solve(args: argparse.Namespace) -> int:
         else:
             fig = draw_layers(result.plan)
             draw_nodes(result.plan, fig.axes[0])
-        png = Path(args.out) / f"{side.plan_id}.png"
+        png = Path(args.out) / f"{file_stem(side.plan_id)}.png"
         png.write_bytes(to_png(fig))
         written.append(png)
     summary = f"{side.plan_id}: {side.status}"
@@ -88,7 +91,7 @@ def _check(args: argparse.Namespace) -> int:
     print(r.verdict)
     if r.verdict == "invalid":
         return 1
-    return 2 if r.violations and args.fail_on_strict else 0
+    return STRICT_EXIT if r.violations and args.fail_on_strict else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,8 +99,8 @@ def main(argv: list[str] | None = None) -> int:
 
     solve: exit 0 when a submission was written (strict-only too), 1 when only the sidecar was,
     3 when the plan file doesn't exist. check: exit 1 on any `error`, 0 when valid (strict-only
-    too; each strict reading printed `STRICT (rule n, #46 Qm):`), 2 for strict-only under
-    `--fail-on-strict`, 3 when a file can't be read.
+    too; each strict reading printed `STRICT (rule n, #46 Qm):`), 4 for strict-only under
+    `--fail-on-strict`, 3 when a file can't be read, 2 for a usage error (argparse).
     """
     _utf8()
     p = argparse.ArgumentParser(prog="hackhive", description="PS4 floor-plan network planner.")
@@ -110,7 +113,7 @@ def main(argv: list[str] | None = None) -> int:
     k.add_argument("plan", type=Path, help="the plan JSON file")
     k.add_argument("submission", type=Path, help="the slide-8 submission JSON file")
     k.add_argument(
-        "--fail-on-strict", action="store_true", help="exit 2 when only strict violations exist"
+        "--fail-on-strict", action="store_true", help="exit 4 when only strict violations exist"
     )
     k.set_defaults(run=_check)
     args = p.parse_args(argv)

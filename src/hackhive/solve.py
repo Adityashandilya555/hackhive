@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,22 @@ from hackhive.zoning import (
 )
 
 HubHook = Callable[[list[Hub]], list[Hub]]
+
+_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]")
+
+
+def file_stem(plan_id: str) -> str:
+    """The file name a plan's outputs use. Organiser ids are kept verbatim in the submission, but
+    one like `../x`, `A/B` or `A:B` would write outside `out_dir` or crash on Windows (#72
+    review): every other character becomes `_`, leading dots go, and an empty result is `plan`."""
+    return _UNSAFE.sub("_", plan_id).lstrip(".") or "plan"
+
+
+def _name_notes(plan_id: str) -> list[str]:
+    stem = file_stem(plan_id)
+    if stem == plan_id:
+        return []
+    return [f"plan_id {plan_id!r} isn't a safe file name: files are written as {stem}.*"]
 
 
 @dataclass(frozen=True)
@@ -106,7 +123,7 @@ def _pick(
                 continue
             try:
                 cost, hubs = _first_cut(zoning, plan, g, c)
-            except Infeasible as e:
+            except (Infeasible, ValueError) as e:  # ValueError: order_ring past 8 nodes (#28)
                 reasons.append(str(e))
                 continue
             if best is None or cost < best[0] - 1e-9:
@@ -207,7 +224,8 @@ def solve(
     provenance = provenance or Provenance(version=__version__)
     area, nodes = eligible_area_and_nodes(plan)
     k_lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
-    base = {"warnings": list(plan.warnings), "folded_parts": list(plan.folded_parts)}
+    notes = [*plan.warnings, *_name_notes(plan.plan_id)]
+    base = {"warnings": notes, "folded_parts": list(plan.folded_parts)}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
         side = _sidecar(
@@ -237,7 +255,11 @@ def solve(
     if blocked:
         return no_design(_rules_reason(blocked), blocked)
     try:
-        rings = route_rings(LabelGrid.from_plan(plan, cell_m=c.grid_m), plan, hubs, c)
+        grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
+    except ValueError as e:
+        return no_design(f"grid failed: {e}")
+    try:
+        rings = route_rings(grid, plan, hubs, c)
     except ValueError as e:
         return no_design(f"routing failed: {e}")
 
@@ -269,7 +291,7 @@ def solve(
             )
             for h in sub.hubs
         ],
-        warnings=[*plan.warnings, *(f"{h.hub_id}: {w}" for h in hubs for w in h.warnings)],
+        warnings=[*notes, *(f"{h.hub_id}: {w}" for h in hubs for w in h.warnings)],
         folded_parts=list(plan.folded_parts),
     )
     return Result(plan, sub, side)
@@ -289,12 +311,14 @@ def solve_file(path: str | Path, c: Constraints | None = None) -> Result:
     try:
         plan = load_plan(path, c)
     except (InputFormatError, ValueError) as e:
+        pid = _plan_id_of(data, path)
         side = _sidecar(
-            _plan_id_of(data, path),
+            pid,
             c,
             provenance,
             status="input_error",
             reason=f"input_error: {e}",
+            warnings=_name_notes(pid),
         )
         return Result(None, None, side)
     return solve(plan, c, provenance=provenance)
@@ -315,16 +339,16 @@ def _plan_id_of(data: bytes, path: Path) -> str:
 
 def submit(result: Result, out_dir: str | Path) -> list[Path]:
     """Write `<plan_id>.json` only if the design has no `error` violation, and always
-    `<plan_id>.sidecar.json` (C43). Returns the paths written."""
+    `<plan_id>.sidecar.json` (C43), named by `file_stem`. Returns the paths written."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    pid = result.sidecar.plan_id
+    stem = file_stem(result.sidecar.plan_id)
     written = []
     if result.submittable:
-        path = out / f"{pid}.json"
+        path = out / f"{stem}.json"
         path.write_text(result.submission.model_dump_json(indent=2) + "\n", encoding="utf-8")
         written.append(path)
-    path = out / f"{pid}.sidecar.json"
+    path = out / f"{stem}.sidecar.json"
     path.write_text(result.sidecar.model_dump_json(indent=2) + "\n", encoding="utf-8")
     written.append(path)
     return written
