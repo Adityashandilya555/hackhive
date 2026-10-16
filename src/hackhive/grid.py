@@ -1,7 +1,8 @@
 """The 10 cm label raster the router searches (#10, ADR-003).
 
 Labels: −1 is blocked (walls, windows, the front door, outside ``inner``); ``0 … R−1`` are the
-plan's rooms in ``plan.rooms`` order; ``R + k`` are doors, then openings. Every door id is
+plan's rooms in ``plan.rooms`` order; ``R + k`` are doors (then any interior windows read as
+doors, #31 WHAT-IF), then openings. Every door id is
 above every room id, which ``route.search`` enforces.
 
 Which two rooms a passage joins is #9's call (``build_graph`` fills ``Door.rooms`` and
@@ -27,6 +28,7 @@ from shapely.geometry import Polygon
 from shapely.geometry.base import BaseGeometry
 
 from hackhive.contracts import Constraints, Door, Opening, Plan
+from hackhive.graph import passage_doors, window_id
 from hackhive.rings import CELL_CENTRE_OFFSET
 from hackhive.route import BLOCKED, Cell
 
@@ -84,7 +86,9 @@ class LabelGrid:
             if room.type not in NOT_PAINTED:
                 labels[inside(room.polygon)] = i
         never_passable = np.zeros_like(labels, dtype=bool)
-        for geom in [*plan.windows, *plan.front_doors]:
+        as_doors = {w.id for w in plan.window_doors}  # #31: windows read as doors (WHAT-IF)
+        shut = [w for i, w in enumerate(plan.windows) if window_id(i) not in as_doors]
+        for geom in [*shut, *plan.front_doors]:
             never_passable |= inside(geom)
         for geom in plan.walls:
             labels[inside(geom)] = BLOCKED
@@ -94,11 +98,12 @@ class LabelGrid:
         n_rooms = len(plan.rooms)
         index = {r.id: i for i, r in enumerate(plan.rooms)}
         # (id, geometry, named rooms); labels R + k follow this order: doors, then openings
+        doors = passage_doors(plan)
         passages: list[tuple[str, BaseGeometry, tuple[str, str] | None]] = [
-            (d.id, door_gap(d, plan, g), d.rooms) for d in plan.doors
+            (d.id, door_gap(d, plan, g), d.rooms) for d in doors
         ]
         passages += [(o.id, o.polygon, o.rooms) for o in openings]
-        n_doors = len(plan.doors)
+        n_doors = len(doors)
         under: dict[int, np.ndarray] = {}  # what each passage was painted over
         painted: dict[int, np.ndarray] = {}  # the cells each passage was given
         windowed: set[int] = set()  # passages a window or the front door cuts into

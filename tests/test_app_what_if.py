@@ -138,3 +138,31 @@ def test_counting_toggle_shows_both_readings_without_a_banner():
     tables = [d.value for d in at.main.dataframe if "Reading" in d.value.columns]
     assert len(tables) == 1
     assert list(tables[0]["Reading"]) == ["strict (ours)", "lenient"]
+
+
+# --------------------------------------------------------------------------- #31 interior windows
+
+
+def _pick_2814(at: AppTest) -> AppTest:
+    at.sidebar.selectbox(key="fixture").set_value("2814")
+    return _run(at)
+
+
+def _hubs_shown(at: AppTest) -> int:
+    """The hubs of the design the app draws (the submission, or a WHAT-IF display copy)."""
+    return len(json.loads(_shown_solution(at).read_text(encoding="utf-8"))["hubs"])
+
+
+def test_interior_window_checkbox_resolves_2814_and_unticking_restores():
+    """#31, C29, C37: ticking the checkbox re-solves 2814 with one hub under the WHAT-IF banner;
+    unticking restores the preset's two hubs and no banner."""
+    at = _pick_2814(_run())
+    assert not _what_if_banner(at) and _hubs_shown(at) == 2
+    at.sidebar.checkbox(key="wi_interior_windows_as_doors").check()
+    _run(at)
+    (text,) = _what_if_banner(at)
+    assert "windows on interior walls as doors" in text
+    assert _hubs_shown(at) == 1
+    at.sidebar.checkbox(key="wi_interior_windows_as_doors").uncheck()
+    _run(at)
+    assert not _what_if_banner(at) and _hubs_shown(at) == 2

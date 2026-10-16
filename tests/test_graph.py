@@ -350,3 +350,71 @@ def test_single_door_rooms_on_the_fixtures():
         and sorted(g.nodes[n]["type"] for n in g.neighbors(r.id)) == ["balcony", "living"]
     ]
     assert balcony_bed and not set(balcony_bed) & single_door_rooms(g)
+
+
+# --------------------------------------------------------------------------- #31 interior windows
+
+WINDOWS_ON = Constraints(interior_windows_as_doors=True)
+
+
+def test_interior_window_off_keeps_2814_kitchen_isolated():
+    """#31, C14: the strict default never links rooms through a window."""
+    plan, G = fixture(2814)
+    kitchen = room_by_label(plan, "kitchen_0").id
+    assert G.degree(kitchen) == 0
+    assert plan.window_doors == []
+    assert not any(d["kind"] == "window_door" for _, _, d in G.edges(data=True))
+
+
+def test_interior_window_on_joins_2814_kitchen_to_living():
+    """#31, C37: with the setting on, 2814's living–kitchen window is a `window_door` edge whose
+    `door_ids` point at the window."""
+    plan = load_plan(FIXTURES / "plans" / "plan-2814.json")
+    G = build_graph(plan, WINDOWS_ON)
+    kitchen, living = (room_by_label(plan, x).id for x in ("kitchen_0", "living_0"))
+    assert G.has_edge(kitchen, living)
+    edge = G.edges[kitchen, living]
+    assert edge["kind"] == "window_door"
+    (wid,) = edge["door_ids"]
+    (wd,) = [w for w in plan.window_doors if w.id == wid]
+    assert set(wd.rooms) == {kitchen, living}
+    assert nx.number_connected_components(eligible_graph(G)) == 1
+
+
+def test_interior_window_never_counts_balcony_or_exterior_windows():
+    """#31: only windows between two interior rooms count; balcony and outer windows stay shut."""
+    for pid in PLAN_IDS:
+        plan = load_plan(FIXTURES / "plans" / f"plan-{pid}.json")
+        build_graph(plan, WINDOWS_ON)
+        types = {r.id: r.type for r in plan.rooms}
+        for w in plan.window_doors:
+            assert w.rooms is not None
+            assert all(types[r] not in ("balcony", *OUTDOOR) for r in w.rooms), (pid, w.id)
+
+
+def test_interior_window_setting_off_again_resets_the_plan():
+    """build_graph is safe to call again: turning the setting off drops the window doors."""
+    plan = load_plan(FIXTURES / "plans" / "plan-2814.json")
+    build_graph(plan, WINDOWS_ON)
+    assert plan.window_doors
+    G = build_graph(plan)
+    assert plan.window_doors == []
+    assert G.degree(room_by_label(plan, "kitchen_0").id) == 0
+
+
+def test_interior_window_is_painted_as_a_door_and_routable():
+    """#31: `LabelGrid` paints the window as a door region, so the kitchen can be reached."""
+    plan = load_plan(FIXTURES / "plans" / "plan-2814.json")
+    build_graph(plan, WINDOWS_ON)
+    grid = LabelGrid.from_plan(plan)
+    (wd,) = plan.window_doors
+    label = len(plan.rooms) + grid.passage_ids.index(wd.id)
+    assert label in grid.door_rooms
+    kitchen, living = (room_by_label(plan, x) for x in ("kitchen_0", "living_0"))
+    a = next(n for n in plan.nodes if n.room_id == living.id)
+    b = next(n for n in plan.nodes if n.room_id == kitchen.id)
+    cell_a, _ = grid.snap(a.xy, a.room_id)
+    cell_b, _ = grid.snap(b.xy, b.room_id)
+    from hackhive.route import path_to
+
+    assert path_to(search(grid.labels, grid.door_rooms, [cell_a], 0.0), cell_b)

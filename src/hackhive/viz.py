@@ -425,6 +425,7 @@ def _clear_point(room: Room, ax: Axes, renderer: Any) -> Point:
 _KNOWN_LINKS = {
     "door": ({"color": LINK_DOOR, "ls": "-"}, "through a door"),
     "opening": ({"color": LINK_OPENING, "ls": "--"}, "open passage"),
+    "window_door": ({"color": LINK_OTHER, "ls": "-"}, "window read as a door (WHAT-IF)"),
     "via_excluded": ({"color": LINK_OTHER, "ls": ":"}, "via an excluded room"),
 }
 
@@ -437,7 +438,7 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
     silently. Adds a "Room graph" legend."""
     node_at = {n.room_id: Point(n.xy) for n in plan.nodes}
     rooms = {r.id: r for r in plan.rooms}
-    doors = {d.id: d.polygon for d in plan.doors}
+    doors = {d.id: d.polygon for d in [*plan.doors, *plan.window_doors]}
     renderer = _renderer(ax.figure)
     hollow = {
         r: _clear_point(rooms[r], ax, renderer)
@@ -454,7 +455,7 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
         kind = str(d.get("kind"))
         style, name = _KNOWN_LINKS.get(kind, ({"color": LINK_OTHER, "ls": "-."}, kind))
         seen[kind] = (style, name)
-        if kind == "door":
+        if kind in ("door", "window_door"):
             vias = [(i, _anchor(doors[i])) for i in d.get("door_ids", []) if i in doors]
         elif kind == "opening":
             vias = [("opening", _anchor(d["region"]))]
