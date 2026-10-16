@@ -18,13 +18,13 @@
     "case": "strict_only",
     "title": "Strict-only design",
     "look_for": "orange banner: valid only if the organisers allow the strict readings (Q2, Q4)",
-    "plan": "case-strict-only-13693.json",
+    "plan": "case-strict-only-15333.json",
     "expected": {
       "status": "submitted_strict_only",
-      "k_found": 1,
+      "k_found": 2,
       "tags": [
         "open_passage",
-        "en_suite",
+        "one_node_ring",
         "lb_met"
       ]
     }
