@@ -96,9 +96,10 @@ If code and this page disagree, fix whichever is wrong, then update this page in
 ## 7. Ranking
 | Edge case | Decision | Source | Enforced by |
 |---|---|---|---|
-| Order | valid designs only (C39). Fewest hubs H, then lowest J, then the **smaller assigned-area gap**, then our zone signature (internal determinism only) | slides 3, 6; C16, C47 | `metrics.rank_key` |
-| "Assigned-area gap" | **max − min of the hubs' assigned eligible area**; a single hub has gap 0 (Adi, 2026-10-15) ⚠ #46 Q6 | slides 3, 6; C47 | `metrics.area_gap` · `test_metrics::area_gap` |
-| Equal J | compared after rounding to 1e-6 m, so float noise never decides | convention | `metrics.rank_key` |
+| Order | valid designs only (C39). Fewest hubs H, then lowest J, then the **smaller assigned-area gap**, then our zone signature (internal determinism only) | slides 3, 6; C16, C47 | `solve.rank_key` · `test_solve -k rank_key` |
+| "Assigned-area gap" | **max − min of the hubs' assigned eligible area**; a single hub has gap 0 (Adi, 2026-10-15) ⚠ #46 Q6 | slides 3, 6; C47 | `checker.area_gap` · `test_checker_metrics -k area_gap` |
+| Equal J | compared after rounding to 1e-6 m, so float noise never decides | convention | `solve.rank_key` |
+| Unclear counting rules | each arrangement is scored under both readings (strict, lenient) and ranked by its **worse** J, so the submitted design's worse J is lowest | D3; C17, C40 | `solve.Arrangement.J` · `test_solve::test_rank_key_uses_the_worse_counting_reading` |
 
 ## 8. Output and submission
 | Edge case | Decision | Source | Enforced by · test |
@@ -113,6 +114,6 @@ If code and this page disagree, fix whichever is wrong, then update this page in
 | `length_m`, `ring_length_m`, `total_length_m` | computed by the mirror from the polylines (slide 8's own numbers check out: 4.8 = 2.4 + 2.4; 7.1 = 1.0 + 1.0 + 5.1; 23.8 + 25.2 = 49.0); ignored by the organisers' checker, but always consistent | slides 6, 8; C42, C48 | mirror |
 | Id scope | hub, node and room ids are plan-global (H1, H2…; N1…N6; R01…), never per-hub | slide 8; C48 | `io.py`, `solve.py` |
 | `reported_metrics` | `hub_count` = number of hubs; `total_length_m` = the sum of `ring_length_m` | slide 8 | mirror |
-| A design that fails the checker mirror | a three-step gate: submit the clean design (`status: ok`); else the best design whose only violations are `strict` (`submitted_strict_only`); else no submission (`infeasible`, with the reasons). Unreadable input gives `input_error` | slide 6; C43 | `solve.submit` · `test_solve::gate` |
+| A design that fails the checker mirror | a three-step gate over the ranked arrangements: submit the first clean one in rank order, **even at more hubs**, but at most one hub count above the first design with no `error` (`status: ok`; Adi, 2026-10-16, #22 review); else the best-ranked one whose only violations are `strict` (`submitted_strict_only`); else, after the walking skeleton, no submission (`infeasible`, with the reasons). The sidecar's `arrangement` names the one used and why better-ranked ones weren't. Unreadable input gives `input_error` | slide 6; C43 | `solve.solve`, `solve.submit` · `test_solve -k "falls_back or writes_no_submission or strict_only"` |
 | Overlay | zones, hub and node IDs, visiting order, full rings with the return leg, drawn from the submitted polylines exactly (×k on same-line stretches); **violations in red** (from the mirror); per-hub summary | slide 3; C23 | `viz.py` |
 | Final-presentation visual | a per-plan PNG/SVG export with the overlay + summary + J breakdown | slide 8; C45 | `viz.export_presentation` |
