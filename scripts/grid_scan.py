@@ -6,11 +6,14 @@
 A plan is rejected at load (bad input, such as rooms outside `inner`) or by the raster (a door
 or passage it can't paint), each with its reason. `--solve` also runs `solve` and prints each
 plan's status. Exit code 1 if the raster fails any plan. Independent of the batch report (#32).
+Plans are checked on `--workers` processes (default: `hackhive.batch.plan_workers`; #103),
+printed in sample order.
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import random
 import re
@@ -18,10 +21,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from hackhive.graph import build_graph
-from hackhive.grid import LabelGrid
-from hackhive.io import load_plan
-from hackhive.solve import solve
+from hackhive.batch import plan_workers
+from hackhive.parallel import map_in_order
+from hackhive.scans import grid_check
 
 
 def _kind(msg: str) -> str:
@@ -37,6 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--seed", type=int, default=11)
     p.add_argument("--ids", help="comma-separated plan ids to scan instead of a sample")
     p.add_argument("--solve", action="store_true", help="also solve each plan, print its status")
+    p.add_argument("--workers", type=int, help="processes (default: up to 4; 1: one at a time)")
     args = p.parse_args(argv)
 
     lines = args.plans.read_text().splitlines()
@@ -47,21 +50,20 @@ def main(argv: list[str] | None = None) -> int:
         raws = [json.loads(line) for line in random.Random(args.seed).sample(lines, args.n)]
     rejected: list[tuple[str, str]] = []
     failed: list[tuple[str, str]] = []
-    for raw in raws:
+    procs = plan_workers(args.workers, len(raws))  # > 1: no zone pool inside a plan worker
+    check = functools.partial(
+        grid_check, solve_plan=args.solve, solve_workers=1 if procs > 1 else None
+    )
+    for raw, (load_error, grid_error, solved) in zip(
+        raws, map_in_order(check, raws, procs), strict=True
+    ):
         pid = str(raw.get("id"))
-        try:
-            plan = load_plan(raw)
-        except ValueError as e:
-            rejected.append((pid, str(e)))
-            continue
-        build_graph(plan)
-        try:
-            LabelGrid.from_plan(plan)
-        except ValueError as e:
-            failed.append((pid, str(e)))
-        if args.solve:
-            side = solve(plan).sidecar
-            print(f"{pid}\tsolve: {side.status}" + (f" ({side.reason})" if side.reason else ""))
+        if load_error is not None:
+            rejected.append((pid, load_error))
+        if grid_error is not None:
+            failed.append((pid, grid_error))
+        if solved is not None:
+            print(solved)
     for what, rows in (("input error", rejected), ("grid failed", failed)):
         for pid, msg in rows:
             print(f"{pid}\t{what}: {msg}")
