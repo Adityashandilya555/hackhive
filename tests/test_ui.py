@@ -3,11 +3,10 @@
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 
 from hackhive.contracts import Constraints, Sidecar, Violation
 from hackhive.graph import build_graph
-from hackhive.io import load_plan
-from hackhive.solve import solve
 from hackhive.ui import case_tags, status_banner
 
 PLANS = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "plans"
@@ -15,9 +14,8 @@ C = Constraints.problem_statement()
 
 
 def _case(pid: str):
-    plan = load_plan(PLANS / f"plan-{pid}.json")
-    G = build_graph(plan)
-    return plan, G, solve(plan, C)
+    result = solved(pid)  # one solve per fixture for the session
+    return result.plan, build_graph(result.plan), result
 
 
 def _labels(pid: str) -> list[str]:
