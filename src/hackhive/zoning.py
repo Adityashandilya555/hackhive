@@ -26,7 +26,7 @@ from hackhive.contracts import AREA_EPS_M2, Constraints, Plan, lower_bound
 Zone = frozenset[str]
 Zoning = tuple[Zone, ...]
 
-MAX_COMPONENT_ROOMS = 16  # beyond this, solve falls back to greedy zoning (#49, #40)
+MAX_COMPONENT_ROOMS = 16  # beyond this: no submission, a "too large" sidecar (D8; #49 Backlog)
 # Rooms alone don't bound the work: a 16-room grid of doors has ~1M zonings, and #20/#22
 # route and rank every one. ResPlan's maximum is 116, so this only stops pathological plans.
 MAX_ZONINGS = 5_000
