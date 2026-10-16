@@ -7,6 +7,9 @@ organisers' slide-8 submission plus a sidecar that explains the design.
 - What we build and the rules: [`AGENTS.md`](AGENTS.md), [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Output files, statuses, warnings and J: [`docs/output-format.md`](docs/output-format.md)
 - Every edge case: [`docs/decision_conventions.md`](docs/decision_conventions.md)
+- The organisers' problem statement, all 8 slides: [`docs/problem-statement/`](docs/problem-statement/)
+- The ResPlan data (provenance, schema, units, profile): [`docs/dataset/`](docs/dataset/)
+- Final-presentation images of the seven fixture plans: [`docs/presentations/`](docs/presentations/)
 
 ## Install
 
@@ -44,7 +47,7 @@ uv run hackhive batch --plans tests/fixtures/plans --n 3 --out out/batch.csv
 Without `--plans`, `batch` reads `data/sample/test-100.jsonl.gz`, else `data/resplan/plans.jsonl`,
 and keeps the `--split` (default `test`) listed in a `split.json` beside it. `data/` is not committed:
 for a full run, put ResPlan (below) there as `data/resplan/plans.jsonl`, one plan per line, with its
-`split.json` beside it.
+`split.json` beside it ([how](docs/dataset/README.md#getting-the-plans)).
 
 Every arrangement of a plan, ranked (#22: fewest hubs, then the worse J of the two counting
 readings, then the area gap). J here is pass 0's, each ring routed alone; `solve` submits the first
