@@ -59,7 +59,7 @@ def test_a_plus_crossing_counts_under_both():
     a = ring((0, 2), [[(0, 2), (4, 2)], [(4, 2), (4, 6), (0, 6), (0, 2)]], hub_id="H1")
     b = ring((2, 0), [[(2, 0), (2, 4)], [(2, 4), (8, 4), (8, 0), (2, 0)]], hub_id="H2")
     strict, lenient = both([a, b])
-    assert strict.X == lenient.X == 1
+    assert strict.X == lenient.X == 2  # (2, 2) and (4, 4): two real crossings
 
 
 def test_a_t_touch_counts_only_strict():
