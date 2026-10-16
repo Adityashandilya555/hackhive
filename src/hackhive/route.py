@@ -198,9 +198,8 @@ def _heading(a: Cell, b: Cell) -> Cell:
 
 # --------------------------------------------------------------------------- rings (#15)
 
-# shortcut: every corner combination is scored, up to 4 options × 5 stops; a bigger ring (the
-# ≤ 20-node what-if, #28) picks corners greedily one stop at a time. Revisit with #19/#28.
-MAX_CORNER_COMBOS = 4**5
+# shortcut: every corner combination is scored (≤ 4 options per stop, so ≤ 4⁵ rings at 5 nodes);
+# the ≤ 20-node what-if (#28) will need a per-stop or greedy choice (#19).
 
 
 @dataclass(frozen=True)
@@ -293,6 +292,9 @@ def _square_up(points: Sequence[Point2], tol: float) -> list[Point2]:
     is squared by moving its next point onto the previous one's coordinate, forwards from the
     first point and then backwards from the last, so the neighbouring run follows the exact
     point by ≤ tol. Pieces shorter than tol become zero-length and are dropped.
+
+    shortcut: a straight run pinned by both ends to different coordinates (two near-aligned
+    stops on one straight grid piece) keeps a sub-mm skew, which the checker tolerates.
     """
     p = [list(q) for q in points]
     n = len(p)
@@ -424,12 +426,7 @@ def route_ring(
             out.append(cache[key])
         return out
 
-    if math.prod(map(len, options)) <= MAX_CORNER_COMBOS:
-        best = min(itertools.product(*options), key=lambda choice: _score(prep, legs(choice)))
-    else:  # greedy, one stop at a time (see MAX_CORNER_COMBOS)
-        best = [opts[0] for opts in options]
-        for i, opts in enumerate(options):
-            best[i] = min(opts, key=lambda o: _score(prep, legs([*best[:i], o, *best[i + 1 :]])))
+    best = min(itertools.product(*options), key=lambda choice: _score(prep, legs(choice)))
     return _segments(prep, best)
 
 
