@@ -9,6 +9,7 @@ the quick loop, never that it is skipped by the full run.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
 
 import pytest
@@ -62,9 +63,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Under `pytest -n`, `solve()` routes its zones inline instead of in its own process pool:
-    the test workers already fill every core, and forking a pool inside an xdist worker (a
-    process with threads) can stall on Linux. A test that passes `workers=` explicitly still
-    gets its pool."""
-    if os.environ.get("PYTEST_XDIST_WORKER"):
+    """Under `pytest -n` where pools fork (Linux), `solve()` routes its zones inline instead of in
+    its own process pool: forking a pool inside an xdist worker (a process with threads) stalled
+    Ubuntu CI for minutes. Windows and macOS spawn their workers, so they keep the pool: inline,
+    13344 in the app took over 180 s on a busy Windows runner (#107, #108, #111's CI). A test that
+    passes `workers=` explicitly always gets its pool."""
+    if os.environ.get("PYTEST_XDIST_WORKER") and multiprocessing.get_start_method() == "fork":
         parallel.default_workers = lambda: 1
