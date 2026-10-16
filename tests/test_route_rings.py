@@ -36,7 +36,7 @@ C = Constraints()
 TOL = C.tolerance_m
 
 
-def _route(plan_id: str) -> SimpleNamespace:
+def _route(plan_id: str, c: Constraints = C) -> SimpleNamespace:
     plan = load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
     G = build_graph(plan, C)
     g = eligible_graph(G)
@@ -46,7 +46,7 @@ def _route(plan_id: str) -> SimpleNamespace:
     zoning = next(z for z in zonings if len(z) == k)
     hubs = [first_ring(zone, plan, g, C, hub_id=f"H{i}") for i, zone in enumerate(zoning, 1)]
     grid = LabelGrid.from_plan(plan)
-    rings = route_rings(grid, plan, hubs, C)
+    rings = route_rings(grid, plan, hubs, c, zones=list(zoning))
     return SimpleNamespace(plan=plan, G=G, zoning=zoning, hubs=hubs, grid=grid, rings=rings)
 
 
@@ -394,6 +394,110 @@ def test_errors_name_the_stop_or_leg(routed):
 def test_each_module_imports_on_its_own(module):
     """Trap 2: route imports neither grid nor checker at the top (they import route)."""
     subprocess.run([sys.executable, "-c", f"import {module}"], check=True)
+
+
+# --------------------------------------------------------------------------- own rooms (D7, #79)
+
+
+def _length_inside(polyline, polygon) -> float:
+    """Metres of the polyline strictly inside the polygon (shrunk 1 mm, so a run along a shared
+    edge or through a door in the wall doesn't count)."""
+    return shapely.LineString(polyline).intersection(polygon.buffer(-TOL)).length
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_own_rooms_every_fixture(routed, plan_id):
+    """C33: by default no ring runs inside an excluded room or another hub's room."""
+    case = routed[plan_id]
+    for ring, zone in zip(case.rings, case.zoning, strict=True):
+        for room in case.plan.rooms:
+            if room.id in zone:
+                continue
+            inside = sum(_length_inside(s.polyline, room.polygon) for s in ring.segments)
+            assert inside <= TOL, f"{ring.hub_id} runs {inside:.3f} m inside {room.id}"
+
+
+def _detour_plan():
+    """bedroom | bathroom | bedroom on top, each bedroom with a door to the bathroom, and a
+    living room along the bottom with a door into each bedroom (1 unit = 0.1 m)."""
+    from shapely.geometry import MultiPolygon, mapping
+
+    walls = [
+        *(box(-2, 48, 10, 50), box(20, 48, 80, 50), box(90, 48, 102, 50)),
+        *(box(40, 48, 42, 70), box(40, 80, 42, 102), box(62, 48, 64, 70), box(62, 80, 64, 102)),
+    ]
+    doors = [box(40, 70, 42, 80), box(62, 70, 64, 80), box(10, 48, 20, 50), box(80, 48, 90, 50)]
+    geoms = {
+        "bedroom": MultiPolygon([box(0, 50, 40, 100), box(64, 50, 100, 100)]),
+        "bathroom": box(42, 50, 62, 100),
+        "living": box(0, 0, 100, 48),
+        "wall": MultiPolygon(walls),
+        "door": MultiPolygon(doors),
+    }
+    raw = {"id": "SYN", "area": 100.0, "wall_depth": 2.0, "inner": mapping(box(0, 0, 100, 100))}
+    plan = load_plan(raw | {k: mapping(g) for k, g in geoms.items()})
+    rooms = {r.label: r for r in plan.rooms}
+    node = {n.room_id: n for n in plan.nodes}
+    return plan, rooms, node
+
+
+def _detour_hub(plan, rooms, node, zone, hub_room, ring_rooms):
+    from hackhive.rings import Hub
+
+    x, y = node[rooms[hub_room].id].xy
+    nodes = [node[rooms[r].id].id for r in ring_rooms]
+    return Hub("H1", rooms[hub_room].id, (x + 1.0, y), ["H1", *nodes, "H1"]), [
+        {rooms[r].id for r in zone}
+    ]
+
+
+def test_own_rooms_detour_vs_whatif():
+    """C17, C33: the shortest bedroom → bedroom leg cuts through the bathroom; by default the
+    ring goes round through the living room, and with the WHAT-IF it takes the bathroom."""
+    plan, rooms, node = _detour_plan()
+    hub, zones = _detour_hub(
+        plan, rooms, node, ["living_0", "bedroom_0", "bedroom_1"], "living_0",
+        ["bedroom_0", "bedroom_1", "living_0"],
+    )  # fmt: skip
+    grid = LabelGrid.from_plan(plan)
+    bath = rooms["bathroom_0"].polygon
+    own = route_rings(grid, plan, [hub], C, zones=zones)[0]
+    loose = route_rings(
+        grid, plan, [hub], Constraints(route_through_other_rooms=True), zones=zones
+    )[0]
+    assert sum(_length_inside(s.polyline, bath) for s in own.segments) <= TOL
+    assert sum(_length_inside(s.polyline, bath) for s in loose.segments) > 1.0
+    assert loose.ring_length_m < own.ring_length_m
+
+
+def test_own_rooms_flag_is_whatif():
+    """C29: allowing cable through other rooms is not the problem statement."""
+    assert Constraints().route_through_other_rooms is False
+    assert Constraints(route_through_other_rooms=True).is_problem_statement is False
+
+
+def test_own_rooms_unreachable_raises():
+    """Two bedrooms joined only through rooms outside the zone: no silent fallback."""
+    plan, rooms, node = _detour_plan()
+    hub, zones = _detour_hub(
+        plan, rooms, node, ["bedroom_0", "bedroom_1"], "bedroom_0", ["bedroom_0", "bedroom_1"]
+    )
+    grid = LabelGrid.from_plan(plan)
+    with pytest.raises(ValueError, match="D7"):
+        route_rings(grid, plan, [hub], C, zones=zones)
+    whatif = Constraints(route_through_other_rooms=True)
+    assert route_rings(grid, plan, [hub], whatif, zones=zones)[0].ring_length_m > 0
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_own_rooms_j_unchanged(routed, plan_id):
+    """C13, C17: no fixture ring used another room before, so J is the same with the WHAT-IF
+    on, and rule 5 still passes."""
+    case = routed[plan_id]
+    loose = _route(plan_id, Constraints(route_through_other_rooms=True))
+    j = metrics(submission(case).hubs, C).J
+    assert metrics(submission(loose).hubs, C).J == pytest.approx(j, abs=TOL)
+    assert not [v for v in check_rules(case.plan, submission(case), C) if v.rule == 5]
 
 
 # --------------------------------------------------------------------------- see it
