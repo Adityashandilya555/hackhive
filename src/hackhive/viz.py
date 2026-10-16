@@ -11,7 +11,7 @@ from __future__ import annotations
 import argparse
 import io
 import sys
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,12 +20,16 @@ from matplotlib.axes import Axes
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
-from matplotlib.patches import PathPatch
+from matplotlib.patches import Patch, PathPatch
 from matplotlib.path import Path as MplPath
-from shapely.geometry import Point, Polygon
+from matplotlib.transforms import Bbox
+from shapely.geometry import LineString, Point, Polygon
 from shapely.geometry.base import BaseGeometry
+from shapely.ops import unary_union
 
-from hackhive.contracts import Plan, Room
+from hackhive import checker
+from hackhive.contracts import Plan, Room, Submission, Violation
+from hackhive.io import get_geometries
 
 # --------------------------------------------------------------------------- palette
 # Neutral inks and fills (the dataviz reference chrome), so the categorical slots stay free for
@@ -46,6 +50,16 @@ FRONT_DOOR_FILL = "#8a5a2b"  # slide 5's brown entrance bar
 LINK_DOOR = "#2a78d6"
 LINK_OPENING = "#008300"
 LINK_OTHER = INK_SECONDARY  # via an excluded room (a what-if setting only)
+# The solution overlay (#17). Zones take the validated categorical slots 1-7 in fixed order (the
+# dataviz reference palette: every hard check passes; three slots sit below 3:1 contrast, so each
+# zone also carries its hub id and a summary row). Slot 8, red, is left out on purpose: red is
+# reserved for violations (the status palette), so a zone can never look like an error. Past seven
+# hubs the colours repeat with a hatch, never as new hues.
+ZONE_COLOURS = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6")
+ZONE_ALPHA = 0.22
+STATUS_CRITICAL = "#d03b3b"  # an `error` violation
+STATUS_SERIOUS = "#ec835a"  # a `strict`-only violation
+RING_LW = 2.0
 
 ELIGIBLE = ("living", "bedroom", "kitchen", "storage")
 EXCLUDED = ("bathroom", "balcony", "stair", "garden", "pool", "parking", "land")
@@ -322,7 +336,8 @@ _NODE_LABEL_SPOTS = (
 
 
 def _avoid(ax: Axes, renderer: Any) -> list[Any]:
-    """Display boxes overlays must keep clear of: room labels, the "Entrance" tag, node dots."""
+    """Display boxes overlays must keep clear of: room labels, the "Entrance" tag, node and hub
+    markers."""
     if renderer is None:
         return []
     texts = [
@@ -333,7 +348,7 @@ def _avoid(ax: Axes, renderer: Any) -> list[Any]:
     dots = [
         ln.get_window_extent(renderer)
         for ln in ax.lines
-        if (ln.get_gid() or "").startswith("node:")
+        if (ln.get_gid() or "").startswith(("node:", "hub:"))
     ]
     return texts + dots
 
@@ -494,6 +509,311 @@ def draw_graph(plan: Plan, G: Any, ax: Axes) -> None:
     )
 
 
+def _place_label(
+    ax: Axes, xy: tuple[float, float], text: str, taken: list[Any], renderer: Any, **style: Any
+) -> Any:
+    """`text` next to `xy`, at the first of `_NODE_LABEL_SPOTS` that overlaps nothing in `taken`
+    (the last spot if all do); its box is added to `taken`."""
+    for k, (offset, ha, va) in enumerate(_NODE_LABEL_SPOTS):
+        label = ax.annotate(
+            text, xy, xytext=offset, textcoords="offset points", ha=ha, va=va, **style
+        )
+        if renderer is None:
+            return label
+        box = label.get_window_extent(renderer)
+        if k == len(_NODE_LABEL_SPOTS) - 1 or not any(box.overlaps(t) for t in taken):
+            taken.append(box)
+            return label
+        label.remove()
+    raise AssertionError("unreachable")
+
+
+def _zone_style(i: int) -> tuple[str, str | None]:
+    """Hub i's colour, and a hatch once the seven slots are used up (never a new hue)."""
+    return ZONE_COLOURS[i % len(ZONE_COLOURS)], (None if i < len(ZONE_COLOURS) else "//")
+
+
+# where along a leg its number may sit, tried in this order (fractions of the leg's length)
+_MIDWAY = 0.5  # not-a-weight: half-way along a leg
+_ORDER_SPOTS = (_MIDWAY, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.12, 0.88)
+_ORDER_R = 9  # px: half the side of a number's circle, for the overlap test
+_MARK_R = 7  # px: half the side of a ✗ violation marker's box
+
+
+def draw_solution(
+    plan: Plan,
+    solution: Submission,
+    violations: Sequence[Violation] = (),
+    step: int | None = None,
+    ax: Axes | None = None,
+) -> Figure:
+    """The slide-5 overlay (#17) on the base layer:
+
+    - each hub's rooms tinted in its zone colour; its hub as a square labelled H1…;
+    - every node with its id; each ring in its zone colour, drawn from the **submitted polylines
+      exactly** (no offset lanes), with its visit order circled on each leg, the last number on
+      the return leg;
+    - a same-line stretch that k ≥ 2 legs share (`checker.overlap_stretches`, the stretches O
+      counts) drawn once, dashed, marked ×k; real parallel runs are just two lines;
+    - every violation in red (orange when only `strict`) at its `where`, labelled with its rule,
+      and a hub-point violation turns that hub's square red;
+    - a "How to read" legend with only what is drawn.
+
+    `step` draws only the first `step` legs of each ring (#25's step-through).
+    """
+    fig = draw_layers(plan, ax)
+    ax = fig.axes[0] if ax is None else ax
+    renderer = _renderer(fig)
+    rooms = {r.id: r for r in plan.rooms}
+    hubs = list(solution.hubs)
+    colour = {h.hub_id: _zone_style(i) for i, h in enumerate(hubs)}
+
+    # zones
+    for h in hubs:
+        c, hatch = colour[h.hub_id]
+        for rid in dict.fromkeys(h.assigned_rooms):
+            if rid in rooms:
+                ax.add_patch(
+                    _patch(
+                        rooms[rid].polygon,
+                        facecolor=c,
+                        alpha=ZONE_ALPHA,
+                        edgecolor="none",
+                        hatch=hatch,
+                        zorder=1.5,
+                        gid=f"zone:{h.hub_id}:{rid}",
+                    )
+                )
+
+    # legs, and the same-line stretches they share
+    legs: list[tuple[str, int, list[tuple[float, float]]]] = []
+    for h in hubs:
+        segments = h.route_segments if step is None else h.route_segments[: max(step, 0)]
+        for j, s in enumerate(segments, start=1):
+            pts = checker.clean_polyline(s.polyline)
+            if len(pts) >= 2:
+                legs.append((h.hub_id, j, pts))
+    stretches = checker.overlap_stretches([p for _, _, p in legs], [o for o, _, _ in legs])
+    tol = checker.TOL
+    cut = unary_union([LineString(st.ends).buffer(tol, cap_style="flat") for st in stretches])
+    for hub_id, j, pts in legs:
+        line = LineString(pts)
+        rest = line.difference(cut) if stretches else line
+        for piece in get_geometries(rest):
+            if isinstance(piece, LineString) and piece.length > 2 * tol:
+                xs, ys = piece.xy
+                ax.plot(
+                    xs,
+                    ys,
+                    color=colour[hub_id][0],
+                    lw=RING_LW,
+                    solid_capstyle="round",
+                    zorder=5,
+                    gid=f"ring:{hub_id}:{j}",
+                )
+    for i, st in enumerate(stretches):
+        (x0, y0), (x1, y1) = st.ends
+        ax.plot(
+            [x0, x1],
+            [y0, y1],
+            color=colour[st.owners[0]][0] if len(st.owners) == 1 else INK,
+            lw=RING_LW,
+            ls="--",
+            zorder=5,
+            gid=f"overlap:{i}",
+        )
+        ax.annotate(
+            f"×{st.k}",
+            ((x0 + x1) / 2, (y0 + y1) / 2),
+            xytext=(0, 6),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=_LABEL_PT - 1,
+            color=INK,
+            zorder=8,
+            gid=f"overlap-label:{i}",
+            bbox={"boxstyle": "round,pad=0.12", "fc": SURFACE, "ec": "none", "alpha": 0.9},
+        )
+
+    # hubs (red when the hub point itself breaks rule 6), then nodes, then the hub ids
+    bad_hub = {
+        v.hub_id for v in violations if v.rule == checker.HUB_POINT and v.severity == "error"
+    }
+    for h in hubs:
+        red = h.hub_id in bad_hub
+        ax.plot(
+            [h.location.x],
+            [h.location.y],
+            marker="s",
+            ms=10,
+            mfc=STATUS_CRITICAL if red else colour[h.hub_id][0],
+            mec=STATUS_CRITICAL if red else INK,
+            mew=1.4,
+            ls="none",
+            zorder=9,
+            gid=f"hub:{h.hub_id}",
+        )
+    draw_nodes(plan, ax)
+    # one list of everything drawn so far that later labels and numbers must keep clear of;
+    # every annotation below appends to it in draw order
+    taken = _avoid(ax, renderer) + [
+        t.get_window_extent(renderer)
+        for t in ax.texts
+        if renderer is not None
+        and (t.get_gid() or "").startswith(("node-label:", "overlap-label:"))
+    ]
+    for h in hubs:
+        _place_label(
+            ax,
+            (h.location.x, h.location.y),
+            h.hub_id,
+            taken,
+            renderer,
+            fontsize=_LABEL_PT + 1,
+            fontweight="bold",
+            color=INK,
+            zorder=9,
+            gid=f"hub-label:{h.hub_id}",
+            bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.9},
+        )
+
+    # violations, at their `where`, before the numbers so the numbers move clear of them
+    labelled: dict[tuple[float, float], list[Violation]] = {}
+    for i, v in enumerate(violations):
+        pts = [tuple(p) for p in v.where]
+        if not pts and v.hub_id:
+            hub = next((h for h in hubs if h.hub_id == v.hub_id), None)
+            pts = [(hub.location.x, hub.location.y)] if hub else []
+        if not pts:
+            continue
+        red = STATUS_CRITICAL if v.severity == "error" else STATUS_SERIOUS
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        ax.plot(
+            xs,
+            ys,
+            color=red,
+            marker="X",
+            ms=8,
+            mec=SURFACE,
+            mew=0.8,
+            lw=1.6,
+            ls=":" if len(pts) == 2 else "none",
+            zorder=11,
+            gid=f"violation:{i}",
+        )
+        for x, y in pts:  # each ✗ marker (not the dotted line between two of them)
+            dx, dy = ax.transData.transform((x, y))
+            taken.append(Bbox.from_extents(dx - _MARK_R, dy - _MARK_R, dx + _MARK_R, dy + _MARK_R))
+        labelled.setdefault((round(pts[0][0], 2), round(pts[0][1], 2)), []).append(v)
+    for i, (xy, vs) in enumerate(labelled.items()):
+        errors = [v for v in vs if v.severity == "error"]
+        rules = sorted({v.rule for v in vs})
+        mark = "✗" if errors else "⚠"
+        word = "rule" if len(rules) == 1 else "rules"
+        _place_label(
+            ax,
+            xy,
+            f"{mark} {word} {', '.join(map(str, rules))}",
+            taken,
+            renderer,
+            fontsize=_LABEL_PT,
+            fontweight="bold",
+            color=STATUS_CRITICAL if errors else STATUS_SERIOUS,
+            zorder=12,
+            gid=f"violation:{i}:label",
+            bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.9},
+        )
+
+    # visit order: one circled number per leg, at the first spot along it clear of every label
+    # and of the numbers already placed (a circle's box is about 2 × _ORDER_R px)
+    for hub_id, j, pts in legs:
+        line = LineString(pts)
+        best = line.interpolate(_MIDWAY, normalized=True)
+        for f in _ORDER_SPOTS:
+            p = line.interpolate(f, normalized=True)
+            dx, dy = ax.transData.transform((p.x, p.y))
+            box = Bbox.from_extents(dx - _ORDER_R, dy - _ORDER_R, dx + _ORDER_R, dy + _ORDER_R)
+            if not any(box.overlaps(t) for t in taken):
+                best = p
+                break
+        mark = ax.annotate(
+            str(j),
+            (best.x, best.y),
+            ha="center",
+            va="center",
+            fontsize=_LABEL_PT - 1,
+            fontweight="bold",
+            color=INK,
+            zorder=10,
+            gid=f"order:{hub_id}:{j}",
+            bbox={"boxstyle": "circle,pad=0.25", "fc": SURFACE, "ec": colour[hub_id][0], "lw": 1.3},
+        )
+        if renderer is not None:
+            taken.append(mark.get_window_extent(renderer))
+
+    # how to read it: only what is drawn
+    first = ZONE_COLOURS[0]
+    handles: list[Any] = [
+        Patch(
+            facecolor=first, alpha=ZONE_ALPHA, edgecolor="none", label="zone · one colour per hub"
+        ),
+        Line2D([], [], marker="s", ms=8, mfc=first, mec=INK, ls="none", label="hub H1…"),
+        Line2D([], [], marker="o", ms=5, mfc=INK, mec=SURFACE, ls="none", label="node N1…"),
+        Line2D([], [], color=first, lw=RING_LW, label="ring, in its zone's colour"),
+        Line2D(
+            [],
+            [],
+            marker="o",
+            ms=8,
+            mfc=SURFACE,
+            mec=first,
+            ls="none",
+            label="visit order (last = the return leg)",
+        ),
+    ]
+    if stretches:
+        handles.append(
+            Line2D([], [], color=INK, lw=RING_LW, ls="--", label="same line, ×k legs (overlap)")
+        )
+    if any(v.severity == "error" for v in violations):
+        handles.append(
+            Line2D(
+                [],
+                [],
+                marker="X",
+                ms=8,
+                color=STATUS_CRITICAL,
+                ls="none",
+                label="✗ violation (rule n)",
+            )
+        )
+    if any(v.severity == "strict" for v in violations):
+        handles.append(
+            Line2D(
+                [],
+                [],
+                marker="X",
+                ms=8,
+                color=STATUS_SERIOUS,
+                ls="none",
+                label="⚠ strict-only (rule n)",
+            )
+        )
+    ax.legend(
+        handles=handles,
+        title="How to read",
+        loc="upper center",
+        bbox_to_anchor=(0.5, 0.0),  # not-a-weight: centred under the axes
+        ncol=3,
+        frameon=False,
+        fontsize=_LABEL_PT,
+        title_fontsize=_LABEL_PT + 1,
+        labelcolor=INK_SECONDARY,
+    )
+    return fig
+
+
 def to_png(fig: Figure, dpi: int = 150) -> bytes:
     """The figure as PNG bytes. The figure is cleared afterwards so its memory is released."""
     buf = io.BytesIO()
@@ -506,20 +826,36 @@ def to_png(fig: Figure, dpi: int = 150) -> bytes:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """`python -m hackhive.viz <plan.json> <out.png>`: draw a plan's base layer."""
+    """`python -m hackhive.viz <plan.json> <out.png> [--solution <submission.json>]`: draw a
+    plan's base layer, or with a submission its full overlay (#17), violations in red."""
     from hackhive.io import load_plan
 
     p = argparse.ArgumentParser(prog="python -m hackhive.viz", description=main.__doc__)
     p.add_argument("plan", type=Path, help="one plan JSON file")
     p.add_argument("out", type=Path, help="where to write the PNG")
+    p.add_argument("--solution", type=Path, help="a slide-8 submission to overlay")
     args = p.parse_args(argv)
     try:
         plan = load_plan(args.plan)
+        sub = (
+            Submission.model_validate_json(args.solution.read_text(encoding="utf-8"))
+            if args.solution
+            else None
+        )
     except (OSError, ValueError) as e:
         print(f"{type(e).__name__}: {e}", file=sys.stderr)
         return 1
+    if sub is not None and sub.plan_id != plan.plan_id:
+        print(
+            f"warning: the submission is for {sub.plan_id}, the plan is {plan.plan_id}",
+            file=sys.stderr,
+        )
+    if sub is None:
+        fig = draw_layers(plan)
+    else:
+        fig = draw_solution(plan, sub, violations=checker.check_rules(plan, sub))
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_bytes(to_png(draw_layers(plan)))
+    args.out.write_bytes(to_png(fig))
     print(f"wrote {args.out}")
     return 0
 
