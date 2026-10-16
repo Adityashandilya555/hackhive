@@ -63,8 +63,9 @@ def test_banner_ok_5088():
     assert kind == "success" and "✓" in text and "ok" in text
 
 
-def test_banner_strict_only_5924_names_its_retraces():
-    plan, _, res = _case("5924")
+def test_banner_strict_only_13344_names_its_retraces():
+    # 13344 keeps a two-door retrace; 5924's went with #81's parallel runs
+    plan, _, res = _case("13344")
     kind, text = status_banner(res.sidecar, plan)
     assert kind == "warning"
     # the count is the sidecar's own rule-4 flags (#80's rip-up passes change it)
