@@ -537,6 +537,7 @@ def _zone_style(i: int) -> tuple[str, str | None]:
 _MIDWAY = 0.5  # not-a-weight: half-way along a leg
 _ORDER_SPOTS = (_MIDWAY, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8, 0.12, 0.88)
 _ORDER_R = 9  # px: half the side of a number's circle, for the overlap test
+_MARK_R = 7  # px: half the side of a ✗ violation marker's box
 
 
 def draw_solution(
@@ -654,10 +655,13 @@ def draw_solution(
             gid=f"hub:{h.hub_id}",
         )
     draw_nodes(plan, ax)
+    # one list of everything drawn so far that later labels and numbers must keep clear of;
+    # every annotation below appends to it in draw order
     taken = _avoid(ax, renderer) + [
         t.get_window_extent(renderer)
         for t in ax.texts
-        if renderer is not None and (t.get_gid() or "").startswith("node-label:")
+        if renderer is not None
+        and (t.get_gid() or "").startswith(("node-label:", "overlap-label:"))
     ]
     for h in hubs:
         _place_label(
@@ -674,35 +678,7 @@ def draw_solution(
             bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.9},
         )
 
-    # visit order: one circled number per leg, at the first spot along it clear of every label
-    # and of the numbers already placed (a circle's box is about 2 × _ORDER_R px)
-    placed: list[Any] = []
-    for hub_id, j, pts in legs:
-        line = LineString(pts)
-        best = line.interpolate(_MIDWAY, normalized=True)
-        for f in _ORDER_SPOTS:
-            p = line.interpolate(f, normalized=True)
-            dx, dy = ax.transData.transform((p.x, p.y))
-            box = Bbox.from_extents(dx - _ORDER_R, dy - _ORDER_R, dx + _ORDER_R, dy + _ORDER_R)
-            if not any(box.overlaps(t) for t in [*taken, *placed]):
-                best = p
-                break
-        mark = ax.annotate(
-            str(j),
-            (best.x, best.y),
-            ha="center",
-            va="center",
-            fontsize=_LABEL_PT - 1,
-            fontweight="bold",
-            color=INK,
-            zorder=10,
-            gid=f"order:{hub_id}:{j}",
-            bbox={"boxstyle": "circle,pad=0.25", "fc": SURFACE, "ec": colour[hub_id][0], "lw": 1.3},
-        )
-        if renderer is not None:
-            placed.append(mark.get_window_extent(renderer))
-
-    # violations, at their `where`
+    # violations, at their `where`, before the numbers so the numbers move clear of them
     labelled: dict[tuple[float, float], list[Violation]] = {}
     for i, v in enumerate(violations):
         pts = [tuple(p) for p in v.where]
@@ -726,6 +702,9 @@ def draw_solution(
             zorder=11,
             gid=f"violation:{i}",
         )
+        for x, y in pts:  # each ✗ marker (not the dotted line between two of them)
+            dx, dy = ax.transData.transform((x, y))
+            taken.append(Bbox.from_extents(dx - _MARK_R, dy - _MARK_R, dx + _MARK_R, dy + _MARK_R))
         labelled.setdefault((round(pts[0][0], 2), round(pts[0][1], 2)), []).append(v)
     for i, (xy, vs) in enumerate(labelled.items()):
         errors = [v for v in vs if v.severity == "error"]
@@ -745,6 +724,33 @@ def draw_solution(
             gid=f"violation:{i}:label",
             bbox={"boxstyle": "round,pad=0.15", "fc": SURFACE, "ec": "none", "alpha": 0.9},
         )
+
+    # visit order: one circled number per leg, at the first spot along it clear of every label
+    # and of the numbers already placed (a circle's box is about 2 × _ORDER_R px)
+    for hub_id, j, pts in legs:
+        line = LineString(pts)
+        best = line.interpolate(_MIDWAY, normalized=True)
+        for f in _ORDER_SPOTS:
+            p = line.interpolate(f, normalized=True)
+            dx, dy = ax.transData.transform((p.x, p.y))
+            box = Bbox.from_extents(dx - _ORDER_R, dy - _ORDER_R, dx + _ORDER_R, dy + _ORDER_R)
+            if not any(box.overlaps(t) for t in taken):
+                best = p
+                break
+        mark = ax.annotate(
+            str(j),
+            (best.x, best.y),
+            ha="center",
+            va="center",
+            fontsize=_LABEL_PT - 1,
+            fontweight="bold",
+            color=INK,
+            zorder=10,
+            gid=f"order:{hub_id}:{j}",
+            bbox={"boxstyle": "circle,pad=0.25", "fc": SURFACE, "ec": colour[hub_id][0], "lw": 1.3},
+        )
+        if renderer is not None:
+            taken.append(mark.get_window_extent(renderer))
 
     # how to read it: only what is drawn
     first = ZONE_COLOURS[0]
@@ -839,6 +845,11 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError) as e:
         print(f"{type(e).__name__}: {e}", file=sys.stderr)
         return 1
+    if sub is not None and sub.plan_id != plan.plan_id:
+        print(
+            f"warning: the submission is for {sub.plan_id}, the plan is {plan.plan_id}",
+            file=sys.stderr,
+        )
     if sub is None:
         fig = draw_layers(plan)
     else:

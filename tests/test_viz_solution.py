@@ -356,8 +356,14 @@ def test_order_numbers_keep_off_violations_and_times_k_labels(plan_5088, name):
         pytest.skip("non-finite coordinates")
     ax = fig.axes[0]
     r = fig.canvas.get_renderer()
-    blockers = [a.get_window_extent(r) for a in _gids(ax, "violation:")]
+    from matplotlib.transforms import Bbox
+
+    blockers = [a.get_window_extent(r) for a in _gids(ax, "violation:") if a in ax.texts]
     blockers += [a.get_window_extent(r) for a in _gids(ax, "overlap-label:")]
+    for ln in (a for a in _gids(ax, "violation:") if a in ax.lines):  # each ✗ marker
+        for x, y in zip(ln.get_xdata(), ln.get_ydata(), strict=True):
+            dx, dy = ax.transData.transform((x, y))
+            blockers.append(Bbox.from_extents(dx - 6, dy - 6, dx + 6, dy + 6))
     for t in _gids(ax, "order:"):
         box = t.get_window_extent(r)
         assert not any(box.overlaps(b) for b in blockers), (name, t.get_gid())

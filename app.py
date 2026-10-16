@@ -142,15 +142,22 @@ def best_tab(source: str, key: str, content: bytes | None, plan: Plan, path: Pat
     try:
         sub = load_submission(path)
         rep = checked(source, key, content, str(path))
-        png = overlay(source, key, content, str(path))
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
+    try:
+        png = overlay(source, key, content, str(path))
+    except (
+        Exception
+    ) as e:  # Best is the landing tab: a drawing error is a message, never a traceback
+        st.error(f"Can't draw this solution. {type(e).__name__}: {e}")
+        png = None
     picture_col, panel = st.columns([5, 3], gap="large")
     with picture_col:
         if mismatch := submission_mismatch(sub, plan):
             st.warning(mismatch)
-        st.image(png, width="stretch")
+        if png is not None:
+            st.image(png, width="stretch")
         st.subheader("Per-hub summary")
         if rep.metrics is None:
             st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
