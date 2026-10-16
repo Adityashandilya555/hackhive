@@ -947,9 +947,9 @@ def _route_ring(
     prep = _prepare(grid, stops, c, occupancy)
     options = [_options(s, retrace_ok, free) for s in prep.stops]
     j, best = _best_corners(prep, options)
-    if occupancy is None and _both_layouts(stops, retrace_ok):
+    if occupancy is None and _both_layouts(stops, retrace_ok) and _shares_an_edge(prep.cells):
         lanes = _prepare(grid, stops, c, Occupancy())
-        lanes_j, lanes_best = _best_corners(lanes, options)
+        lanes_j, lanes_best = _best_corners(lanes, options, start=best)
         if lanes_j < j - _EPS:
             prep, best = lanes, lanes_best
     return _segments(prep, best), prep.cells
@@ -961,10 +961,20 @@ def _both_layouts(stops: Sequence[Stop], retrace_ok: Collection[str]) -> bool:
     return len(stops) == 2 or any(s.id in retrace_ok for s in stops)
 
 
+def _shares_an_edge(legs: Sequence[Sequence[Cell]]) -> bool:
+    """Whether two of a ring's grid paths use one cell edge: without that there's no retrace for
+    (b) to remove, so `_route_ring` skips it (ADR-003 runtime, #81)."""
+    uses = Counter(e for path in legs for e in set(Occupancy.edges(path)))
+    return any(k > 1 for k in uses.values())
+
+
 def _best_corners(
-    prep: _Prepared, options: Sequence[list[tuple[int | None, int | None]]]
+    prep: _Prepared,
+    options: Sequence[list[tuple[int | None, int | None]]],
+    start: list[tuple[int | None, int | None]] | None = None,
 ) -> tuple[float, list[tuple[int | None, int | None]]]:
-    """The stub corner choice with the lowest ring J, and that J."""
+    """The stub corner choice with the lowest ring J, and that J. From `start`, only one greedy
+    pass per stop (the parallel-run variant starts from the retrace's choice, ADR-003)."""
     n = len(prep.stops)
     cache: dict[tuple[int, int | None, int | None], list[Point2]] = {}
 
@@ -980,10 +990,10 @@ def _best_corners(
     def score(choice: Sequence[tuple[int | None, int | None]]) -> float:
         return _score(prep, legs(choice))
 
-    if math.prod(len(o) for o in options) <= MAX_CORNER_COMBOS:
+    if start is None and math.prod(len(o) for o in options) <= MAX_CORNER_COMBOS:
         best = list(min(itertools.product(*options), key=score))
     else:  # ponytail: one greedy pass from every stop's first option; exact search is #19's
-        best = [o[0] for o in options]
+        best = list(start) if start else [o[0] for o in options]
         for i, opts in enumerate(options):
             best = min(([*best[:i], o, *best[i + 1 :]] for o in opts), key=score)
     return score(best), best
