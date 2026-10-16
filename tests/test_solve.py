@@ -248,13 +248,13 @@ def test_cli_check_exits_1_on_an_error(capsys):
 
 
 def test_cli_check_strict_only_exits_0_with_strict_lines(capsys):
-    """C26, C43: strict-only exits 0 and prints `STRICT (rule n, #46 Qm):`; 2 on request."""
+    """C26, C43: strict-only exits 0 and prints `STRICT (rule n, #46 Qm):`; 4 on request."""
     args = ["check", str(PLANS / "plan-5088.json"), str(SOLUTIONS / "5088-retrace-two-door.json")]
     assert cli.main(args) == 0
     out = capsys.readouterr().out
     strict = [line for line in out.splitlines() if line.startswith("STRICT ")]
     assert strict and all(line.startswith("STRICT (rule 4, #46 Q5): ") for line in strict)
-    assert cli.main([*args, "--fail-on-strict"]) == 2
+    assert cli.main([*args, "--fail-on-strict"]) == 4  # not 2: argparse's usage error (#72)
 
 
 def test_cli_check_on_an_unreadable_submission_exits_3(tmp_path, capsys):
@@ -279,3 +279,83 @@ def test_hub_hook_point_helper_is_sane():
     xy = _point_near_a_wall(plan, room.id, 0.30)
     assert wall_geometry(plan).distance(Point(xy)) == pytest.approx(0.30, abs=0.01)
     assert room.polygon.contains(Point(xy))
+
+
+# --------------------------------------------------------------------------- #72 review
+
+
+@pytest.mark.parametrize(
+    ("plan_id", "stem"),
+    [
+        ("../escaped", "_escaped"),
+        ("A/B", "A_B"),
+        ("A:B", "A_B"),
+        ("..", "plan"),
+        ("PLAN 7", "PLAN_7"),
+    ],
+)
+def test_an_unsafe_plan_id_never_leaves_the_output_folder(plan_id, stem, tmp_path):
+    """An organiser id is kept verbatim in the submission, but its file name is made safe (a
+    path separator, `..` or `:` would write elsewhere or crash on Windows); the sidecar warns."""
+    raw = json.loads((FIXTURES / "organiser" / "guess-5924.json").read_text(encoding="utf-8"))
+    raw["plan_id"] = plan_id
+    src = tmp_path / "in" / "plan.json"
+    src.parent.mkdir()
+    src.write_text(json.dumps(raw), encoding="utf-8")
+    out = tmp_path / "out"
+    assert cli.main(["solve", str(src), "--out", str(out)]) == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["in", "out"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        f"{stem}.json",
+        f"{stem}.png",
+        f"{stem}.sidecar.json",
+    ]
+    sub = Submission.model_validate_json((out / f"{stem}.json").read_text("utf-8"))
+    side = Sidecar.model_validate_json((out / f"{stem}.sidecar.json").read_text("utf-8"))
+    assert sub.plan_id == side.plan_id == plan_id
+    assert any("file name" in w and stem in w for w in side.warnings)
+
+
+def test_an_unsafe_plan_id_on_an_unreadable_plan_is_filed_safely(tmp_path):
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"plan_id": "../../x", "rooms": "nope"}), encoding="utf-8")
+    written = submit(solve_file(bad, C), tmp_path / "out")
+    assert [p.parent for p in written] == [tmp_path / "out"]
+    assert [p.name for p in written] == ["_.._x.sidecar.json"]
+    side = Sidecar.model_validate_json(written[0].read_text("utf-8"))
+    assert side.plan_id == "../../x" and side.status == "input_error"
+
+
+def test_cli_check_strict_only_under_fail_on_strict_exits_4_not_argparse_2(capsys):
+    """#72 review: argparse exits 2 on a usage error, so strict-only must not share it."""
+    args = ["check", str(PLANS / "plan-5088.json"), str(SOLUTIONS / "5088-retrace-two-door.json")]
+    assert cli.main([*args, "--fail-on-strict"]) == 4
+    with pytest.raises(SystemExit) as e:
+        cli.main([*args, "--fail-on-strcit"])
+    assert e.value.code == 2
+
+
+def test_a_ring_that_cant_be_ordered_ends_in_the_sidecar(monkeypatch):
+    """#72 review: `order_ring` raises ValueError past 8 nodes (reachable with max_nodes raised
+    toward the ≤ 20 what-if); solve() reports it instead of raising."""
+    import hackhive.solve as solve_mod
+
+    def too_many(*args, **kwargs):
+        raise ValueError("9 nodes > 8: use Held-Karp (#28)")
+
+    monkeypatch.setattr(solve_mod, "first_ring", too_many)
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C)
+    assert result.sidecar.status == "infeasible" and result.submission is None
+    assert "Held-Karp" in result.sidecar.reason
+
+
+def test_a_grid_failure_is_not_reported_as_routing(monkeypatch):
+    import hackhive.solve as solve_mod
+
+    def broken(*args, **kwargs):
+        raise ValueError("door_3 touches no room")
+
+    monkeypatch.setattr(solve_mod.LabelGrid, "from_plan", broken)
+    result = solve(load_plan(PLANS / "plan-5088.json", C), C)
+    assert result.sidecar.status == "infeasible"
+    assert result.sidecar.reason.startswith("grid failed: ") and "door_3" in result.sidecar.reason

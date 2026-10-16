@@ -341,7 +341,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - Returns `Violation(rule, severity, message, ids, hub_id, where)` and never raises; `where` feeds the red overlay.
   - Builds the slide-5 checklist.
   - **The gate (C43):** submit the clean design; else the best strict-only design (`status: submitted_strict_only`); else nothing (`status: infeasible`) (#11, #16, #22, #23).
-  - `hackhive check` exits 1 on any `error`, 0 on strict-only (each printed with a `STRICT` prefix), 2 on strict-only with `--fail-on-strict`, and 3 when a file can't be read (#16). `hackhive solve` exits 0 when it wrote a submission, 1 when it wrote only the sidecar.
+  - `hackhive check` exits 1 on any `error`, 0 on strict-only (each printed with a `STRICT` prefix), 4 on strict-only with `--fail-on-strict`, 3 when a file can't be read, and 2 only for a usage error (argparse) (#16). `hackhive solve` exits 0 when it wrote a submission, 1 when it wrote only the sidecar.
 
   | Severity | Meaning | Examples |
   |---|---|---|
