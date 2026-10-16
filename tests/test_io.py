@@ -408,6 +408,15 @@ def test_nodes_room_under_walls_keeps_a_node():
     assert node.clearance_m == 0.0 and len(plan.warnings) == 1
 
 
+def test_nodes_take_the_middle_of_a_max_clearance_plateau():
+    """An 8 × 3 m room is 1.5 m clear all along its centre line. GEOS returns one end of it, and a
+    different point on macOS arm64 than on Linux (up to 0.73 m apart, #38), so the node is the
+    line's middle, the same on every platform."""
+    (node,) = load_plan(synthetic(bedroom=box(0, 0, 80, 30))).nodes
+    assert node.xy == pytest.approx((4.0, 1.5), abs=1e-3)
+    assert node.clearance_m == pytest.approx(1.5, abs=1e-3)
+
+
 def test_nodes_sliver_by_free_space_is_folded():
     """C38: a living part 1.2 m wide by its outline but 0.3 m wide between walls is a sliver,
     judged on the same free space as the node."""

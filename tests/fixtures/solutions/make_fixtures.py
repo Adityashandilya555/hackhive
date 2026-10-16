@@ -3,9 +3,11 @@
     uv run python tests/fixtures/solutions/make_fixtures.py [out_dir]
 
 `test_checker_rules.py` regenerates them into a temp folder and checks the committed files
-match. Node points are written out verbatim (as `io.load_plan` places them) so the output is the
-same on every platform; `write()` checks them against `load_plan` first. Reported lengths are rounded to 1 µm and summed with `math.fsum`, so they
-don't depend on the Python version (3.12 changed `sum()` of floats; CI runs 3.11).
+match. Node points come from `io.load_plan`, which places them the same way on every platform
+(the middle of the max-clearance plateau, #38), so a change to node placement shows up here as
+regenerated files rather than hand-copied numbers. Reported lengths are rounded to 1 µm and
+summed with `math.fsum`, so they don't depend on the Python version (3.12 changed `sum()` of
+floats; CI runs 3.11).
 """
 
 from __future__ import annotations
@@ -24,11 +26,16 @@ from hackhive.io import load_plan
 HERE = Path(__file__).resolve().parent
 PLAN_5088 = HERE.parent / "plans" / "plan-5088.json"
 
-N1, N2, N3 = (
-    (1.9168004848969091, 4.1252094467026),
-    (8.139631124543094, 5.929384811987724),
-    (4.982010914708966, 7.239747515909592),
-)
+
+def node_points(source: Path | dict) -> dict[str, tuple[float, float]]:
+    """Each node's point as `io.load_plan` places it, rounded to 1 µm like the lengths, so the
+    files don't depend on the last bit of a platform's float maths (the checker allows 1 mm)."""
+    plan = load_plan(copy.deepcopy(source) if isinstance(source, dict) else source)
+    return {n.id: (round(n.xy[0], 6), round(n.xy[1], 6)) for n in plan.nodes}
+
+
+_NODES_5088 = node_points(PLAN_5088)
+N1, N2, N3 = (_NODES_5088[n] for n in ("N1", "N2", "N3"))
 HUB = (3.05, 5.55)
 
 # --------------------------------------------------------------------------- synthetic plans
@@ -76,10 +83,7 @@ SYN_OPEN = {
     "kitchen": mapping(box(50, 0, 100, 100)),
     "wall": mapping(MultiPolygon([box(49, 0, 51, 20), box(49, 80, 51, 100)])),
 }
-SYN_NODES = {
-    "SYN_ENTRANCE": {"N1": (2.0, 2.0), "N2": (6.200000000000001, 2.0)},
-    "SYN_OVERCAP": {"N1": (4.95, 5.0), "N2": (15.05, 5.0)},
-}
+SYN_NODES = {"SYN_ENTRANCE": node_points(SYN_ENTRANCE), "SYN_OVERCAP": node_points(SYN_OVERCAP)}
 
 # --------------------------------------------------------------------------- builders
 
@@ -374,32 +378,8 @@ SYNTHETIC = {
 }
 
 
-def _check_nodes() -> None:
-    """The verbatim node points must be the ones load_plan places (within 1 µm)."""
-    expected = {
-        PLAN_5088: {"N1": N1, "N2": N2, "N3": N3},
-        **{
-            SYNTHETIC[f"syn-{k}-plan.json"]["id"]: v
-            for k, v in (
-                ("entrance", SYN_NODES["SYN_ENTRANCE"]),
-                ("overcap", SYN_NODES["SYN_OVERCAP"]),
-            )
-        },
-    }
-    for source, nodes in expected.items():
-        plan = load_plan(source if isinstance(source, Path) else _raw_by_id(source))
-        got = {n.id: n.xy for n in plan.nodes}
-        for nid, xy in nodes.items():
-            assert math.dist(got[nid], xy) < 1e-6, (source, nid, got[nid], xy)
-
-
-def _raw_by_id(plan_id: str) -> dict:
-    return next(v for v in SYNTHETIC.values() if v.get("id") == plan_id)
-
-
 def write(out: Path) -> list[Path]:
     """Write every fixture into `out`; returns the paths written."""
-    _check_nodes()
     out.mkdir(parents=True, exist_ok=True)
     written = []
     for name, obj in {**FIVE_088, **SYNTHETIC}.items():
