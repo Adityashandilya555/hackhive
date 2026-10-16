@@ -187,7 +187,7 @@ def test_5088_checklist_shows_five_ticks_from_the_checker():
 
 def test_broken_solution_lists_its_violations_in_red_with_the_rule_number():
     at = _pick(_run(), "5088")
-    at.main.selectbox(key="solution").set_value("hub 0.3m from wall")
+    at.sidebar.selectbox(key="solution").set_value("hub 0.3m from wall")
     _run(at)
     text = _main_text(at)
     assert ":red[✗ **Rule 6** · H1 · error:" in text
@@ -196,7 +196,7 @@ def test_broken_solution_lists_its_violations_in_red_with_the_rule_number():
 
 def test_wall_crossing_shows_rule_5_in_red():
     at = _pick(_run(), "5088")
-    at.main.selectbox(key="solution").set_value("wall crossing")
+    at.sidebar.selectbox(key="solution").set_value("wall crossing")
     _run(at)
     text = _main_text(at)
     assert ":red[✗ **Rule 5**" in text and ":red[✗ axis-aligned" in text

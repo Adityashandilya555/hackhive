@@ -11,6 +11,8 @@ from hackhive import checker
 from hackhive.contracts import (
     Constraints,
     CostWeights,
+    HubMetrics,
+    HubOut,
     Plan,
     Submission,
     Violation,
@@ -196,3 +198,68 @@ def verdict_line(verdict: str) -> str:
 def metrics_line(m: checker.Metrics | None) -> str:
     """The checker CLI's metrics line, from the one shared formatter (`checker.metrics_text`)."""
     return md_text(checker.metrics_text(m))
+
+
+# --------------------------------------------------------------------------- per-hub summary (#17)
+
+
+def hub_metrics(plan: Plan, sub: Submission, m: checker.Metrics) -> list[HubMetrics]:
+    """Each hub's share of the metrics, in submission order: the eligible m² and nodes it's
+    assigned, and its L, X, O, B from the checker mirror (`Metrics.per_hub`). The same rows a
+    sidecar's `hubs[]` holds (#16), so the summary and the sidecar can't disagree."""
+    rooms = {r.id: r for r in plan.rooms}
+    out = []
+    for h in sub.hubs:
+        per = m.per_hub[h.hub_id]
+        area = checker.assigned_area(h, rooms)
+        out.append(
+            HubMetrics(
+                hub_id=h.hub_id,
+                area_m2=area,
+                n_nodes=len(set(h.assigned_nodes)),
+                L=per.L,
+                X=per.X,
+                O=per.O,
+                B=per.B,
+            )
+        )
+    return out
+
+
+def rooms_text(hub: HubOut, plan: Plan) -> str:
+    """`R01, R03 (living, kitchen)`: a hub's rooms and their types, for the table and the line."""
+    rooms = {r.id: r for r in plan.rooms}
+    ids = list(dict.fromkeys(hub.assigned_rooms))
+    kinds = ", ".join(rooms[r].type if r in rooms else "?" for r in ids)
+    return f"{', '.join(ids)} ({kinds})"
+
+
+def hub_summary_line(row: HubMetrics, hub: HubOut, plan: Plan) -> str:
+    """`H1: R01, R03 (living, kitchen) · 34.0 m² · 2 nodes · 12.40 m, 8 bends`, plus the
+    overlap and crossings when there are any."""
+    nodes = f"{row.n_nodes} node{'' if row.n_nodes == 1 else 's'}"
+    extra = (f" · O {row.O:.2f} m" if row.O else "") + (f" · X {row.X}" if row.X else "")
+    return (
+        f"{hub.hub_id}: {rooms_text(hub, plan)} · {row.area_m2:.1f} m² · {nodes} · "
+        f"{row.L:.2f} m, {row.B} bends{extra}"
+    )
+
+
+def hub_table(plan: Plan, sub: Submission, m: checker.Metrics) -> list[dict[str, Any]]:
+    """The per-hub summary as table rows (C25): rooms, m², nodes, length, bends, overlap and
+    crossings, one row per hub in submission order."""
+    rows = []
+    for row, hub in zip(hub_metrics(plan, sub, m), sub.hubs, strict=True):
+        rows.append(
+            {
+                "Hub": hub.hub_id,
+                "Rooms": rooms_text(hub, plan),
+                "m²": round(row.area_m2, 1),
+                "Nodes": row.n_nodes,
+                "L (m)": round(row.L, 3),
+                "Bends": row.B,
+                "Overlap O (m)": round(row.O, 3),
+                "Crossings X": row.X,
+            }
+        )
+    return rows

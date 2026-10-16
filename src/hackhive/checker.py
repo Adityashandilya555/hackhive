@@ -157,10 +157,34 @@ def _cluster(values: Sequence[float], tol: float) -> dict[float, float]:
     return rep
 
 
-def _overlaps(
-    legs: Sequence[Sequence[Point]], owners: Sequence[str], tol: float
-) -> tuple[float, dict[str, float]]:
-    """Total O and each owner's credit (every owner on a shared stretch gets its full (k-1)·len)."""
+@dataclass(frozen=True)
+class Stretch:
+    """A same-line stretch that k ≥ 2 leg pieces cover (O counts (k - 1) · length of it)."""
+
+    axis: str  # "h" (y fixed) or "v" (x fixed)
+    at: float  # the fixed coordinate
+    lo: float
+    hi: float
+    k: int
+    owners: tuple[str, ...]  # the rings involved, sorted
+
+    @property
+    def length(self) -> float:
+        return self.hi - self.lo
+
+    @property
+    def ends(self) -> tuple[Point, Point]:
+        if self.axis == "h":
+            return (self.lo, self.at), (self.hi, self.at)
+        return (self.at, self.lo), (self.at, self.hi)
+
+
+def overlap_stretches(
+    legs: Sequence[Sequence[Point]], owners: Sequence[str], tol: float = TOL
+) -> list[Stretch]:
+    """Every same-line stretch covered by k ≥ 2 pieces: the one computation behind O
+    (`_overlaps` sums (k - 1) · length over these) and the overlay's ×k stretches (#17).
+    Adjacent runs with the same k and rings are merged."""
     lines: dict[tuple[str, float], list[tuple[float, float, str]]] = {}
     raw: list[tuple[str, float, float, float, str]] = []
     for leg, owner in zip(legs, owners, strict=True):
@@ -169,16 +193,14 @@ def _overlaps(
                 raw.append(("h", (a[1] + b[1]) / 2, a[0], b[0], owner))
             elif abs(a[0] - b[0]) <= tol:
                 raw.append(("v", (a[0] + b[0]) / 2, a[1], b[1], owner))
-            # diagonal pieces are a rule-5 violation (#11); they take no part in O
     for axis in ("h", "v"):
         pieces = [r for r in raw if r[0] == axis]
         rep = _cluster([r[1] for r in pieces], tol)
         for _, c, s, e, owner in pieces:
             lines.setdefault((axis, rep[c]), []).append((min(s, e), max(s, e), owner))
 
-    total = 0.0
-    credit: dict[str, float] = {o: 0.0 for o in owners}
-    for intervals in lines.values():
+    out: list[Stretch] = []
+    for (axis, at), intervals in sorted(lines.items()):
         rep = _cluster([v for lo, hi, _ in intervals for v in (lo, hi)], tol)
         events = sorted(
             (rep[v], d, owner)
@@ -191,13 +213,34 @@ def _overlaps(
         for pos, d, owner in events:
             k = sum(active.values())
             if prev is not None and k >= 2 and pos > prev:
-                total += (k - 1) * (pos - prev)
-                for o in active:
-                    credit[o] += (k - 1) * (pos - prev)
+                who = tuple(sorted(active))
+                last = out[-1] if out else None
+                if (
+                    last is not None
+                    and (last.axis, last.at, last.k, last.owners) == (axis, at, k, who)
+                    and last.hi == prev
+                ):
+                    out[-1] = Stretch(axis, at, last.lo, pos, k, who)
+                else:
+                    out.append(Stretch(axis, at, prev, pos, k, who))
             active[owner] += d
             if not active[owner]:
                 del active[owner]
             prev = pos
+    return out
+
+
+def _overlaps(
+    legs: Sequence[Sequence[Point]], owners: Sequence[str], tol: float
+) -> tuple[float, dict[str, float]]:
+    """Total O and each owner's credit (every owner on a shared stretch gets its full (k-1)·len).
+    Derived from `overlap_stretches`, so O and the overlay's ×k stretches are one computation."""
+    total = 0.0
+    credit: dict[str, float] = {o: 0.0 for o in owners}
+    for st in overlap_stretches(legs, owners, tol):
+        total += (st.k - 1) * st.length
+        for o in st.owners:
+            credit[o] += (st.k - 1) * st.length
     return total, credit
 
 
@@ -550,12 +593,23 @@ def _rule1_coverage(sub: Submission, ctx: _Context) -> list[Violation]:
     return out
 
 
+def assigned_area(hub: HubOut, rooms: Mapping[str, Room]) -> float:
+    """A hub's assigned eligible area in m²: each listed room once, unknown and excluded rooms
+    left out (rule 1 reports those). The one definition behind rule 2, the area gap and the
+    app's per-hub summary."""
+    return sum(
+        rooms[r].area_m2
+        for r in dict.fromkeys(hub.assigned_rooms)
+        if r in rooms and rooms[r].eligible
+    )
+
+
 def _rule2_capacity(hub: HubOut, ctx: _Context) -> list[Violation]:
     """At most `max_area_m2` of assigned eligible area and `max_nodes` nodes per hub (C5, C6)."""
     c = ctx.c
     rooms = [ctx.rooms[r] for r in dict.fromkeys(hub.assigned_rooms) if r in ctx.rooms]
     rooms = [r for r in rooms if r.eligible]
-    area = sum(r.area_m2 for r in rooms)
+    area = assigned_area(hub, ctx.rooms)
     out = []
     if area - AREA_EPS_M2 > c.max_area_m2:
         msg = f"{area:.1f} m² of eligible rooms (limit {c.max_area_m2:g} m²)"
@@ -913,12 +967,7 @@ def report(plan: Plan, submission: Submission, c: Constraints = _DEFAULT) -> Rep
     """The rules, the metrics, the checklist and the verdict for one submission."""
     violations = check_rules(plan, submission, c)
     rooms = {r.id: r for r in plan.rooms}
-    hub_areas = {
-        h.hub_id: sum(
-            rooms[r].area_m2 for r in set(h.assigned_rooms) if r in rooms and rooms[r].eligible
-        )
-        for h in submission.hubs
-    }
+    hub_areas = {h.hub_id: assigned_area(h, rooms) for h in submission.hubs}
     try:
         m = metrics(submission.hubs, c, hub_areas=hub_areas)
     except ValueError:  # a non-finite coordinate: rule 4 reports it

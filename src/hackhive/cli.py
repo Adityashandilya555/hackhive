@@ -35,7 +35,7 @@ def _utf8() -> None:
 
 def _solve(args: argparse.Namespace) -> int:
     from hackhive.solve import solve_file, submit
-    from hackhive.viz import draw_layers, draw_nodes, draw_rings, to_png
+    from hackhive.viz import draw_layers, draw_nodes, draw_solution, to_png
 
     if not args.plan.is_file():
         print(f"no such plan file: {args.plan}", file=sys.stderr)
@@ -44,11 +44,12 @@ def _solve(args: argparse.Namespace) -> int:
     result = solve_file(args.plan, c)
     written = submit(result, args.out)
     side = result.sidecar
-    if result.plan is not None:  # a minimal picture; #17 replaces it with the full overlay
-        fig = draw_layers(result.plan)
-        draw_nodes(result.plan, fig.axes[0])
+    if result.plan is not None:  # #17's overlay; just the plan and its nodes without a design
         if result.submission is not None:
-            draw_rings(result.submission, fig.axes[0])
+            fig = draw_solution(result.plan, result.submission, violations=side.violations)
+        else:
+            fig = draw_layers(result.plan)
+            draw_nodes(result.plan, fig.axes[0])
         png = Path(args.out) / f"{side.plan_id}.png"
         png.write_bytes(to_png(fig))
         written.append(png)
