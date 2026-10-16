@@ -36,6 +36,30 @@ def test_the_fixture_has_32s_columns():
     assert set(BATCH_COLUMNS) <= set(rows[0])
 
 
+def test_the_columns_are_32s_own_list():
+    """One list: the tab reads exactly what `hackhive batch` writes (#106 review)."""
+    from hackhive import batch
+
+    assert tuple(batch.COLUMNS) == BATCH_COLUMNS
+
+
+def test_the_tab_reads_what_hackhive_batch_writes(tmp_path):
+    """End to end: #32's runner on a fixture, read back by the tab's reader."""
+    from hackhive import batch
+    from hackhive.contracts import Constraints
+
+    plans = tmp_path / "plans"
+    plans.mkdir()
+    src = ROOT / "tests" / "fixtures" / "plans" / "plan-5088.json"
+    (plans / src.name).write_bytes(src.read_bytes())
+    out = tmp_path / "out" / "batch.csv"
+    written = batch.run(plans, "test", 5, out, Constraints())
+    rows = read_batch(out)
+    assert [r["plan_id"] for r in rows] == [w["plan_id"] for w in written] == ["PLAN_5088"]
+    assert rows[0]["submitted"] is True and rows[0]["J"] == pytest.approx(written[0]["J"])
+    assert batch_summary(rows).valid_pct == 100
+
+
 def test_read_batch_types_the_values():
     rows = {r["plan_id"]: r for r in read_batch(SMALL)}
     ok = rows["PLAN_5924"]
@@ -69,7 +93,8 @@ def test_find_batch_csv_prefers_the_fresh_run(tmp_path, monkeypatch):
 def test_batch_summary_counts_validity_lb_and_mean_j():
     s = batch_summary(read_batch(SMALL))
     assert s.n == 9 and (s.ok, s.strict_only, s.infeasible, s.input_error) == (7, 0, 1, 1)
-    assert s.valid_pct == pytest.approx(100 * 7 / 9)
+    # #32's definition (batch.summary): of the feasible plans, i.e. loaded and not infeasible
+    assert s.feasible == 7 and s.valid_pct == pytest.approx(100.0)
     assert s.at_lb_pct == pytest.approx(100 * 2 / 7)  # 3086 and 5088, of the 7 submitted
     js = [r["J"] for r in read_batch(SMALL) if r["submitted"]]
     assert s.mean_J == pytest.approx(sum(js) / len(js))
@@ -77,7 +102,16 @@ def test_batch_summary_counts_validity_lb_and_mean_j():
 
 def test_batch_summary_of_nothing_submitted_has_no_means():
     s = batch_summary([r for r in read_batch(SMALL) if not r["submitted"]])
-    assert s.valid_pct == 0 and s.at_lb_pct is None and s.mean_J is None
+    assert s.feasible == 0 and s.valid_pct is None and s.at_lb_pct is None and s.mean_J is None
+
+
+def test_a_feasible_plan_without_a_submission_counts_against_validity():
+    """A loaded, not-infeasible plan without a submission counts against validity (#32's
+    definition): here an `ok` row whose submission wasn't written."""
+    rows = read_batch(SMALL)
+    rows[0] = {**rows[0], "submitted": False}
+    s = batch_summary(rows)
+    assert s.feasible == 7 and s.valid_pct == pytest.approx(100 * 6 / 7)
 
 
 def test_hub_gap_counts_h_minus_lb_of_submitted_plans():
@@ -136,7 +170,7 @@ def test_the_tab_shows_the_rows_and_the_cards(monkeypatch):
     assert len(table) == 9
     cards = {m.label: m.value for m in tab.metric}
     assert cards["Plans"] == "9"
-    assert cards["Valid submissions"] == "77.8%"
+    assert cards["Valid submissions"] == "100.0%"  # 7 of the 7 feasible plans
     assert cards["Hubs at the lower bound"] == "28.6%"
     assert cards["Mean J (submitted)"].startswith(f"{batch_summary(read_batch(SMALL)).mean_J:.2f}")
     assert len(tab.image) == 1  # the H − LB histogram
