@@ -12,7 +12,7 @@ from typing import Any
 
 import networkx as nx
 
-from hackhive import checker, graph
+from hackhive import batch, checker, graph
 from hackhive.contracts import (
     Constraints,
     CostWeights,
@@ -441,26 +441,9 @@ BATCH_PATHS: tuple[Path, ...] = (
     ROOT / "data" / "sample" / "batch-test-100.csv",
 )
 BATCH_COMMAND = "uv run hackhive batch --split test --n 100 --out out/batch.csv"
-# #32's columns, in its spec's order. `tags` (#83's case-tag labels, ";"-joined) is optional.
-BATCH_COLUMNS = (
-    "plan_id",
-    "n_nodes",
-    "area_m2",
-    "k_lb",
-    "H",
-    "L",
-    "X",
-    "O",
-    "B",
-    "J",
-    "area_gap",
-    "submitted",
-    "rules_failed",
-    "fallback_used",
-    "ms",
-    "status",
-    "reason",
-)
+# #32's columns, read from `hackhive batch` itself so the two never drift (#106 review). `tags`
+# (#83's case-tag labels, ";"-joined) is an optional extra.
+BATCH_COLUMNS = tuple(batch.COLUMNS)
 _INTS = ("n_nodes", "k_lb", "H", "X", "B", "ms")
 _FLOATS = ("area_m2", "L", "O", "J", "area_gap")
 
@@ -510,15 +493,19 @@ class BatchSummary:
     strict_only: int
     infeasible: int
     input_error: int
-    valid_pct: float  # plans with a submission (ok or strict-only), of all plans
+    feasible: int  # loaded and not infeasible: #32's denominator (`batch.summary`)
+    valid_pct: float | None  # feasible plans with a submission (ok or strict-only); None if none
     at_lb_pct: float | None  # submitted plans whose hub count is the lower bound
     mean_J: float | None  # over submitted plans
 
 
 def batch_summary(rows: list[dict[str, Any]]) -> BatchSummary:
-    """Counts by status, the validity %, the % at the lower bound and the mean J."""
+    """Counts by status, the validity %, the % at the lower bound and the mean J. Validity is
+    #32's: submitted plans of the feasible ones (loaded and not infeasible), so the card and
+    `hackhive batch`'s summary give one number."""
     status = [r["status"] for r in rows]
     sub = [r for r in rows if r["submitted"]]
+    feasible = len(rows) - status.count("input_error") - status.count("infeasible")
     at_lb = [r for r in sub if r["H"] is not None and r["H"] == r["k_lb"]]
     js = [r["J"] for r in sub if r["J"] is not None]
     return BatchSummary(
@@ -527,7 +514,8 @@ def batch_summary(rows: list[dict[str, Any]]) -> BatchSummary:
         strict_only=status.count("submitted_strict_only"),
         infeasible=status.count("infeasible"),
         input_error=status.count("input_error"),
-        valid_pct=100 * len(sub) / len(rows) if rows else 0.0,
+        feasible=feasible,
+        valid_pct=100 * len(sub) / feasible if feasible else None,
         at_lb_pct=100 * len(at_lb) / len(sub) if sub else None,
         mean_J=sum(js) / len(js) if js else None,
     )

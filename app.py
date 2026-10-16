@@ -451,9 +451,10 @@ def batch_tab() -> None:
     cards[0].metric("Plans", f"{s.n}")
     cards[1].metric(
         "Valid submissions",
-        f"{s.valid_pct:.1f}%",
-        help=f"{s.ok} ok, {s.strict_only} strict-only (valid if the organisers agree, Q2), "
-        f"{s.infeasible} infeasible, {s.input_error} input error.",
+        "–" if s.valid_pct is None else f"{s.valid_pct:.1f}%",
+        help=f"Of the {s.feasible} feasible plans (loaded, not infeasible), as `hackhive batch` "
+        f"counts: {s.ok} ok, {s.strict_only} strict-only (valid if the organisers agree, Q2). "
+        f"Also {s.infeasible} infeasible, {s.input_error} input error.",
     )
     cards[2].metric(
         "Hubs at the lower bound",
