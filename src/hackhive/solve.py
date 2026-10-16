@@ -159,18 +159,18 @@ def _hub_point_errors(plan: Plan, hubs: Sequence[Hub], c: Constraints) -> list[V
 
 
 def _submission(
-    plan: Plan, zoning: Zoning, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
+    plan: Plan, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
 ) -> tuple[Submission, Metrics]:
     """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
     out = []
-    for zone, hub, ring in zip(_zone_order(zoning), hubs, rings, strict=True):
+    for hub, ring in zip(hubs, rings, strict=True):
         out.append(
             HubOut.model_validate(
                 {
                     "hub_id": hub.hub_id,
                     "room_id": hub.room_id,
                     "location": {"x": hub.location[0], "y": hub.location[1]},
-                    "assigned_rooms": [hub.room_id, *sorted(zone - {hub.room_id})],
+                    "assigned_rooms": hub.assigned_rooms,
                     "assigned_nodes": sorted(hub.ring[1:-1]),
                     "closed_sequence": hub.ring,
                     "route_segments": [s.model_dump(by_alias=True) for s in ring.segments],
@@ -259,11 +259,11 @@ def solve(
     except ValueError as e:
         return no_design(f"grid failed: {e}")
     try:
-        rings = route_rings(grid, plan, hubs, c, zones=_zone_order(zoning))
+        rings = route_rings(grid, plan, hubs, c)
     except ValueError as e:
         return no_design(f"routing failed: {e}")
 
-    sub, m = _submission(plan, zoning, hubs, rings, c)
+    sub, m = _submission(plan, hubs, rings, c)
     violations = check_rules(plan, sub, c)
     status = _status(violations)
     hub_nodes = {h.hub_id: len(h.assigned_nodes) for h in sub.hubs}

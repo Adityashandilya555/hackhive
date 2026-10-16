@@ -529,7 +529,7 @@ J_MAIN = {
     "13344": 108.1007,
 }
 # 13344's H1 ran 10 cm along opening_0's band (to H2's room) inside its own living_0; the strict
-# door rule moves it off the band: +0.2 m L (#79 review, point 3)
+# door rule moves it off the band: +0.2 m L, +0.1 m O (#79 review, point 3)
 D7_COST = {"13344": 0.3}
 
 

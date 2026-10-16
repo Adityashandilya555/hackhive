@@ -40,6 +40,7 @@ class Hub:
     room_id: str
     location: Point2
     ring: list[str]  # [hub_id, node ids in visiting order, hub_id]
+    assigned_rooms: list[str]  # the zone, hub's room first (slide 8)
     warnings: list[str] = field(default_factory=list)
 
 
@@ -107,7 +108,8 @@ def first_ring(
     points = {hub_id: best.xy, **{n.id: n.xy for n in nodes}}
     ring = order_ring(hub_id, [n.id for n in nodes], lambda a, b: manhattan(points[a], points[b]))
     warnings = ["wall_clearance_only"] if best.wall_clearance_only else []
-    return Hub(hub_id, room, best.xy, ring, warnings)
+    assigned = [room, *sorted(zone - {room})]
+    return Hub(hub_id, room, best.xy, ring, assigned, warnings)
 
 
 def order_ring(hub: str, nodes: Sequence[str], dist: Callable[[str, str], float]) -> list[str]:
