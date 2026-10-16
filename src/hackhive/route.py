@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, ClassVar
 import numpy as np
 import shapely
 
-from hackhive.contracts import Constraints, HubOut, Location, Plan, RouteSegment
+from hackhive.contracts import Constraints, HubOut, Location, Plan, RouteSegment, Submission
 
 if TYPE_CHECKING:  # grid imports this module, so these are for type hints only
     from hackhive.grid import LabelGrid
@@ -987,27 +987,30 @@ RIP_UP_PASSES = 2  # ADR-004: rip-up-and-reroute passes after the sequential one
 
 @dataclass(frozen=True)
 class Snapshot:
-    """Every ring after one pass (#80), with the pass's J and O from `checker.metrics`."""
+    """Every ring after one pass (#80): the pass's J and O from `checker.metrics`, and its
+    `check_rules` flags, `error` and `strict` (#93 review)."""
 
     pass_no: int  # 0: each ring routed alone; 1 …: rip-up-and-reroute passes
     rings: list[RoutedRing]  # in hub order
     J: float
     O: float  # noqa: E741 (slide 7's name)
+    errors: int = 0
+    strict: int = 0  # rule-4 retraces and rule-6 hub edges: valid only if the organisers agree
 
 
 @dataclass(frozen=True)
 class Routing:
-    """`route_passes`' result: the lowest-J pass's rings, and every pass."""
+    """`route_passes`' result: the best pass's rings (`best_pass`), and every pass."""
 
     rings: list[RoutedRing]
     snapshots: list[Snapshot]
-    best: int  # the index of `rings`' snapshot (the first of equal J)
+    best: int  # the index of `rings`' snapshot
 
 
 def route_rings(
     grid: LabelGrid, plan: Plan, hubs: Sequence[Hub], c: Constraints = _DEFAULT
 ) -> list[RoutedRing]:
-    """Every hub's ring, in hub order: `route_passes`' lowest-J pass."""
+    """Every hub's ring, in hub order: `route_passes`' best pass."""
     return route_passes(grid, plan, hubs, c).rings
 
 
@@ -1025,8 +1028,9 @@ def route_passes(
     Pass 0 routes each ring alone, in hub order. Every later pass rips each ring up in turn,
     longest (pass 0's L) first, and reroutes it with an occupancy penalty: each cell edge that
     another cable uses, this ring's own earlier legs included, costs J's overlap weight once
-    per cable (`overlap_weight_cells`). The pass with the lowest total J (`checker.metrics`,
-    crossings and overlaps between rings included) wins, so J is never above pass 0's.
+    per cable (`overlap_weight_cells`). `best_pass` picks the winner: validity first, then the
+    lowest total J (`checker.metrics`, crossings and overlaps between rings included), so J is
+    never above pass 0's unless pass 0 has more `error` or `strict` flags.
     """
     from hackhive.checker import _free_space  # checker imports grid, which imports us
     from hackhive.graph import build_graph
@@ -1066,7 +1070,7 @@ def route_passes(
     first = [route(i, None) for i in range(len(hubs))]
     segments = [segs for segs, _ in first]
     cells = [legs for _, legs in first]
-    snapshots = [_snapshot(0, hubs, segments, c)]
+    snapshots = [_snapshot(0, plan, hubs, segments, c)]
     order = sorted(range(len(hubs)), key=lambda i: -snapshots[0].rings[i].ring_length_m)
     occupancy = Occupancy()
     for legs in cells:
@@ -1077,16 +1081,30 @@ def route_passes(
             for path in cells[i]:
                 occupancy.clear(path)
             segments[i], cells[i] = route(i, occupancy)
-        snapshots.append(_snapshot(pass_no, hubs, segments, c))
-    best = min(range(len(snapshots)), key=lambda k: snapshots[k].J)
+        snapshots.append(_snapshot(pass_no, plan, hubs, segments, c))
+    best = best_pass(snapshots)
     return Routing(snapshots[best].rings, snapshots, best)
 
 
+def best_pass(snapshots: Sequence[Snapshot]) -> int:
+    """The winning pass: fewest `error` flags, then fewest `strict` ones, then the lowest J; the
+    first on a tie. Validity before J, as the project ranks (an invalid plan scores zero), so a
+    rip-up that lowers J but adds a rule-4 retrace never wins (#93 review)."""
+    return min(
+        range(len(snapshots)),
+        key=lambda k: (snapshots[k].errors, snapshots[k].strict, snapshots[k].J),
+    )
+
+
 def _snapshot(
-    pass_no: int, hubs: Sequence[Hub], segments: Sequence[list[RouteSegment]], c: Constraints
+    pass_no: int,
+    plan: Plan,
+    hubs: Sequence[Hub],
+    segments: Sequence[list[RouteSegment]],
+    c: Constraints,
 ) -> Snapshot:
-    """Every ring of one pass, scored together by `checker.metrics`."""
-    from hackhive.checker import metrics  # checker imports grid, which imports this module
+    """Every ring of one pass, scored together by `checker.metrics` and `check_rules`."""
+    from hackhive.checker import check_rules, metrics  # checker imports grid, which imports us
 
     outs = [
         HubOut.model_validate(
@@ -1108,7 +1126,15 @@ def _snapshot(
         RoutedRing(hub.hub_id, list(segs), m.per_hub[hub.hub_id].L, m.per_hub[hub.hub_id].B)
         for hub, segs in zip(hubs, segments, strict=True)
     ]
-    return Snapshot(pass_no, rings, m.J, m.O)
+    sub = Submission(
+        plan_id=plan.plan_id,
+        units="m",
+        hubs=outs,
+        reported_metrics={"hub_count": m.H, "total_length_m": m.L},
+    )
+    flags = check_rules(plan, sub, c)
+    errors = sum(v.severity == "error" for v in flags)
+    return Snapshot(pass_no, rings, m.J, m.O, errors, sum(v.severity == "strict" for v in flags))
 
 
 # --------------------------------------------------------------------------- benchmark (#19)

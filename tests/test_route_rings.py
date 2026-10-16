@@ -568,12 +568,12 @@ def _retraces(case) -> int:
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
 def test_occupancy_j_not_above_the_sequential_baseline(routed, plan_id):
     """C17: J after the rip-up passes ≤ J of the sequential baseline (pass 0), as checker.metrics
-    computes it from the submitted polylines."""
+    computes it from the submitted polylines; the winner is `best_pass`'s."""
     case = routed[plan_id]
     best = metrics(submission(case).hubs, C).J
     base = metrics(submission(_sequential(case)).hubs, C).J
     assert best <= base + 1e-9
-    assert best == pytest.approx(min(s.J for s in case.routing.snapshots), abs=1e-9)
+    assert case.routing.best == route.best_pass(case.routing.snapshots)
 
 
 def test_occupancy_576_overlap_not_above_the_baseline(routed):
@@ -592,8 +592,20 @@ def test_occupancy_snapshots_one_per_pass_and_no_error(routed, plan_id):
         view = SimpleNamespace(**{**vars(case), "rings": snap.rings})
         m = metrics(submission(view).hubs, C)
         assert (snap.J, snap.O) == (pytest.approx(m.J, abs=1e-9), pytest.approx(m.O, abs=1e-9))
-        assert not [v for v in check_rules(case.plan, submission(view), C) if v.severity == "error"]
+        flags = check_rules(case.plan, submission(view), C)
+        assert not [v for v in flags if v.severity == "error"] and snap.errors == 0
+        assert snap.strict == sum(v.severity == "strict" for v in flags)
     assert case.routing.rings == snaps[case.routing.best].rings
+
+
+def test_occupancy_best_pass_ranks_validity_before_j():
+    """#93 review: a pass with a lower J but one more strict flag (a rule-4 retrace) loses; an
+    `error` outranks both; equal flags fall to J, then to the first pass."""
+    snap = route.Snapshot
+    base = snap(0, [], 90.270, 6.86, 0, 1)
+    assert route.best_pass([base, snap(1, [], 90.170, 0.20, 0, 2)]) == 0
+    assert route.best_pass([snap(0, [], 50.0, 0.0, 1, 0), snap(1, [], 90.0, 0.0, 0, 3)]) == 1
+    assert route.best_pass([base, snap(1, [], 88.0, 0.2, 0, 1), snap(2, [], 88.0, 0.2, 0, 1)]) == 1
 
 
 def test_occupancy_passes_is_a_setting(routed):
