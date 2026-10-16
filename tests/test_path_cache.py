@@ -157,18 +157,32 @@ def test_every_cached_pair_is_at_least_the_manhattan_bound(plan_id):
     nodes, _ = plan_points(grid, plan, C)
     pc = PathCache.build(grid, nodes, C)
     pairs = [(a, b) for a in nodes for b in nodes if a != b]
-    assert pairs
+    reached = [(a, b) for a, b in pairs if not math.isinf(pc.dist(a, b))]
+    assert reached
     for a, b in pairs:
         p = pc.path(a, b)
         assert p.dist >= _manhattan(nodes[a], nodes[b]) - 1e-9
+        assert pc.path(b, a).dist == p.dist  # both searched: ties may pick other cells
+        if (a, b) not in reached:  # 576's N2 room has no door
+            assert p.cells == [] and math.isinf(pc.dist(b, a))
+            continue
         assert p.cells[0] == nodes[a] and p.cells[-1] == nodes[b]
         for (r0, c0), (r1, c1) in zip(p.cells, p.cells[1:], strict=False):
             assert r0 == r1 or c0 == c1
         assert path_length(p.cells) >= _manhattan(nodes[a], nodes[b])
         assert path_length(p.cells) + _w(grid) * bends(p.cells) == pytest.approx(p.dist)
         assert p.polyline == [grid.to_xy(cell) for cell in p.cells]
-        assert pc.path(b, a).cells == p.cells[::-1]  # symmetry: the same cable, reversed
         assert pc.cost_m(a, b) == pytest.approx(p.dist * grid.cell_m)
+
+
+def test_a_target_reads_the_source_cable_reversed():
+    grid = _grid("3086")
+    plan = load_plan(FIXTURES / "plans" / "plan-3086.json")
+    nodes, cands = plan_points(grid, plan, C)
+    (n, cell), (cand, cand_cell) = next(iter(nodes.items())), next(iter(cands.items()))
+    pc = PathCache.build(grid, {n: cell}, C, targets={cand: cand_cell})
+    assert pc.path(cand, n).cells == pc.path(n, cand).cells[::-1]
+    assert pc.path(cand, n).dist == pc.dist(n, cand)
 
 
 def test_unknown_or_target_only_pairs_raise():
@@ -191,7 +205,7 @@ def test_cache_is_built_once_per_plan_grid_and_weights(monkeypatch):
     real = route.search
     monkeypatch.setattr(route, "search", lambda *a, **k: calls.append(1) or real(*a, **k))
     grid = _grid("5088")
-    plan = load_plan(FIXTURES / "plans" / f"plan-5088.json")
+    plan = load_plan(FIXTURES / "plans" / "plan-5088.json")
     nodes, _ = plan_points(grid, plan, C)
 
     first = PathCache.cached(grid, nodes, C)
@@ -223,7 +237,7 @@ def test_bench_prints_ms_per_plan_and_percentiles(tmp_path, capsys):
     (tmp_path / "notes.txt").write_text("not a plan")
     assert route.main(["--bench", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    rows = [line for line in out.splitlines() if line.startswith(("5088", "3086"))]
+    rows = [line for line in out.splitlines() if line.startswith(("PLAN_5088", "PLAN_3086"))]
     assert len(rows) == 2
     assert "ms" in out
     assert "p50" in out and "p95" in out
