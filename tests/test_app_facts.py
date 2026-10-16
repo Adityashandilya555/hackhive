@@ -381,3 +381,41 @@ def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
     at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
     _run(at)
     assert at.main.image and calls.count("__main__") == 1, calls
+
+
+# --------------------------------------------------------------------------- #83 banners and chips
+
+
+def _upload_raw(at: AppTest, name: str, content: bytes) -> AppTest:
+    at.sidebar.radio(key="source").set_value("Upload")
+    _run(at)
+    at.sidebar.file_uploader(key="upload").set_value((name, content, "application/json"))
+    return _run(at)
+
+
+def test_banner_5924_is_strict_only_and_chips_show():
+    at = _run()
+    assert any("strict" in w.value and "retraces" in w.value for w in at.main.warning)
+    assert any("one-node ring" in m.value for m in at.main.markdown)
+
+
+def test_banner_5088_is_ok():
+    at = _run()
+    at.sidebar.selectbox(key="fixture").set_value("5088")
+    _run(at)
+    assert any("✓" in s.value for s in at.main.success)
+
+
+def test_banner_area_x4_upload_is_red_and_plan_still_draws():
+    import json
+
+    raw = json.loads((PLANS / "plan-5924.json").read_text(encoding="utf-8"))
+    raw["area"] = raw["area"] * 4
+    at = _upload_raw(_run(), "big.json", json.dumps(raw).encode())
+    assert any("> 100" in e.value and "m²" in e.value for e in at.main.error)
+    assert at.main.image  # the Plan tab still draws
+
+
+def test_banner_input_error_on_an_unreadable_upload():
+    at = _upload_raw(_run(), "bad.json", b"not json at all")
+    assert any("input_error" in e.value for e in at.main.error)
