@@ -348,10 +348,11 @@ def read_layers(raw: dict, c: Constraints | None = None) -> Layers:
 # --------------------------------------------------------------------------- the Plan (#6)
 
 NODE_CLEARANCE_M = 0.5  # slide 2: node clearance, 0.5 m from walls
-# An eligible room further than this past `inner` means `inner` doesn't match the rooms (#78).
-# ResPlan's 16,317 train/val/test plans: at most 16% past it, except 8 with a stray room drawn
-# 70-100% outside the house (16067, 12536, 8137, …); its 683 augmented plans: 541 past 20%.
-ROOM_OUTSIDE_INNER_MAX = 0.20
+# An eligible room further than this past `inner` gets a warning: `inner` may not match the rooms
+# (#78). ResPlan's 16,317 train/val/test plans: at most 16% past it, except 8 with a stray room
+# drawn 70-100% outside the house (16067, 12536, 8137, …); its 683 augmented plans: 541 past 20%.
+# Only a node outside `inner` rejects the plan: no cable can reach it (rule 5).
+ROOM_OUTSIDE_INNER_WARN = 0.20
 _GAP_EPS_M = 1e-6  # closes float-sized gaps when a folded sliver's union isn't one polygon
 _MIC_TOL_M = 1e-4  # max clearance to 0.1 mm; points that close to it count as tied
 
@@ -630,13 +631,6 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
         for n, (t, i, p) in enumerate(ordered, start=1)
     ]
     room_id = {r.label: r.id for r in rooms}
-    for r in rooms:
-        out = 1 - r.polygon.intersection(layers.inner).area / r.area_m2 if r.area_m2 else 0
-        if r.eligible and out > ROOM_OUTSIDE_INNER_MAX:
-            raise InputFormatError(
-                f"plan {pid}: {r.id} ({r.label}) lies {out:.0%} outside inner, "
-                "so inner doesn't match the rooms"
-            )
 
     inner, walls, windows, front_doors = layers.inner, layers.wall, layers.window, layers.front_door
     door_polys = layers.door
@@ -660,6 +654,18 @@ def load_plan(path_or_raw: str | Path | dict, c: Constraints | None = None) -> P
             xy, clearance = _node_spot(r.polygon, obstacles)
             nodes.append(Node(id=f"N{k}", room_id=r.id, xy=xy, clearance_m=clearance, given=False))
     room_of = {r.id: r for r in rooms}
+    reach = inner.buffer(c.tolerance_m)
+    for n in nodes:
+        if not reach.covers(Point(n.xy)):
+            r = room_of[n.room_id]
+            raise InputFormatError(
+                f"plan {pid}: node {n.id} of {r.id} ({r.label}) lies outside inner, "
+                "so no cable can reach it"
+            )
+    for r in rooms:
+        out = 1 - r.polygon.intersection(inner).area / r.area_m2 if r.area_m2 else 0
+        if r.eligible and out > ROOM_OUTSIDE_INNER_WARN:
+            warnings.append(f"{r.id} ({r.label}) lies {out:.0%} outside inner")
     warnings += [
         f"{room_of[n.room_id].id} ({room_of[n.room_id].label}): node {n.id} clearance "
         f"{n.clearance_m:.2f} m < {NODE_CLEARANCE_M} m"
