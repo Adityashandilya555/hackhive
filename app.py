@@ -31,9 +31,15 @@ from hackhive.solve import (
 )
 from hackhive.solve import enumerate as enumerate_arrangements
 from hackhive.ui import (
+    CASES_SOURCE,
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
     best_by_hub_count,
+    case_check,
+    case_option_label,
+    case_options,
+    case_plan_path,
+    case_rows,
     case_tags,
     checklist_line,
     filter_by_hubs,
@@ -110,6 +116,8 @@ def load(source: str, key: str, content: bytes | None = None) -> tuple[Plan, nx.
         plan = plan_from_bytes(content or b"")
     elif source == RESPLAN:
         plan = load_plan(resplan_raw(RESPLAN_JSONL, key))
+    elif source == CASES_SOURCE:
+        plan = load_plan(case_plan_path(_case(key)))
     else:
         plan = load_plan(fixture_path(key))
     return plan, graph.build_graph(plan)
@@ -244,7 +252,7 @@ def _ident(source: str, key: str, content: bytes | None, settings: str) -> str:
 def pick_plan() -> tuple[str, str, bytes | None] | None:
     """The chosen plan as (source, key, content), or None while an upload is pending."""
     st.header("Plan")
-    sources = [FIXTURE, *([RESPLAN] if RESPLAN_JSONL.exists() else []), UPLOAD]
+    sources = [FIXTURE, CASES_SOURCE, *([RESPLAN] if RESPLAN_JSONL.exists() else []), UPLOAD]
     source = st.radio("Source", sources, key="source", horizontal=True)
     if source == FIXTURE:
         ids = fixture_ids()
@@ -256,6 +264,16 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
             key="fixture",
         )
         return source, plan_id, None
+    if source == CASES_SOURCE:  # #85: one small plan per dataset case (#84)
+        rows = {r["case"]: r for r in case_rows()}
+        case = st.selectbox(
+            "Case",
+            case_options(list(rows.values())),
+            format_func=lambda c: case_option_label(rows[c]),
+            key="case",
+            help="Every case the dataset produces, grouped: designs, warnings, no design.",
+        )
+        return source, case, None
     if source == RESPLAN:
         plan_id = st.text_input("ResPlan plan id", value=DEFAULT_FIXTURE, key="resplan_id")
         return source, plan_id.strip(), None
@@ -263,6 +281,20 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
     if up is None:
         return None
     return source, up.name, up.getvalue()
+
+
+def _case(case_id: str) -> dict:
+    """A `cases.json` row by its case id (#85)."""
+    return next(r for r in case_rows() if r["case"] == case_id)
+
+
+def case_callout(case_id: str, side: Sidecar) -> None:
+    """#85: what the case shows, and its expected status and hub count against what solve() gives
+    now (green when they match)."""
+    row = _case(case_id)
+    st.info(f"This case shows: {md_text(row['look_for'])}")
+    kind, text = case_check(row, side)
+    getattr(st, kind)(md_text(text))
 
 
 def _solution_name(path: Path) -> str:
@@ -652,6 +684,8 @@ def page() -> None:
         st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
     best, plan_tab, arr_tab = st.tabs(["Best", "Plan", "Arrangements"])
     with best:
+        if source == CASES_SOURCE:
+            case_callout(key, side)
         is_best = solution is None or (best_path is not None and Path(best_path) == solution)
         best_tab(source, key, content, plan, G, solution, side, settings_c, counting, is_best)
     with arr_tab:
