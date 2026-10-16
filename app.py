@@ -70,6 +70,7 @@ from hackhive.ui import (
     step_caption,
     submission_mismatch,
     tag_chips,
+    tag_label,
     tile_caption,
     tile_verdict,
     verdict_line,
@@ -371,7 +372,9 @@ def best_tab(
         if png is not None:
             st.image(png, width="stretch")
         st.caption(step_caption(sub, step))
-        if path.is_relative_to(SOLVED_DIR):  # solve()'s design, not a hand-made fixture
+        # solve()'s design only: its badge and violations come from solve()'s sidecar, so never
+        # over a gallery arrangement or a hand-made file (#107 x #111, nexuszephyr's review)
+        if is_best:
             what_if = "" if side.settings.is_problem_statement else ".what-if"
             st.download_button(
                 "Download presentation image",
@@ -559,6 +562,10 @@ def batch_tab() -> None:
         st.error(f"Can't read {path.name}. {e}")
         st.code(BATCH_COMMAND, language="bash")
         return
+    if not rows:  # `hackhive batch --n 0`, or a split with no plans: only the header (#99 review)
+        st.info(f"{path.name} has no plans yet. Run the batch over the test split, then reload:")
+        st.code(BATCH_COMMAND, language="bash")
+        return
     s = batch_summary(rows)
     st.caption(f"{path.relative_to(ROOT) if ROOT in path.parents else path} · {s.n} plans")
     cards = st.columns(4)
@@ -588,19 +595,17 @@ def batch_tab() -> None:
         _open_button(pick, "batch_open_go")
         if open_target(pick) is None:
             st.caption("Only test plans open here, or any id once data/resplan/plans.jsonl is in.")
-    columns = [*BATCH_COLUMNS, *(["tags"] if "tags" in rows[0] else [])]
+    columns = [c for c in BATCH_COLUMNS if c in rows[0]]  # `tags` only when the CSV has it
     st.dataframe([{c: r.get(c) for c in columns} for r in rows], hide_index=True)
     st.subheader("Plans per case tag")
     tags = plans_by_tag(rows)
     if not tags:
-        st.caption("Case tags appear when the CSV has a `tags` column (#83's labels, from #32).")
-    for tag, plan_ids in tags.items():
-        with st.expander(f"{md_text(tag)} · {len(plan_ids)}"):
-            for col, pid in zip(st.columns(4), plan_ids[:12], strict=False):
-                with col:
-                    _open_button(pid, f"tag_{tag}_{pid}")
-            for i, pid in enumerate(plan_ids[12:], start=12):
-                with st.columns(4)[i % 4]:
+        st.caption("Case tags appear when the CSV has a `tags` column (#83's ids, from #32).")
+    for tag, plan_ids in tags.items():  # keyed by id, so the buttons' keys stay stable (#108)
+        with st.expander(f"{md_text(tag_label(tag))} · {len(plan_ids)}"):
+            cols = st.columns(4)
+            for i, pid in enumerate(plan_ids):  # every plan, 4 to a row (#99 review)
+                with cols[i % 4]:
                     _open_button(pid, f"tag_{tag}_{pid}")
 
 

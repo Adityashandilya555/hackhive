@@ -26,7 +26,7 @@ from hackhive.contracts import (
     Violation,
     lower_bound,
 )
-from hackhive.io import load_plan
+from hackhive.io import NODE_CLEARANCE_M, load_plan
 from hackhive.solve import Result
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -580,6 +580,29 @@ BATCH_COMMAND = "uv run hackhive batch --split test --n 100 --out out/batch.csv"
 # #32's columns, read from `hackhive batch` itself so the two never drift (#106 review). `tags`
 # (#83's case-tag labels, ";"-joined) is an optional extra.
 BATCH_COLUMNS = tuple(batch.COLUMNS)
+OPTIONAL_COLUMNS = ("tags",)  # #108's case-tag ids; a CSV from before it still loads
+# `cases.case_tags` ids (what #108 writes) → what the tab shows. The +k of "hubs > lower bound"
+# lives in the plan's own label, not its id, so the batch groups every above-the-bound plan.
+TAG_LABELS = {
+    "open_passage": "open passage",
+    "en_suite": "en-suite single-door",
+    "one_node_ring": "one-node ring",
+    "lb_met": "hubs = lower bound",
+    "above_lb": "hubs > lower bound",
+    "many_hubs": "4+ hubs",
+    "disconnected": "disconnected groups",
+    "isolated": "isolated eligible room",
+    "multi_living": "multi-part living",
+    "low_clearance": f"node clearance < {NODE_CLEARANCE_M:g} m",
+    "folded": "folded sliver",
+}
+
+
+def tag_label(tag_id: str) -> str:
+    """A case-tag id's label; an id the tab doesn't know yet is shown as is."""
+    return TAG_LABELS.get(tag_id, tag_id)
+
+
 _INTS = ("n_nodes", "k_lb", "H", "X", "B", "ms")
 _FLOATS = ("area_m2", "L", "O", "J", "area_gap")
 
@@ -602,7 +625,8 @@ def read_batch(path: Path) -> list[dict[str, Any]]:
     value that isn't a number, so the tab can say what's wrong."""
     with path.open(encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
-        missing = [c for c in BATCH_COLUMNS if c not in (reader.fieldnames or [])]
+        have = reader.fieldnames or []
+        missing = [c for c in BATCH_COLUMNS if c not in OPTIONAL_COLUMNS and c not in have]
         if missing:
             raise ValueError(f"{path.name}: missing column(s) {', '.join(missing)} (#32's CSV)")
         rows = []
@@ -668,7 +692,8 @@ def hub_gap_counts(rows: list[dict[str, Any]]) -> dict[int, int]:
 
 
 def plans_by_tag(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
-    """Plan ids per case tag (#83), from the optional `tags` column; empty without it."""
+    """Plan ids per case-tag id (#83; #108 writes `cases.case_tags` ids), from the optional `tags`
+    column; empty without it. `tag_label` gives each id's label."""
     out: dict[str, list[str]] = {}
     for r in rows:
         for tag in filter(None, (t.strip() for t in (r.get("tags") or "").split(";"))):
