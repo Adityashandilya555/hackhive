@@ -1,18 +1,29 @@
-"""The walking skeleton (#16): one plan in, a gated slide-8 submission and its sidecar out.
+"""One plan in, a gated slide-8 submission and its sidecar out (#16, #22).
 
-`solve(plan, c)` runs the stages in order: room graph → every zoning → the minimum-hub zoning
-whose first-cut rings are shortest (Manhattan) → hubs and ring order → label raster → routed
-rings → the checker mirror. `submit(result, out_dir)` is the gate (C43): an invalid or missing
-plan scores zero, so a submission is written only when the checker finds no `error`; with only
-`strict` ones it is written and flagged `submitted_strict_only`. The sidecar is always written.
+`enumerate(plan, c)` ranks every arrangement: each zoning with each zone's routed choice of hub
+spot and ring order (`rings.best_ring`, once per zone however many zonings share it), its rings
+routed alone and scored together by the checker mirror under both counting readings, sorted by
+`rank_key` (H, the worse J, area gap, signature). `solve(plan, c)` fully routes (`route`: the
+rip-up passes) and checks the arrangements in rank order, one hub count at a time, and submits the
+first clean one, else the best strict-only one; the walking skeleton's first cut (#16) is the last
+candidate. `submit(result, out_dir)` is the gate (C43): an invalid or missing plan scores zero, so
+a submission is written only when the checker finds no `error`; with only `strict` ones it is
+written and flagged `submitted_strict_only`. The sidecar is always written.
+
+`enumerate` shadows the builtin in this module, as the spec names it: use `builtins.enumerate`.
 """
 
 from __future__ import annotations
 
+import argparse
+import builtins
+import dataclasses
+import functools
 import hashlib
 import json
 import re
-from collections.abc import Callable, Sequence
+import sys
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -20,8 +31,17 @@ import networkx as nx
 from shapely.geometry import Point
 
 from hackhive import __version__
-from hackhive.checker import HUB_POINT, Metrics, check_rules, metrics, reported_mismatches
+from hackhive.checker import (
+    HUB_POINT,
+    READINGS,
+    Metrics,
+    area_gap,
+    check_rules,
+    metrics,
+    reported_mismatches,
+)
 from hackhive.contracts import (
+    ArrangementUsed,
     Bounds,
     Constraints,
     CostBreakdown,
@@ -29,6 +49,7 @@ from hackhive.contracts import (
     HubOut,
     Plan,
     Provenance,
+    RouteSegment,
     Sidecar,
     Submission,
     Violation,
@@ -37,8 +58,9 @@ from hackhive.contracts import (
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
 from hackhive.io import InputFormatError, load_plan
-from hackhive.rings import Hub, best_ring, first_ring, manhattan
-from hackhive.route import RoutedRing, route_rings
+from hackhive.parallel import map_in_order
+from hackhive.rings import Hub, best_ring_routed, first_ring, manhattan
+from hackhive.route import RoutedRing, Routing, route_passes, route_rings
 from hackhive.what_if import what_if_note
 from hackhive.zoning import (
     Infeasible,
@@ -115,7 +137,7 @@ def _first_cut(zoning: Zoning, plan: Plan, g: nx.Graph, c: Constraints) -> tuple
     """Hubs and ring orders for one zoning, and the sum of their Manhattan ring lengths."""
     points = {n.id: n.xy for n in plan.nodes}
     hubs, cost = [], 0.0
-    for i, zone in enumerate(_zone_order(zoning), start=1):
+    for i, zone in builtins.enumerate(_zone_order(zoning), start=1):
         hub = first_ring(zone, plan, g, c, hub_id=f"H{i}")
         at = {**points, hub.hub_id: hub.location}
         cost += sum(manhattan(at[a], at[b]) for a, b in zip(hub.ring, hub.ring[1:], strict=False))
@@ -175,26 +197,29 @@ def _hub_point_errors(plan: Plan, hubs: Sequence[Hub], c: Constraints) -> list[V
     return out
 
 
+def _hub_out(hub: Hub, segments: Sequence[RouteSegment], ring_length_m: float = 0.0) -> HubOut:
+    """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
+    return HubOut.model_validate(
+        {
+            "hub_id": hub.hub_id,
+            "room_id": hub.room_id,
+            "location": {"x": hub.location[0], "y": hub.location[1]},
+            "assigned_rooms": hub.assigned_rooms,
+            "assigned_nodes": sorted(hub.ring[1:-1]),
+            "closed_sequence": hub.ring,
+            "route_segments": [s.model_dump(by_alias=True) for s in segments],
+            "ring_length_m": ring_length_m,
+        }
+    )
+
+
 def _submission(
     plan: Plan, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
 ) -> tuple[Submission, Metrics]:
-    """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
-    out = []
-    for hub, ring in zip(hubs, rings, strict=True):
-        out.append(
-            HubOut.model_validate(
-                {
-                    "hub_id": hub.hub_id,
-                    "room_id": hub.room_id,
-                    "location": {"x": hub.location[0], "y": hub.location[1]},
-                    "assigned_rooms": hub.assigned_rooms,
-                    "assigned_nodes": sorted(hub.ring[1:-1]),
-                    "closed_sequence": hub.ring,
-                    "route_segments": [s.model_dump(by_alias=True) for s in ring.segments],
-                    "ring_length_m": ring.ring_length_m,
-                }
-            )
-        )
+    out = [
+        _hub_out(hub, ring.segments, ring.ring_length_m)
+        for hub, ring in zip(hubs, rings, strict=True)
+    ]
     rooms = {r.id: r for r in plan.rooms}
     areas = {h.hub_id: sum(rooms[r].area_m2 for r in h.assigned_rooms) for h in out}
     m = metrics(out, c, hub_areas=areas)
@@ -205,6 +230,136 @@ def _submission(
         reported_metrics={"hub_count": m.H, "total_length_m": m.L},
     )
     return sub, m
+
+
+# --------------------------------------------------------------------------- ranking (#22)
+
+_ZONE_HUB = "H"  # a zone's hub id while memoised; each zoning renames it H1… in zone order
+
+
+@dataclass(frozen=True)
+class Arrangement:
+    """One zoning, each zone with its routed choice of hub spot and ring order (#20), costed with
+    every ring routed alone (pass 0; `route` runs the rip-up passes)."""
+
+    zoning: Zoning
+    hubs: list[Hub]  # H1… in zone order
+    rings: list[list[RouteSegment]]  # each hub's ring routed alone, in hub order
+    J_by_reading: dict[str, float]  # checker.metrics' J under each counting reading (D3)
+    area_gap: float  # max − min of the hubs' assigned eligible area (C47)
+    signature: str  # the zone signature: the last tie-break, for determinism only
+
+    @property
+    def H(self) -> int:
+        return len(self.hubs)
+
+    @property
+    def J(self) -> float:
+        """The worse reading's J (D3): ranking by it submits the design whose worse J is lowest."""
+        return max(self.J_by_reading.values())
+
+
+def rank_key(a: Arrangement) -> tuple[int, float, float, str]:
+    """Fewest hubs, then J to 1e-6 m (float noise never decides), then the smaller area gap, then
+    the zone signature (slides 3, 6; C16, C47; decision_conventions §7)."""
+    return (a.H, round(a.J, 6), a.area_gap, a.signature)
+
+
+def signature(zoning: Zoning) -> str:
+    """The zone signature: each zone's rooms, zones in hub order, e.g. "bedroom_0+living_0|…"."""
+    return "|".join("+".join(sorted(zone)) for zone in _zone_order(zoning))
+
+
+def _renamed(hub: Hub, segments: list[RouteSegment], hub_id: str) -> tuple[Hub, list[RouteSegment]]:
+    """A memoised zone ring under the hub id its zoning gives it."""
+
+    def swap(stop: str) -> str:
+        return hub_id if stop == hub.hub_id else stop
+
+    return (
+        dataclasses.replace(hub, hub_id=hub_id, ring=[swap(s) for s in hub.ring]),
+        [s.model_copy(update={"from_": swap(s.from_), "to": swap(s.to)}) for s in segments],
+    )
+
+
+MIN_POOL_ZONES = 4  # fewer zones to route are routed inline: starting workers costs ~1 s
+
+
+def _zone_ring(
+    zone: Zone, plan: Plan, g: nx.Graph, grid: LabelGrid, c: Constraints
+) -> tuple[Hub, list[RouteSegment]] | None:
+    """A zone's `best_ring` and its ring routed alone (pass 0), or None if the zone can't be built
+    (no node, no hub spot, a ring that can't be ordered or routed). Module-level, so a worker
+    process can import it (`parallel.map_in_order`)."""
+    try:
+        hub, segments = best_ring_routed(zone, plan, g, grid, c, hub_id=_ZONE_HUB)
+    except (Infeasible, ValueError):  # ValueError: no node, > 8 nodes
+        return None
+    return None if segments is None else (hub, segments)
+
+
+def _ranker(
+    plan: Plan, g: nx.Graph, grid: LabelGrid, c: Constraints, workers: int | None = None
+) -> Callable[[Sequence[Zoning]], list[Arrangement]]:
+    """Ranks zonings into arrangements. Each zone's ring is built once for the ranker's life (so
+    `solve` can rank one hub count at a time), and a call's new zones are built in parallel
+    (`workers` as in `parallel.map_in_order`): 13344's 21 three-hub zones take 32 s on one core,
+    11 s on four (#22 review). A zoning with a zone that can't be built is left out.
+    """
+    area = {r.id: r.area_m2 for r in plan.rooms}
+    memo: dict[Zone, tuple[Hub, list[RouteSegment]] | None] = {}
+
+    def rank(zonings: Sequence[Zoning]) -> list[Arrangement]:
+        todo = sorted({z for zoning in zonings for z in zoning} - memo.keys(), key=sorted)
+        build = functools.partial(_zone_ring, plan=plan, g=g, grid=grid, c=c)
+        pool = workers if len(todo) >= MIN_POOL_ZONES else 1
+        memo.update(zip(todo, map_in_order(build, todo, pool), strict=True))
+        out = []
+        for zoning in zonings:
+            built = [memo[zone] for zone in _zone_order(zoning)]
+            if any(b is None for b in built):
+                continue
+            named = [_renamed(*b, f"H{i}") for i, b in builtins.enumerate(built, start=1)]
+            hubs = [hub for hub, _ in named]
+            rings = [segs for _, segs in named]
+            outs = [_hub_out(hub, segs) for hub, segs in named]
+            J = {reading: metrics(outs, c, reading=reading).J for reading in READINGS}
+            gap = area_gap(sum(area[r] for r in hub.assigned_rooms) for hub in hubs)
+            out.append(Arrangement(zoning, hubs, rings, J, gap, signature(zoning)))
+        return sorted(out, key=rank_key)
+
+    return rank
+
+
+def _zonings(plan: Plan, g: nx.Graph, c: Constraints) -> list[Zoning]:
+    area, nodes = eligible_area_and_nodes(plan)
+    return enumerate_zonings(g, area, c, nodes=nodes, hub_capable=hub_capable_rooms(plan, c))
+
+
+def enumerate(
+    plan: Plan, c: Constraints | None = None, k: int | None = None, *, workers: int | None = None
+) -> list[Arrangement]:
+    """Every arrangement (C29), or only those with `k` hubs, ranked by `rank_key`: for each
+    zoning, each zone's `best_ring` (once per zone, in parallel over `workers`), its ring routed
+    alone, and the zoning's totals by the checker mirror under both counting readings (D3),
+    crossings and overlaps between its rings included. J is pass 0's (before the rip-up passes).
+    Raises `Infeasible` or `TooLarge` as `enumerate_zonings` does, and ValueError if the grid
+    can't be built.
+
+    ponytail: every zone's best_ring is routed, ~1.2 s a zone on one core (13344: 63 zones). A
+    lower bound can't prune it: `rings.shortlist`'s sits 18-38 m under 13344's three-hub J (#22
+    review). Speed up the corner scoring (`route._best_corners`) if the gallery needs it faster.
+    """
+    c = c or Constraints()
+    g = eligible_graph(build_graph(plan, c))
+    zonings = [z for z in _zonings(plan, g, c) if k is None or len(z) == k]
+    return _ranker(plan, g, LabelGrid.from_plan(plan, cell_m=c.grid_m), c, workers)(zonings)
+
+
+def route(arrangement: Arrangement, plan: Plan, c: Constraints | None = None) -> Routing:
+    """An arrangement's full geometry on demand: every ring after the rip-up passes (#80)."""
+    c = c or Constraints()
+    return route_passes(LabelGrid.from_plan(plan, cell_m=c.grid_m), plan, arrangement.hubs, c)
 
 
 # --------------------------------------------------------------------------- solve
@@ -225,17 +380,78 @@ def _rules_reason(violations: Sequence[Violation]) -> str:
     return "the design breaks " + ", ".join(f"rule {r}" for r in rules)
 
 
+def _proof(k_found: int | None, k_lb: int, fewest: int) -> str:
+    """What `k_found` is proven to be: `lb_met` at the lower bound; `exhaustive` at the fewest
+    hubs any zoning uses (every zoning was enumerated); else `none`: a count with fewer hubs had
+    only strict-only designs, or zonings that couldn't be built (#22 review)."""
+    if k_found == k_lb:
+        return "lb_met"
+    return "exhaustive" if k_found == fewest else "none"
+
+
+def _why_not(violations: Sequence[Violation]) -> str:
+    """Why a design with these flags wasn't the first choice ("" if clean)."""
+    if _status(violations) == "infeasible":
+        return _rules_reason(violations)
+    rules = sorted({v.rule for v in violations})
+    return "strict only: " + ", ".join(f"rule {r}" for r in rules) if rules else ""
+
+
+@dataclass(frozen=True)
+class _Design:
+    """One candidate, fully routed and checked; `submission` is None when its hubs can't be
+    routed (a hub in a wall, an unroutable leg)."""
+
+    rank: int | None  # 1 = enumerate()'s first; None: the walking skeleton
+    signature: str
+    hubs: list[Hub]
+    submission: Submission | None
+    metrics: Metrics | None
+    violations: list[Violation]
+    why_not: str  # "" when clean
+
+    @property
+    def label(self) -> str:
+        return f"#{self.rank} {self.signature}" if self.rank else f"skeleton {self.signature}"
+
+
+def _design(
+    plan: Plan, grid: LabelGrid, rank: int | None, sig: str, hubs: list[Hub], c: Constraints
+) -> _Design:
+    blocked = _hub_point_errors(plan, hubs, c)
+    if blocked:
+        return _Design(rank, sig, hubs, None, None, blocked, _rules_reason(blocked))
+    try:
+        rings = route_rings(grid, plan, hubs, c)
+    except ValueError as e:
+        return _Design(rank, sig, hubs, None, None, [], f"routing failed: {e}")
+    sub, m = _submission(plan, hubs, rings, c)
+    violations = check_rules(plan, sub, c)
+    return _Design(rank, sig, hubs, sub, m, violations, _why_not(violations))
+
+
 def solve(
     plan: Plan,
     c: Constraints | None = None,
     *,
     provenance: Provenance | None = None,
     hub_hook: HubHook | None = None,
+    workers: int | None = None,
 ) -> Result:
-    """Design one plan and check it (#16). Never raises for a plan that loaded: anything that
-    stops a design (no zoning, a room over the cap, an unroutable leg) ends in the sidecar.
+    """Design one plan and check it (#16, #22). Never raises for a plan that loaded: anything
+    that stops a design (no zoning, a room over the cap, an unroutable leg) ends in the sidecar.
 
-    `hub_hook` is a test hook: it may change the placed hubs before routing (forced failures).
+    The candidates are `enumerate`'s arrangements in rank order, ranked one hub count at a time
+    (H is the first key, so a later count is ranked only if an earlier one has no clean design),
+    then the walking skeleton's first cut (#16). Each is fully routed (the rip-up passes) and
+    checked; the first with no violation is submitted, else the best-ranked with only `strict`
+    ones (`submitted_strict_only`), else none: the best-ranked failure is reported (C43). Once a
+    design with no `error` is found, a clean one is looked for at most one hub count above it
+    (Adi, #22 review), so a plan where everything is strict-only doesn't route every zoning.
+
+    `hub_hook` is a test hook: it may change each candidate's hubs before routing (forced
+    failures); it's called once per candidate, in rank order. `workers` builds the zones in
+    parallel (`parallel.map_in_order`); a test that monkeypatches the ring builders passes 1.
     """
     c = c or Constraints()
     provenance = provenance or Provenance(version=__version__)
@@ -259,69 +475,96 @@ def solve(
         )
         return Result(plan, None, side)
 
+    def designed(d: _Design, skipped: Sequence[_Design]) -> Result:
+        sub, m, violations = d.submission, d.metrics, d.violations
+        status = _status(violations)
+        k_found = None if status == "infeasible" else m.H
+        hub_nodes = {h.hub_id: len(h.assigned_nodes) for h in sub.hubs}
+        rooms = {r.id: r for r in plan.rooms}
+        used = ArrangementUsed(
+            rank=d.rank, signature=d.signature, skipped=[f"{s.label}: {s.why_not}" for s in skipped]
+        )
+        side = _sidecar(
+            plan.plan_id,
+            c,
+            provenance,
+            status=status,
+            reason=_rules_reason(violations) if status == "infeasible" else None,
+            violations=violations,
+            bounds=Bounds(k_lb=k_lb, k_found=k_found, proof=_proof(k_found, k_lb, fewest)),
+            arrangement=None if status == "infeasible" else used,
+            cost=CostBreakdown(
+                H=m.H, L=m.L, X=m.X, O=m.O, B=m.B, J=m.J, area_gap=m.area_gap or 0.0
+            ),
+            hubs=[
+                HubMetrics(
+                    hub_id=h.hub_id,
+                    area_m2=sum(rooms[r].area_m2 for r in h.assigned_rooms),
+                    n_nodes=hub_nodes[h.hub_id],
+                    L=m.per_hub[h.hub_id].L,
+                    X=m.per_hub[h.hub_id].X,
+                    O=m.per_hub[h.hub_id].O,
+                    B=m.per_hub[h.hub_id].B,
+                )
+                for h in sub.hubs
+            ],
+            warnings=[*notes, *(f"{h.hub_id}: {w}" for h in d.hubs for w in h.warnings)],
+            folded_parts=list(plan.folded_parts),
+            frame=plan.frame,
+        )
+        return Result(plan, sub, side)
+
     g = eligible_graph(build_graph(plan, c))
     try:
-        zonings = enumerate_zonings(g, area, c, nodes=nodes, hub_capable=hub_capable_rooms(plan, c))
-        zoning, hubs = _pick(zonings, plan, g, c)
+        zonings = _zonings(plan, g, c)
     except Infeasible as e:
         return no_design(f"infeasible: {e}")
     except TooLarge as e:  # D8: no ResPlan plan needs more (largest group: 9 rooms)
         return no_design(
             f"too large for exact zoning: {e}; the greedy fallback (#49) is in the Backlog"
         )
-
     try:
         grid = LabelGrid.from_plan(plan, cell_m=c.grid_m)
     except ValueError as e:
         return no_design(f"grid failed: {e}")
-    # the routed choice of each zone's hub spot and ring order (#20); first_ring's is its floor
-    hubs = [
-        best_ring(zone, plan, g, grid, c, hub_id=hub.hub_id)
-        for zone, hub in zip(_zone_order(zoning), hubs, strict=True)
-    ]
-    if hub_hook is not None:
-        hubs = hub_hook(list(hubs))
-    blocked = _hub_point_errors(plan, hubs, c)
-    if blocked:
-        return no_design(_rules_reason(blocked), blocked)
-    try:
-        rings = route_rings(grid, plan, hubs, c)
-    except ValueError as e:
-        return no_design(f"routing failed: {e}")
 
-    sub, m = _submission(plan, hubs, rings, c)
-    violations = check_rules(plan, sub, c)
-    status = _status(violations)
-    hub_nodes = {h.hub_id: len(h.assigned_nodes) for h in sub.hubs}
-    rooms = {r.id: r for r in plan.rooms}
-    side = _sidecar(
-        plan.plan_id,
-        c,
-        provenance,
-        status=status,
-        reason=_rules_reason(violations) if status == "infeasible" else None,
-        violations=violations,
-        bounds=Bounds(
-            k_lb=k_lb, k_found=None if status == "infeasible" else m.H, proof="exhaustive"
-        ),
-        cost=CostBreakdown(H=m.H, L=m.L, X=m.X, O=m.O, B=m.B, J=m.J, area_gap=m.area_gap or 0.0),
-        hubs=[
-            HubMetrics(
-                hub_id=h.hub_id,
-                area_m2=sum(rooms[r].area_m2 for r in h.assigned_rooms),
-                n_nodes=hub_nodes[h.hub_id],
-                L=m.per_hub[h.hub_id].L,
-                X=m.per_hub[h.hub_id].X,
-                O=m.per_hub[h.hub_id].O,
-                B=m.per_hub[h.hub_id].B,
-            )
-            for h in sub.hubs
-        ],
-        warnings=[*notes, *(f"{h.hub_id}: {w}" for h in hubs for w in h.warnings)],
-        folded_parts=list(plan.folded_parts),
-        frame=plan.frame,
-    )
-    return Result(plan, sub, side)
+    fewest = min(len(z) for z in zonings)
+    rank = _ranker(plan, g, grid, c, workers)
+    no_skeleton: list[str] = []
+    usable_at: int | None = None  # H of the first design with no `error`
+
+    def candidates() -> Iterator[tuple[int | None, str, list[Hub]]]:
+        n = 0
+        for k in sorted({len(z) for z in zonings}):
+            if usable_at is not None and k > usable_at + 1:
+                return  # a clean design is looked for one hub count up, no further
+            for a in rank([z for z in zonings if len(z) == k]):
+                n += 1
+                yield n, a.signature, a.hubs
+        try:
+            zoning, hubs = _pick(zonings, plan, g, c)
+        except Infeasible as e:
+            no_skeleton.append(f"infeasible: {e}")
+            return
+        yield None, signature(zoning), hubs
+
+    tried: list[_Design] = []
+    for n, sig, hubs in candidates():
+        d = _design(plan, grid, n, sig, hubs if hub_hook is None else hub_hook(list(hubs)), c)
+        if d.submission is not None and not d.violations:
+            return designed(d, tried)
+        tried.append(d)
+        if usable_at is None and d.submission is not None and _status(d.violations) != "infeasible":
+            usable_at = len(d.hubs)
+    for i, d in builtins.enumerate(tried):
+        if d.submission is not None and _status(d.violations) != "infeasible":
+            return designed(d, tried[:i])
+    if not tried:
+        return no_design(no_skeleton[0])
+    first = tried[0]
+    if first.submission is None:
+        return no_design(first.why_not, first.violations)
+    return designed(first, [])  # status infeasible: shown with its violations, never written
 
 
 def solve_file(path: str | Path, c: Constraints | None = None) -> Result:
@@ -386,3 +629,33 @@ def submit(result: Result, out_dir: str | Path) -> list[Path]:
     path.write_text(side.model_dump_json(indent=2) + "\n", encoding="utf-8")
     written.append(path)
     return written
+
+
+# --------------------------------------------------------------------------- CLI
+
+
+def main(argv: list[str] | None = None) -> int:
+    """``python -m hackhive.solve --list <plan.json>``: every arrangement, ranked (#22). J is pass
+    0's, each ring routed alone: `solve()` submits after the rip-up passes, so its J can differ."""
+    p = argparse.ArgumentParser(prog="python -m hackhive.solve")
+    help_ = "print the ranked table (J: pass 0, before the rip-up passes)"
+    p.add_argument("--list", action="store_true", required=True, help=help_)
+    p.add_argument("plan", type=Path)
+    args = p.parse_args(argv)
+    c = Constraints()
+    try:
+        ranked = enumerate(load_plan(args.plan, c), c)
+    except (OSError, ValueError, Infeasible, TooLarge) as e:
+        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+        return 1
+    print(f"{'#':>3} {'H':>2} {'J pass 0':>9} {'strict':>9} {'lenient':>9} {'area gap':>8}  zones")
+    for i, a in builtins.enumerate(ranked, start=1):
+        strict, lenient = a.J_by_reading["strict"], a.J_by_reading["lenient"]
+        print(
+            f"{i:>3} {a.H:>2} {a.J:>9.3f} {strict:>9.3f} {lenient:>9.3f} {a.area_gap:>8.2f}  {a.signature}"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
