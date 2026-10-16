@@ -1,8 +1,11 @@
 """Pick one small ResPlan plan per dataset case and write the case library (#84).
 
-    uv run scripts/make_cases.py ~/HACKHIVE/data/resplan/plans.jsonl
+    uv run scripts/make_cases.py ~/HACKHIVE/data/resplan/plans.jsonl   # pick (needs the dataset)
+    uv run scripts/make_cases.py                                        # refresh `expected` only
 
-Writes `tests/fixtures/cases/cases.json`, one row per case in `ui.CASES` with its plan and what
+Without `plans.jsonl` there's no scan (step 3): every named plan that still shows its case is
+kept and its `expected` recomputed, which is all a `solve()` change needs, unless a plan stops
+showing its case. Writes `tests/fixtures/cases/cases.json`, one row per case in `ui.CASES` with its plan and what
 `solve()` gives, and a verbatim `case-<tag>-<id>.json` for each case that no committed fixture
 (`tests/fixtures/plans/`) shows. Each case's plan is, in order:
 
@@ -32,6 +35,7 @@ from hackhive.io import load_plan
 from hackhive.solve import solve
 
 _SOLVED: dict[Path, ui.CaseFacts | None] = {}
+DATASET_HINT = "uv run scripts/make_cases.py ~/HACKHIVE/data/resplan/plans.jsonl"
 
 
 def _facts(raw_or_path: dict | Path) -> ui.CaseFacts | None:
@@ -79,7 +83,7 @@ def _scan(plans: Path, n: int, seed: int) -> list[str]:
 
 
 def build(
-    plans: Path,
+    plans: Path | None,
     *,
     out: Path = ui.CASE_DIR,
     fixtures: Path = ui.FIXTURE_DIR,
@@ -111,7 +115,7 @@ def build(
             take(path, facts)
 
     # 3. the scan, smallest first; each plan picked is written verbatim, named for its first case
-    if len(picks) < len(ui.CASES):
+    if plans is not None and len(picks) < len(ui.CASES):
         lines = _scan(plans, n, seed)
         for i, line in enumerate(lines, 1):
             missing = [c for c in ui.CASES if c.id not in picks]
@@ -154,7 +158,12 @@ def build(
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    p.add_argument("plans", type=Path, help="plans.jsonl (one ResPlan plan per line)")
+    p.add_argument(
+        "plans",
+        type=Path,
+        nargs="?",
+        help="plans.jsonl (one ResPlan plan per line); omit to refresh `expected` with no scan",
+    )
     p.add_argument("--n", type=int, default=600, help="plans in the scan (0: all)")
     p.add_argument("--seed", type=int, default=5)
     p.add_argument("--out", type=Path, default=ui.CASE_DIR)
@@ -168,6 +177,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  {row['case']:<16} {row['plan']:<40} {row['expected']['status']}")
     if missing:
         print(f"no plan for: {', '.join(missing)}", file=sys.stderr)
+        if args.plans is None:
+            print(f"re-pick them with the dataset: {DATASET_HINT}", file=sys.stderr)
     return 1 if missing else 0
 
 
