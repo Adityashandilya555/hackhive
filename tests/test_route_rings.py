@@ -36,7 +36,7 @@ C = Constraints()
 TOL = C.tolerance_m
 
 
-def _route(plan_id: str) -> SimpleNamespace:
+def _route(plan_id: str, c: Constraints = C) -> SimpleNamespace:
     plan = load_plan(FIXTURES / "plans" / f"plan-{plan_id}.json")
     G = build_graph(plan, C)
     g = eligible_graph(G)
@@ -46,7 +46,7 @@ def _route(plan_id: str) -> SimpleNamespace:
     zoning = next(z for z in zonings if len(z) == k)
     hubs = [first_ring(zone, plan, g, C, hub_id=f"H{i}") for i, zone in enumerate(zoning, 1)]
     grid = LabelGrid.from_plan(plan)
-    rings = route_rings(grid, plan, hubs, C)
+    rings = route_rings(grid, plan, hubs, c)
     return SimpleNamespace(plan=plan, G=G, zoning=zoning, hubs=hubs, grid=grid, rings=rings)
 
 
@@ -394,6 +394,157 @@ def test_errors_name_the_stop_or_leg(routed):
 def test_each_module_imports_on_its_own(module):
     """Trap 2: route imports neither grid nor checker at the top (they import route)."""
     subprocess.run([sys.executable, "-c", f"import {module}"], check=True)
+
+
+# --------------------------------------------------------------------------- own rooms (D7, #79)
+
+
+def _length_inside(polyline, polygon) -> float:
+    """Metres of the polyline strictly inside the polygon (shrunk 1 mm, so a run along a shared
+    edge or through a door in the wall doesn't count)."""
+    return shapely.LineString(polyline).intersection(polygon.buffer(-TOL)).length
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_own_rooms_every_fixture(routed, plan_id):
+    """C33: by default no ring runs inside an excluded room or another hub's room. Door
+    polygons don't count (1293's door_9 into its own bedroom covers a 4 cm strip of living_0),
+    nor does the land lot, which covers every room."""
+    case = routed[plan_id]
+    doors = shapely.union_all([d.polygon for d in case.plan.doors])
+    for ring, zone in zip(case.rings, case.zoning, strict=True):
+        for room in case.plan.rooms:
+            if room.id in zone or room.type == "land":
+                continue
+            outside_doors = room.polygon.difference(doors)
+            inside = sum(_length_inside(s.polyline, outside_doors) for s in ring.segments)
+            assert inside <= TOL, f"{ring.hub_id} runs {inside:.3f} m inside {room.id}"
+
+
+def _detour_plan():
+    """bedroom | bathroom | bedroom on top, each bedroom with a door to the bathroom, and a
+    living room along the bottom with a door into each bedroom (1 unit = 0.1 m)."""
+    from shapely.geometry import MultiPolygon, mapping
+
+    walls = [
+        *(box(-2, 48, 10, 50), box(20, 48, 80, 50), box(90, 48, 102, 50)),
+        *(box(40, 48, 42, 70), box(40, 80, 42, 102), box(62, 48, 64, 70), box(62, 80, 64, 102)),
+    ]
+    doors = [box(40, 70, 42, 80), box(62, 70, 64, 80), box(10, 48, 20, 50), box(80, 48, 90, 50)]
+    geoms = {
+        "bedroom": MultiPolygon([box(0, 50, 40, 100), box(64, 50, 100, 100)]),
+        "bathroom": box(42, 50, 62, 100),
+        "living": box(0, 0, 100, 48),
+        "wall": MultiPolygon(walls),
+        "door": MultiPolygon(doors),
+    }
+    raw = {"id": "SYN", "area": 100.0, "wall_depth": 2.0, "inner": mapping(box(0, 0, 100, 100))}
+    plan = load_plan(raw | {k: mapping(g) for k, g in geoms.items()})
+    rooms = {r.label: r for r in plan.rooms}
+    node = {n.room_id: n for n in plan.nodes}
+    return plan, rooms, node
+
+
+def _detour_hub(rooms, node, zone, hub_room, ring_rooms):
+    from hackhive.rings import Hub
+
+    x, y = node[rooms[hub_room].id].xy
+    nodes = [node[rooms[r].id].id for r in ring_rooms]
+    assigned = [rooms[hub_room].id, *sorted(rooms[r].id for r in zone if r != hub_room)]
+    return Hub("H1", rooms[hub_room].id, (x + 1.0, y), ["H1", *nodes, "H1"], assigned)
+
+
+def _inside_bath(rooms, ring) -> float:
+    return sum(_length_inside(s.polyline, rooms["bathroom_0"].polygon) for s in ring.segments)
+
+
+def test_own_rooms_detour_vs_whatif():
+    """C17, C33: the shortest bedroom → bedroom leg cuts through the bathroom; by default the
+    ring goes round through the living room, and with the WHAT-IF it takes the bathroom."""
+    plan, rooms, node = _detour_plan()
+    zone = ["living_0", "bedroom_0", "bedroom_1"]
+    hub = _detour_hub(rooms, node, zone, "living_0", ["bedroom_0", "bedroom_1", "living_0"])
+    grid = LabelGrid.from_plan(plan)
+    own = route_rings(grid, plan, [hub], C)[0]
+    loose = route_rings(grid, plan, [hub], Constraints(route_through_other_rooms=True))[0]
+    assert _inside_bath(rooms, own) <= TOL
+    assert _inside_bath(rooms, loose) > 1.0
+    assert loose.ring_length_m < own.ring_length_m
+
+
+def test_own_rooms_grid_opens_only_doors_between_own_rooms():
+    """A door or opening is open only when both its rooms are allowed: the bedroom → bathroom
+    doors are blocked for the living + bedrooms zone, the bedroom → living ones are not."""
+    plan, rooms, _ = _detour_plan()
+    grid = LabelGrid.from_plan(plan)
+    own = route.own_rooms_grid(grid, [rooms[r].id for r in ("living_0", "bedroom_0", "bedroom_1")])
+    bath = grid.room_label(rooms["bathroom_0"].id)
+    assert grid.door_rooms
+    for label, pair in grid.door_rooms.items():
+        cells = grid.labels == label
+        assert cells.any()
+        expected = route.BLOCKED if bath in pair else label
+        assert (own.labels[cells] == expected).all(), (label, pair)
+    assert (own.labels[grid.labels == bath] == route.BLOCKED).all()
+
+
+def test_own_rooms_flag_is_whatif():
+    """C29: allowing cable through other rooms is not the problem statement."""
+    assert Constraints().route_through_other_rooms is False
+    assert Constraints(route_through_other_rooms=True).is_problem_statement is False
+
+
+def test_own_rooms_unreachable_raises():
+    """Two bedrooms joined only through rooms outside the zone: no silent fallback, and the
+    error names the leg and the hub."""
+    plan, rooms, node = _detour_plan()
+    beds = ["bedroom_0", "bedroom_1"]
+    hub = _detour_hub(rooms, node, beds, "bedroom_0", beds)
+    grid = LabelGrid.from_plan(plan)
+    with pytest.raises(ValueError, match=r"N2→N3 unreachable within H1's rooms \(D7\)"):
+        route_rings(grid, plan, [hub], C)
+    whatif = Constraints(route_through_other_rooms=True)
+    assert route_rings(grid, plan, [hub], whatif)[0].ring_length_m > 0
+
+
+def test_own_rooms_via_excluded_zone_routes_through_its_bathroom():
+    """#46 Q2: with zone_links_via_excluded a zone can be joined only through a bathroom, so
+    that bathroom (and its doors) is part of the ring's rooms."""
+    plan, rooms, node = _detour_plan()
+    beds = ["bedroom_0", "bedroom_1"]
+    hub = _detour_hub(rooms, node, beds, "bedroom_0", beds)
+    grid = LabelGrid.from_plan(plan)
+    ring = route_rings(grid, plan, [hub], Constraints(zone_links_via_excluded=True))[0]
+    assert _inside_bath(rooms, ring) > 1.0
+
+
+# main @ ef024cc, before D7: J per fixture (tests/test_route_rings.py demo, full precision).
+# 3086 is after the µm hub tie in rings.first_ring: main gave 82.214805 on Python 3.13 but
+# 88.614805 on 3.11 (CI), as its hub tie fell to the float sum order
+J_MAIN = {
+    "5088": 46.137406,
+    "576": 94.167828,
+    "1293": 96.851413,
+    "2814": 90.270451,
+    "3086": 87.014805,
+    "5924": 84.392827,
+    "13344": 108.1007,
+}
+# 13344's H1 ran 10 cm along opening_0's band (to H2's room) inside its own living_0; the strict
+# door rule moves it off the band: +0.2 m L, +0.1 m O (#79 review, point 3)
+D7_COST = {"13344": 0.3}
+
+
+@pytest.mark.parametrize("plan_id", PLAN_IDS)
+def test_own_rooms_j_against_main(routed, plan_id):
+    """C13, C17: J matches main on every fixture except the recorded D7 cost, and rule 5
+    passes; with the WHAT-IF on, J is main's exactly."""
+    case = routed[plan_id]
+    j = metrics(submission(case).hubs, C).J
+    assert j == pytest.approx(J_MAIN[plan_id] + D7_COST.get(plan_id, 0.0), abs=TOL)
+    assert not [v for v in check_rules(case.plan, submission(case), C) if v.rule == 5]
+    loose = _route(plan_id, Constraints(route_through_other_rooms=True))
+    assert metrics(submission(loose).hubs, C).J == pytest.approx(J_MAIN[plan_id], abs=TOL)
 
 
 # --------------------------------------------------------------------------- see it

@@ -20,7 +20,7 @@ import networkx as nx
 from shapely.geometry import Point
 
 from hackhive import __version__
-from hackhive.checker import HUB_POINT, Metrics, check_rules, metrics
+from hackhive.checker import HUB_POINT, Metrics, check_rules, metrics, reported_mismatches
 from hackhive.contracts import (
     Bounds,
     Constraints,
@@ -60,6 +60,15 @@ def file_stem(plan_id: str) -> str:
     one like `../x`, `A/B` or `A:B` would write outside `out_dir` or crash on Windows (#72
     review): every other character becomes `_`, leading dots go, and an empty result is `plan`."""
     return _UNSAFE.sub("_", plan_id).lstrip(".") or "plan"
+
+
+def _fold_notes(plan: Plan) -> list[str]:
+    """C38: each living sliver folded into a neighbour (generator only), as a readable line."""
+    return [
+        f"{f.room_id} ({f.area_m2:.1f} m²) folded into {f.into_room_id}: "
+        "too narrow for a node at the wall clearance (C38)"
+        for f in plan.folded_parts
+    ]
 
 
 def _name_notes(plan_id: str) -> list[str]:
@@ -159,18 +168,18 @@ def _hub_point_errors(plan: Plan, hubs: Sequence[Hub], c: Constraints) -> list[V
 
 
 def _submission(
-    plan: Plan, zoning: Zoning, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
+    plan: Plan, hubs: Sequence[Hub], rings: Sequence[RoutedRing], c: Constraints
 ) -> tuple[Submission, Metrics]:
     """Slide 8 (C48): rooms start with the hub's own, nodes sorted, segments in ring order."""
     out = []
-    for zone, hub, ring in zip(_zone_order(zoning), hubs, rings, strict=True):
+    for hub, ring in zip(hubs, rings, strict=True):
         out.append(
             HubOut.model_validate(
                 {
                     "hub_id": hub.hub_id,
                     "room_id": hub.room_id,
                     "location": {"x": hub.location[0], "y": hub.location[1]},
-                    "assigned_rooms": [hub.room_id, *sorted(zone - {hub.room_id})],
+                    "assigned_rooms": hub.assigned_rooms,
                     "assigned_nodes": sorted(hub.ring[1:-1]),
                     "closed_sequence": hub.ring,
                     "route_segments": [s.model_dump(by_alias=True) for s in ring.segments],
@@ -224,7 +233,7 @@ def solve(
     provenance = provenance or Provenance(version=__version__)
     area, nodes = eligible_area_and_nodes(plan)
     k_lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
-    notes = [*plan.warnings, *_name_notes(plan.plan_id)]
+    notes = [*plan.warnings, *_fold_notes(plan), *_name_notes(plan.plan_id)]
     base = {"warnings": notes, "folded_parts": list(plan.folded_parts), "frame": plan.frame}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
@@ -246,8 +255,10 @@ def solve(
         zoning, hubs = _pick(zonings, plan, g, c)
     except Infeasible as e:
         return no_design(f"infeasible: {e}")
-    except TooLarge as e:  # the greedy fallback zoning is #49
-        return no_design(f"too large for exact zoning: {e} (greedy fallback: #49)")
+    except TooLarge as e:  # D8: no ResPlan plan needs more (largest group: 9 rooms)
+        return no_design(
+            f"too large for exact zoning: {e}; the greedy fallback (#49) is in the Backlog"
+        )
 
     if hub_hook is not None:
         hubs = hub_hook(list(hubs))
@@ -263,7 +274,7 @@ def solve(
     except ValueError as e:
         return no_design(f"routing failed: {e}")
 
-    sub, m = _submission(plan, zoning, hubs, rings, c)
+    sub, m = _submission(plan, hubs, rings, c)
     violations = check_rules(plan, sub, c)
     status = _status(violations)
     hub_nodes = {h.hub_id: len(h.assigned_nodes) for h in sub.hubs}
@@ -340,16 +351,23 @@ def _plan_id_of(data: bytes, path: Path) -> str:
 
 def submit(result: Result, out_dir: str | Path) -> list[Path]:
     """Write `<plan_id>.json` only if the design has no `error` violation, and always
-    `<plan_id>.sidecar.json` (C43), named by `file_stem`. Returns the paths written."""
+    `<plan_id>.sidecar.json` (C43), named by `file_stem`. The written submission is read back
+    and its reported values compared with its polylines: a mismatch is a sidecar warning, never a
+    reason to withhold it (C42). Returns the paths written."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     stem = file_stem(result.sidecar.plan_id)
     written = []
+    side = result.sidecar
     if result.submittable:
         path = out / f"{stem}.json"
         path.write_text(result.submission.model_dump_json(indent=2) + "\n", encoding="utf-8")
         written.append(path)
+        # read it back, as the organisers will, and compare what we report with the cable
+        back = Submission.model_validate_json(path.read_text(encoding="utf-8"))
+        if mismatches := reported_mismatches(back, side.settings):
+            side = side.model_copy(update={"warnings": [*side.warnings, *mismatches]})
     path = out / f"{stem}.sidecar.json"
-    path.write_text(result.sidecar.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    path.write_text(side.model_dump_json(indent=2) + "\n", encoding="utf-8")
     written.append(path)
     return written
