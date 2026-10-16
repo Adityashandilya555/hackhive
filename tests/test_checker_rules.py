@@ -174,6 +174,41 @@ def test_retrace_where_the_only_other_door_is_a_dead_end_bathroom_is_legal():
     assert violations == []
 
 
+def test_one_node_ring_out_and_back_is_strict_until_q2a():
+    """Q2(a) is open: an out-and-back H → N → H where N's room has two ways out (5088's living
+    room: bedroom and kitchen doors) may be a branch, so it stays rule-4 strict, as ADR-005
+    allows it only when forced (#97 review). Only this ring is submitted, so rule 1's errors
+    are expected."""
+    plan = load_plan(plan_path("5088-valid.json"))
+    n1 = plan.nodes[0]
+    hub = (n1.xy[0] + 1.0, n1.xy[1])
+    sub = Submission.model_validate(
+        {
+            "plan_id": plan.plan_id,
+            "units": "m",
+            "hubs": [
+                {
+                    "hub_id": "H1",
+                    "room_id": n1.room_id,
+                    "location": {"x": hub[0], "y": hub[1]},
+                    "assigned_rooms": [n1.room_id],
+                    "assigned_nodes": [n1.id],
+                    "closed_sequence": ["H1", n1.id, "H1"],
+                    "route_segments": [
+                        {"from": "H1", "to": n1.id, "length_m": 1.0, "polyline": [hub, n1.xy]},
+                        {"from": n1.id, "to": "H1", "length_m": 1.0, "polyline": [n1.xy, hub]},
+                    ],
+                    "ring_length_m": 2.0,
+                }
+            ],
+            "reported_metrics": {"hub_count": 1, "total_length_m": 2.0},
+        }
+    )
+    found = check_rules(plan, sub)
+    assert [(v.rule, v.severity) for v in found if v.rule == 4] == [(4, "strict")], found
+    assert {v.rule for v in found} == {1, 4}
+
+
 def test_two_door_retrace_is_strict_with_a_where():
     """C11, C15, #46 Q5: 1 m retraced at N1 inside the two-door living room (bedroom and
     kitchen doors; its third door, to a dead-end bathroom, doesn't count)."""

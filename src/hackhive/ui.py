@@ -316,7 +316,8 @@ def case_tags(plan: Plan, G: nx.Graph, result: Result) -> list[CaseTag]:
         )
     sub, bounds = result.submission, result.sidecar.bounds
     if sub is not None and any(len(h.assigned_nodes) == 1 for h in sub.hubs):
-        tags.append(CaseTag("one_node_ring", "one-node ring", "a hub → node → hub out-and-back"))
+        look = "hub → node → hub: out-and-back, or a thin two-lane loop when the node is far (#81)"
+        tags.append(CaseTag("one_node_ring", "one-node ring", look))
     if sub is not None and bounds is not None and bounds.k_found is not None:
         extra = bounds.k_found - bounds.k_lb
         if extra == 0:
