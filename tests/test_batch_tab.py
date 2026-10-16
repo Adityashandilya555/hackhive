@@ -261,3 +261,44 @@ def test_a_header_only_csv_says_so_instead_of_failing(monkeypatch, tmp_path):
     monkeypatch.setattr(ui, "BATCH_PATHS", (empty,))
     tab = _batch_tab(_run())
     assert any("no plans" in i.value.lower() for i in tab.info) and not tab.dataframe
+
+
+# --------------------------------------------------------------------------- independent of the plan
+
+
+def _cards(tab) -> dict[str, str]:
+    return {m.label: m.value for m in tab.metric}
+
+
+def test_the_batch_tab_shows_with_no_plan_chosen(monkeypatch):
+    """#99 review (V1702): the leaderboard never waits for the sidebar plan; with the Upload
+    source and nothing uploaded, the Batch tab still shows its cards."""
+    monkeypatch.setattr(ui, "BATCH_PATHS", (SMALL,))
+    at = _run()
+    at.sidebar.radio(key="source").set_value("Upload")
+    _run(at)
+    assert _cards(_batch_tab(at))["Plans"] == "9"
+
+
+def test_the_batch_tab_shows_when_the_plan_fails_to_load(monkeypatch):
+    monkeypatch.setattr(ui, "BATCH_PATHS", (SMALL,))
+    at = _run()
+    at.sidebar.radio(key="source").set_value("Upload")
+    _run(at)
+    at.sidebar.file_uploader(key="upload").set_value(("bad.json", b"not json", "application/json"))
+    _run(at)
+    assert at.error  # the load error is still said, above the tabs
+    assert _cards(_batch_tab(at))["Plans"] == "9"
+
+
+def test_an_input_error_row_cannot_be_opened(monkeypatch):
+    """A row whose plan didn't load in the batch has nothing to open, even with ResPlan here."""
+    monkeypatch.setattr(ui, "BATCH_PATHS", (SMALL,))
+    monkeypatch.setattr(ui, "RESPLAN_JSONL", SMALL)  # any existing file stands in for it
+    at = _run()
+    _batch_tab(at).selectbox(key="batch_open").set_value("PLAN_BAD")
+    _run(at)
+    assert _batch_tab(at).button(key="batch_open_go").disabled
+    _batch_tab(at).selectbox(key="batch_open").set_value("PLAN_5088")
+    _run(at)
+    assert not _batch_tab(at).button(key="batch_open_go").disabled
