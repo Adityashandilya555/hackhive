@@ -17,7 +17,7 @@ from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
-from hackhive import graph, ui
+from hackhive.cases import case_tags
 from hackhive.contracts import Constraints, Provenance
 from hackhive.io import InputFormatError, load_plan
 from hackhive.solve import Result, _sidecar, solve, submit
@@ -146,10 +146,10 @@ def _row(where: str, raw: dict | None, why: str, c: Constraints, out_dir: Path) 
 
 
 def _tags(plan, c: Constraints, result: Result) -> str:
-    """`ui.case_tags` ids (stable keys for #33, unlike the labels). A tag failure must not cost
+    """`cases.case_tags` ids (stable keys for #33, unlike the labels). A tag failure must not cost
     the plan's row, so it leaves the column empty."""
     try:
-        return ";".join(t.id for t in ui.case_tags(plan, graph.build_graph(plan, c), result))
+        return ";".join(t.id for t in case_tags(plan, result.graph, result))
     except Exception as e:  # noqa: BLE001
         print(f"{result.sidecar.plan_id}: no case tags ({e})", file=sys.stderr)
         return ""
