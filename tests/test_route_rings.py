@@ -407,13 +407,17 @@ def _length_inside(polyline, polygon) -> float:
 
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
 def test_own_rooms_every_fixture(routed, plan_id):
-    """C33: by default no ring runs inside an excluded room or another hub's room."""
+    """C33: by default no ring runs inside an excluded room or another hub's room. Door
+    polygons don't count (1293's door_9 into its own bedroom covers a 4 cm strip of living_0),
+    nor does the land lot, which covers every room."""
     case = routed[plan_id]
+    doors = shapely.union_all([d.polygon for d in case.plan.doors])
     for ring, zone in zip(case.rings, case.zoning, strict=True):
         for room in case.plan.rooms:
-            if room.id in zone:
+            if room.id in zone or room.type == "land":
                 continue
-            inside = sum(_length_inside(s.polyline, room.polygon) for s in ring.segments)
+            outside_doors = room.polygon.difference(doors)
+            inside = sum(_length_inside(s.polyline, outside_doors) for s in ring.segments)
             assert inside <= TOL, f"{ring.hub_id} runs {inside:.3f} m inside {room.id}"
 
 
