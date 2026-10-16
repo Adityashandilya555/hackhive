@@ -477,7 +477,9 @@ def _above_lb(extra: int) -> Case:
 
 
 # Every case in the 600-plan scan (plan §4): one per status or no-design reason, one per tag.
-# `too large` (D8: no ResPlan plan needs it) and `input_error` (no plan to solve) aren't here.
+# `too large` (D8: no ResPlan plan needs it) and `input_error` (no plan to solve) aren't here,
+# nor `routing failed`: no plan of the scan fails routing any more (§4's 12025 now solves; 412856
+# and 432441 are `input_error` since #78). Add it back when a plan does.
 CASES: tuple[Case, ...] = (
     Case(
         "ok",
@@ -504,12 +506,6 @@ CASES: tuple[Case, ...] = (
         "a door or passage too thin for the 10 cm grid (#78)",
     ),
     Case(
-        "routing_failed",
-        lambda f: f.status == "infeasible" and f.reason.startswith("routing failed"),
-        "Routing failed",
-        "a leg with no axis-aligned route inside the free space",
-    ),
-    Case(
         "no_hub_capable",
         lambda f: f.status == "infeasible" and "hub-capable" in f.reason,
         "No hub-capable room",
@@ -520,6 +516,7 @@ CASES: tuple[Case, ...] = (
     _tag_case("one_node_ring"),
     _tag_case("lb_met"),
     _above_lb(1),
+    _above_lb(2),
     _above_lb(3),
     _above_lb(4),
     _tag_case("many_hubs"),

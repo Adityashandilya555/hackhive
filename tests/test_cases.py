@@ -42,10 +42,6 @@ def test_every_listed_plan_exists_and_cases_are_known():
         assert ui.case_plan_path(row).is_file(), row["plan"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="HUMAN (#84 step 2): run scripts/make_cases.py on the full dataset, then drop this mark",
-)
 def test_every_case_has_a_plan():
     assert {c.id for c in ui.CASES} <= {r["case"] for r in ROWS}
 

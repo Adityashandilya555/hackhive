@@ -9,8 +9,8 @@ Writes `tests/fixtures/cases/cases.json`, one row per case in `ui.CASES` with it
 1. the plan `cases.json` already names, if its file exists (so #78 can flip the grid-failed
    case's status without losing the plan);
 2. the smallest fixture that shows the case;
-3. the smallest plan of the scan that shows it: the same sample as `grid_scan.py` (`--n 600
-   --seed 11`; `--n 0` scans every plan).
+3. the smallest plan of the scan that shows it: the same 600 plans as the plan's §4 scan
+   (`random.Random(5).sample`, `--n 600 --seed 5`; `--n 0` scans every plan).
 
 "Smallest" is the plan's file (or JSON line) size, then its id. `expected` is recomputed on
 every run, so running it twice changes nothing. Exit code 1 if a case is left without a plan.
@@ -82,7 +82,7 @@ def build(
     out: Path = ui.CASE_DIR,
     fixtures: Path = ui.FIXTURE_DIR,
     n: int = 600,
-    seed: int = 11,
+    seed: int = 5,
 ) -> list[str]:
     """Write `out/cases.json` and the picked case plans; return the cases left without a plan."""
     out.mkdir(parents=True, exist_ok=True)
@@ -154,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     p.add_argument("plans", type=Path, help="plans.jsonl (one ResPlan plan per line)")
     p.add_argument("--n", type=int, default=600, help="plans in the scan (0: all)")
-    p.add_argument("--seed", type=int, default=11)
+    p.add_argument("--seed", type=int, default=5)
     p.add_argument("--out", type=Path, default=ui.CASE_DIR)
     p.add_argument("--fixtures", type=Path, default=ui.FIXTURE_DIR)
     args = p.parse_args(argv)

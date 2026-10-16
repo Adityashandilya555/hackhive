@@ -32,7 +32,8 @@ expected: {status, k_found?, tags}}]`, where `plan` is relative to `cases/` and 
 `solve()` gives (`tests/test_cases.py` checks it). A case shown by a committed fixture points at
 it (`../plans/plan-<id>.json`); every other case has its own `cases/case-<tag>-<id>.json`, a
 **ResPlan** plan (@ `e2b78fe`, CC BY 4.0, attribution as above) written verbatim from a line of
-`plans.jsonl`: the smallest plan of the 600-plan scan that shows the case.
+`plans.jsonl`: the smallest plan of the 600-plan scan (seed 5, as in the plan's
+§4) that shows the case.
 
 Rebuild with `uv run scripts/make_cases.py <plans.jsonl>` (the dataset isn't committed). It keeps
 each case's current plan, so it is idempotent; the grid-failed case stays a regression example and
