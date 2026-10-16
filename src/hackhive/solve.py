@@ -225,7 +225,7 @@ def solve(
     area, nodes = eligible_area_and_nodes(plan)
     k_lb = lower_bound(sum(area.values()), sum(nodes.values()), c)
     notes = [*plan.warnings, *_name_notes(plan.plan_id)]
-    base = {"warnings": notes, "folded_parts": list(plan.folded_parts)}
+    base = {"warnings": notes, "folded_parts": list(plan.folded_parts), "frame": plan.frame}
 
     def no_design(reason: str, violations: Sequence[Violation] = ()) -> Result:
         side = _sidecar(
@@ -293,6 +293,7 @@ def solve(
         ],
         warnings=[*notes, *(f"{h.hub_id}: {w}" for h in hubs for w in h.warnings)],
         folded_parts=list(plan.folded_parts),
+        frame=plan.frame,
     )
     return Result(plan, sub, side)
 

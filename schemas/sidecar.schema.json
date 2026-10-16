@@ -402,6 +402,23 @@
       "title": "Folded Parts",
       "type": "array"
     },
+    "frame": {
+      "anyOf": [
+        {
+          "enum": [
+            "identity",
+            "flip_y",
+            "origin_shift"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Frame"
+    },
     "hubs": {
       "default": [],
       "items": {

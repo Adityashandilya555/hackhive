@@ -168,12 +168,19 @@ class FoldedPart(_Strict):
     area_m2: float
 
 
+# The organiser's node frame (#38): which transform made every given node fit an eligible room.
+Frame = Literal["identity", "flip_y", "origin_shift"]
+
+
 class Sidecar(_Strict):
     """Everything that is not part of the submission."""
 
     plan_id: str
     status: Literal["ok", "submitted_strict_only", "infeasible", "input_error"]
     reason: str | None = None  # why there is no submission (infeasible, input_error), in words
+    # `Plan.frame` (#38), or None when no plan loaded (input_error). The submission is already in
+    # it: the geometry was moved, never the nodes, so nothing is transformed back on output.
+    frame: Frame | None = None
     violations: list[Violation] = []
     bounds: Bounds | None = None
     cost: CostBreakdown | None = None
@@ -237,7 +244,7 @@ class Plan(_Geo):
     warnings: list[str] = []
     folded_parts: list[FoldedPart] = []
     # The organiser's node frame (#38): the geometry was moved into it so given nodes never move.
-    frame: Literal["identity", "flip_y", "origin_shift"] = "identity"
+    frame: Frame = "identity"
 
 
 # --------------------------------------------------------------------------- schema export
