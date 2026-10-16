@@ -299,8 +299,8 @@ PROOFS = ("exhaustive", "lb_met")
 
 
 def proven_min_hubs(side: Sidecar) -> int | None:
-    """The hub count solve() proved minimal, or None when unproven. Read from `bounds.proof` as
-    solve() writes it; #22 sets `lb_met` / `exhaustive` / `none` per plan, and this follows."""
+    """The hub count solve() proved minimal (`bounds.proof` is `lb_met` or `exhaustive`, set
+    per plan by `solve._proof`, #22), or None when unproven."""
     b = side.bounds
     return b.k_found if b is not None and b.proof in PROOFS else None
 

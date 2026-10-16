@@ -1,4 +1,4 @@
-"""Acceptance tests for #24 (pre-#22 part): the optimality badge and checklist line 5 (T7)."""
+"""Acceptance tests for #24: the optimality badge and checklist line 5 (T7)."""
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -41,6 +41,26 @@ def test_badge_5924_proven_minimum(solved):
     assert "3 hubs · optimal (exhaustive search) · LB 2 (+1)" in b.text
     assert "✓ proven minimum" in b.text and "✗" not in b.text
     assert b.explain  # the contiguity / star-around-living expander
+
+
+def test_badge_1293_proven_minimum(solved):
+    """The issue's "1293 = lower bound" predates #62: 1293 is LB 2 but needs 3 hubs
+    (tests/fixtures/README.md, docs/ARCHITECTURE.md), and #22's search proves it."""
+    plan, side = solved("1293")
+    b = optimality_badge(side, plan, C)
+    assert b.kind == "success" and "✗" not in b.text
+    assert "✓ proven minimum · 3 hubs · optimal (exhaustive search) · LB 2 (+1)" in b.text
+
+
+@pytest.mark.parametrize("pid", ["576", "1293", "2814", "3086", "5088", "5924", "13344"])
+def test_badge_follows_the_real_proof(solved, pid):
+    """#22's real `bounds.proof`: lb_met reads "= lower bound", exhaustive "proven minimum"."""
+    plan, side = solved(pid)
+    b = optimality_badge(side, plan, C)
+    assert side.bounds.proof in ("lb_met", "exhaustive")
+    assert b.kind == "success" and "✗" not in b.text
+    assert ("= lower bound" in b.text) == (side.bounds.proof == "lb_met")
+    assert ("✓ proven minimum" in b.text) == (side.bounds.proof == "exhaustive")
 
 
 def test_badge_k_equals_lb_5088(solved):
