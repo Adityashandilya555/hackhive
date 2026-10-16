@@ -272,6 +272,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 - **In → out:** `LabelGrid`, sources → `PathCache`; rings → `Segment` polylines.
 - **Algorithm:** O(4·cells·log) per source; ≤ 9 rings.
   - Measured in #19 (`python -m hackhive.route --bench <dir>`: raster + points + `PathCache` with every eligible room's hub candidates): p95 1.6 s per plan on the 7 fixtures, 1.0 s on 18 test-split plans, under ADR-003's 5 s budget, so no ladder step is taken. If it ever is slow, the order is: a 20 cm cost grid → numba → closed-form rectangles (#37).
+  - **Exception (#22, Adi, 2026-10-16):** `solve()` routes every fewest-hub zone's `best_ring` to rank the arrangements. 13344 (21 zones) takes ~12 s on 4 worker processes (34 s on one core); the other fixtures take 1–3 s. A lower bound can't prune it (`rings.shortlist`'s sits 18–38 m under 13344's J); the next lever is the corner scoring in `route._best_corners` (~60% of the time).
   - `PathCache` searches once per node; node–hub costs come from those searches by symmetry (a reversed cable costs the same), since one search per hub candidate would be thousands per plan. Its door-graph ROI is exact by construction: a source falls back to the whole raster when a path leaving the ROI could be cheaper (exact cost inside + 1 + Manhattan outside).
   - Only 42% of eligible rooms are rectangles, so one grid router is simpler than two.
   - Measured in #80 (`solve` on the 7 fixtures): the rip-up passes cut O to ≤ 0.7 m on six of them and the rule-4 retrace flags from 19 to 11; 2814 keeps pass 0, as its pass 1 trades 6.7 m of O for one more crossing (priced in the search by #82). Pass 2 has matched pass 1 on every fixture so far.
@@ -364,8 +365,8 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
 
 ### 4.10 `solve.py` and `cli.py`: orchestration
 - **Responsibility:**
-  - `solve(plan, c)`: the arrangements in rank order, one hub count at a time, each fully routed (rip-up passes) and checked, until the gate is met; the walking skeleton's first cut is the last candidate;
-  - `enumerate(plan, c, k=None)`: every arrangement (or those with `k` hubs): each zone's `best_ring` once, its ring routed alone, totals by the mirror under both counting readings; ranked by `rank_key` = (H, worse J, area gap, zone signature);
+  - `solve(plan, c)`: the arrangements in rank order, one hub count at a time, each fully routed (rip-up passes) and checked, until the gate is met (a clean design at most one hub count above the first with no `error`); the walking skeleton's first cut is the last candidate;
+  - `enumerate(plan, c, k=None)`: every arrangement (or those with `k` hubs): each zone's `best_ring` once, in parallel over up to 4 worker processes (`parallel.map_in_order`), its ring routed alone, totals by the mirror under both counting readings; ranked by `rank_key` = (H, worse J before rip-up, area gap, zone signature);
   - `route(arrangement, plan, c)`: one arrangement's full geometry on demand (the rip-up passes);
   - `python -m hackhive.solve --list <plan.json>`: the ranked table;
   - `submit()`: the gate + writers (slide-8 submission + sidecar);
