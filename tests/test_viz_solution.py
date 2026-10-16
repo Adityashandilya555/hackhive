@@ -317,6 +317,18 @@ def test_step_captions():
     assert step_caption(sub, total) == f"Step {total} of {total} · the full design"
 
 
+def test_step_caption_with_no_segments():
+    """#88 review: a design with no cable says so, never "Step 0 of 0 · the full design"."""
+    from hackhive.ui import step_caption
+
+    sub = _sub("5088-two-hubs-valid")
+    empty = sub.model_copy(
+        update={"hubs": [h.model_copy(update={"route_segments": []}) for h in sub.hubs]}
+    )
+    for step in (0, 1):  # the disabled slider sits at 1 (its max) when there is nothing to step
+        assert step_caption(empty, step) == "No cable to step through"
+
+
 def test_png_and_no_pyplot(plan_5088):
     import matplotlib.pyplot as plt
 
