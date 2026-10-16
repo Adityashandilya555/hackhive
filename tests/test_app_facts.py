@@ -141,7 +141,7 @@ def test_app_graph_toggle_draws_2814():
     at = _pick(_run(), "2814")
     at.sidebar.toggle(key="show_graph").set_value(True)
     _run(at)
-    assert len(at.main.image) == 1
+    assert len(at.main.image) == 2  # Best's design and the Plan tab with its graph
 
 
 # --------------------------------------------------------------------------- reviewer panel
@@ -358,14 +358,18 @@ def test_an_unknown_edge_kind_is_drawn_and_named_in_the_legend():
 
 
 def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
-    """Follow-up 10: load() keeps the graph, so the picture doesn't build it again."""
+    """Follow-up 10: load() keeps the graph, so the picture doesn't build it again. solve() and
+    the checker build their own on purpose (they trust nothing of the app's), so only the app
+    script's own calls count."""
+    import sys
+
     import hackhive.graph
 
     calls = []
     real = hackhive.graph.build_graph
 
     def counting(*a, **k):
-        calls.append(1)
+        calls.append(sys._getframe(1).f_globals.get("__name__"))
         return real(*a, **k)
 
     monkeypatch.setattr(hackhive.graph, "build_graph", counting)
@@ -376,4 +380,4 @@ def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
     _run(at)
     at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
     _run(at)
-    assert at.main.image and len(calls) == 1
+    assert at.main.image and calls.count("__main__") == 1, calls

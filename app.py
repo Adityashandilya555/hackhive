@@ -1,12 +1,15 @@
 """HackHive demo app: pick a plan, see it drawn, and see the organisers' rules, locked (#7);
-plan facts, node ids, the room graph and the reviewer checklist (#12).
+plan facts, node ids, the room graph and the reviewer checklist (#12); the Best tab shows
+solve()'s design (#16) with its overlay and summary (#17).
 
-Run it with `uv run streamlit run app.py`. Later issues add the solution overlay (#17), the
-what-if sidebar (#30), the arrangements gallery and the batch leaderboard.
+Run it with `uv run streamlit run app.py`. Later issues add the what-if sidebar (#30), the
+arrangements gallery and the batch leaderboard.
 """
 
 from __future__ import annotations
 
+import hashlib
+import tempfile
 from pathlib import Path
 
 import networkx as nx
@@ -15,6 +18,7 @@ import streamlit as st
 from hackhive import checker, graph
 from hackhive.contracts import Constraints, Plan
 from hackhive.io import load_plan
+from hackhive.solve import solve, submit
 from hackhive.ui import (
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
@@ -40,6 +44,8 @@ from hackhive.viz import draw_graph, draw_layers, draw_nodes, draw_solution, to_
 
 PRESET = Constraints.problem_statement()
 FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
+BEST = "best design (solve)"
+SOLVED_DIR = Path(tempfile.gettempdir()) / "hackhive-app"  # solve()'s files, a folder per input
 
 
 # --------------------------------------------------------------------------- cached work
@@ -69,6 +75,21 @@ def picture(source: str, key: str, content: bytes | None = None, show: bool = Fa
         draw_graph(plan, G, ax)
     draw_nodes(plan, ax)
     return to_png(fig)
+
+
+@st.cache_data(max_entries=64, show_spinner="Solving…")
+def solved(source: str, key: str, content: bytes | None) -> tuple[str | None, str]:
+    """`solve()` (#16) through the submit gate (C43), into a temp folder per input: the path of
+    the submission it wrote (None when the gate refused one) and the sidecar's status."""
+    plan, _ = load(source, key, content)
+    result = solve(plan, PRESET)
+    digest = hashlib.sha256(f"{source}\0{key}\0".encode() + (content or b"")).hexdigest()[:16]
+    written = submit(result, SOLVED_DIR / digest)
+    sub = next((p for p in written if not p.name.endswith(".sidecar.json")), None)
+    side = result.sidecar
+    return (
+        str(sub) if sub else None
+    ), f"{side.status}: {side.reason}" if side.reason else side.status
 
 
 @st.cache_data(max_entries=64, show_spinner="Drawing the solution…")
@@ -114,30 +135,38 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
     return source, up.name, up.getvalue()
 
 
-def pick_solution(plan: Plan) -> Path | None:
-    """The solution to show: one of the plan's hand-made fixtures (#11), valid first. `solve()`
-    (#16) will add its own result here; until then plans without fixtures have none."""
-    solutions = solution_paths(plan.plan_id.removeprefix("PLAN_"))
+def _solution_name(path: Path) -> str:
+    """By where the file is, not a captured path: a widget may keep an older run's format_func."""
+    return BEST if SOLVED_DIR in path.parents else solution_label(path)
+
+
+def pick_solution(plan: Plan, best: Path | None) -> Path | None:
+    """The solution to show: solve()'s design first (#16), then the plan's hand-made fixtures
+    (#11), valid first. None only when solve() wrote no submission and there are no fixtures."""
+    solutions = [*([best] if best else []), *solution_paths(plan.plan_id.removeprefix("PLAN_"))]
     if not solutions:
         return None
+    names = [str(p) for p in solutions]
+    if st.session_state.get("solution_options") != names:  # another plan: start at its best,
+        st.session_state.pop("solution", None)  # never keep the last plan's file selected
+        st.session_state["solution_options"] = names
     return st.selectbox(
         "Solution",
         solutions,
-        format_func=solution_label,
+        format_func=_solution_name,
         key="solution",
-        help="5088's hand-made submissions from the checker's tests (#11): the valid one and one "
-        "broken variant per rule. solve() (#16) will add its own.",
+        help="solve()'s design for this plan, then, for 5088, the checker's hand-made "
+        "submissions (#11): the valid one and one broken variant per rule.",
     )
 
 
-def best_tab(source: str, key: str, content: bytes | None, plan: Plan, path: Path | None) -> None:
+def best_tab(
+    source: str, key: str, content: bytes | None, plan: Plan, path: Path | None, status: str
+) -> None:
     """Slide 5's expected solution: the overlay, the per-hub summary (C25) and the reviewer
     checklist (C26), all from the submission and the checker mirror."""
-    if path is None:
-        st.caption(
-            "No solution yet: solve() arrives with #16. Pick 5088 to see a hand-made one, "
-            "or open the Plan tab for the plan and its room graph."
-        )
+    if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
+        st.warning(f"No valid design for this plan ({status}). The Plan tab still shows it.")
         return
     try:
         sub = load_submission(path)
@@ -236,13 +265,17 @@ except Exception as e:  # a plan we can parse but not handle further: say so, ne
     st.error(f"Can't draw this plan. {type(e).__name__}: {e}")
     st.stop()
 
+try:
+    best_path, status = solved(source, key, content)
+except Exception as e:  # solve() never raises for a loaded plan; the landing tab never tracebacks
+    best_path, status = None, f"{type(e).__name__}: {e}"
 with solution_slot:
-    solution = pick_solution(plan)
+    solution = pick_solution(plan, Path(best_path) if best_path else None)
 
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
 best, plan_tab = st.tabs(["Best", "Plan"])
 with best:
-    best_tab(source, key, content, plan, solution)
+    best_tab(source, key, content, plan, solution, status)
 with plan_tab:
     drawing, panel = st.columns([5, 3], gap="large")
     with drawing:

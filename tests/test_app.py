@@ -60,7 +60,7 @@ def test_starts_with_fixture_5924_drawn():
     at = _run()
     assert "Problem statement" in _sidebar_text(at)
     assert "PLAN_5924" in _main_text(at)
-    assert len(_images(at)) == 1
+    assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
     assert not at.error
 
 
@@ -82,13 +82,13 @@ def test_picking_another_fixture_draws_it():
     at.sidebar.selectbox(key="fixture").set_value("13344")
     _run(at)
     assert "PLAN_13344" in _main_text(at)
-    assert len(_images(at)) == 1
+    assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
 
 
 def test_uploaded_fixture_is_drawn():
     at = _upload(_run(), "plan-576.json", (FIXTURES / "plans" / "plan-576.json").read_bytes())
     assert "PLAN_576" in _main_text(at)
-    assert len(_images(at)) == 1
+    assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
     assert not at.error
 
 
@@ -96,7 +96,7 @@ def test_uploaded_vault_file_is_unwrapped_and_drawn():
     raw = (FIXTURES / "raw" / "plan-2814-interior-window.json").read_bytes()
     at = _upload(_run(), "plan-2814-interior-window.json", raw)
     assert "PLAN_2814" in _main_text(at)
-    assert len(_images(at)) == 1
+    assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
 
 
 @pytest.mark.parametrize(
