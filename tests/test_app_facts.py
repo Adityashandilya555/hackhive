@@ -10,7 +10,14 @@ from hackhive import checker
 from hackhive.contracts import Constraints, Violation
 from hackhive.graph import build_graph
 from hackhive.io import load_plan, room_by_label
-from hackhive.ui import checker_ready, plan_facts, solution_path, violation_line
+from hackhive.ui import (
+    checklist_line,
+    load_submission,
+    plan_facts,
+    solution_label,
+    solution_paths,
+    violation_line,
+)
 from hackhive.viz import LINK_DOOR, LINK_OPENING, draw_graph, draw_layers, draw_nodes
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +75,20 @@ def test_every_node_is_drawn_with_its_id():
     assert {n.id for n in plan.nodes} <= texts
     dots = [ln for ln in ax.lines if (ln.get_gid() or "").startswith("node:")]
     assert len(dots) == len(plan.nodes)
+
+
+@pytest.mark.parametrize("pid", ["1293", "13344", "2814", "3086", "5088", "576", "5924"])
+def test_node_ids_never_cover_a_room_label(pid):
+    plan = _plan(pid)
+    fig = draw_layers(plan)
+    ax = fig.axes[0]
+    draw_nodes(plan, ax)
+    r = fig.canvas.get_renderer()
+    rooms = [t.get_window_extent(r) for t in ax.texts if (t.get_gid() or "").startswith("label:")]
+    ids = [t for t in ax.texts if (t.get_gid() or "").startswith("node-label:")]
+    assert len(ids) == len(plan.nodes)
+    clashes = [t.get_text() for t in ids if any(t.get_window_extent(r).overlaps(b) for b in rooms)]
+    assert not clashes, clashes
 
 
 # --------------------------------------------------------------------------- room graph
@@ -132,33 +153,48 @@ def test_violation_line_is_red_with_its_rule_number():
     assert violation_line(s).startswith(":orange[") and "strict" in violation_line(s)
 
 
+def test_checklist_lines_keep_the_checkers_text_and_colour_only_the_crosses():
+    assert checklist_line("✓ each zone connected") == "✓ each zone connected"
+    assert checklist_line("✗ axis-aligned") == ":red[✗ axis-aligned]"
+
+
+def test_solutions_are_found_for_5088_only_with_valid_first():
+    assert solution_paths("5924") == []
+    paths = solution_paths("5088")
+    assert paths[0].name == "5088-valid.json"
+    assert {"5088-hub-0.3m-from-wall.json", "5088-wall-crossing.json"} <= {p.name for p in paths}
+    assert all(p.name.startswith("5088-") for p in paths)
+    assert solution_label(paths[0]) == "valid"
+
+
 def test_no_solution_yet_for_a_plan_without_one():
-    assert solution_path("5924") is None
     assert "no solution yet" in _main_text(_run()).lower()
 
 
-def test_reviewer_panel_waits_for_the_checker_or_shows_five_ticks():
+def test_5088_checklist_shows_five_ticks_from_the_checker():
     at = _pick(_run(), "5088")
     text = _main_text(at)
     assert "Reviewer checklist" in text
-    if checker_ready() and solution_path("5088") is not None:
-        assert text.count("✓") == 5
-    else:
-        assert "no solution yet" in text.lower() or "#11" in text
+    rep = checker.report(_plan("5088"), load_submission(solution_paths("5088")[0]), Constraints())
+    assert rep.verdict == "valid" and len(rep.lines) == 5
+    for line in rep.lines:  # the panel shows the checker's own words, nothing of ours
+        assert line in text
+    assert text.count("✓") >= 5 and "✗" not in text
+    assert not at.error
 
 
-@pytest.mark.skipif(not checker_ready(), reason="checker.check_rules arrives with #11")
-def test_checklist_text_comes_from_the_checker():
-    import json
+def test_broken_solution_lists_its_violations_in_red_with_the_rule_number():
+    at = _pick(_run(), "5088")
+    at.main.selectbox(key="solution").set_value("hub 0.3m from wall")
+    _run(at)
+    text = _main_text(at)
+    assert ":red[✗ **Rule 6** · H1 · error:" in text
+    assert "invalid" in text.lower()
 
-    from hackhive.contracts import Submission
 
-    path = solution_path("5088")
-    assert path is not None
-    sub = Submission.model_validate(json.loads(path.read_text(encoding="utf-8")))
-    plan = _plan("5088")
-    violations = checker.check_rules(plan, sub, Constraints())
-    lines = checker.checklist(violations, checker.metrics(sub.hubs))
-    text = _main_text(_pick(_run(), "5088"))
-    for item in lines:
-        assert (item if isinstance(item, str) else item[0]) in text
+def test_wall_crossing_shows_rule_5_in_red():
+    at = _pick(_run(), "5088")
+    at.main.selectbox(key="solution").set_value("wall crossing")
+    _run(at)
+    text = _main_text(at)
+    assert ":red[✗ **Rule 5**" in text and ":red[✗ axis-aligned" in text

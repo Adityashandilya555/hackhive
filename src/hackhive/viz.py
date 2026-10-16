@@ -228,6 +228,7 @@ def draw_layers(layers: Plan | Any | Mapping[str, Iterable[Any]], ax: Axes | Non
             zorder=4,
             clip_on=True,
             linespacing=1.15,
+            gid=f"label:{room.id}",
         )
         if renderer is not None:
             _fit(text, room, ax, renderer)
@@ -258,8 +259,30 @@ def _fit(text: Any, room: _Room, ax: Axes, renderer: Any) -> None:
     text.set_fontsize(_MIN_LABEL_PT)
 
 
+# Where a node's id may sit around its dot (offset in points, alignment), tried in this order.
+_NODE_LABEL_SPOTS = (
+    ((5, 4), "left", "bottom"),
+    ((5, -4), "left", "top"),
+    ((-5, 4), "right", "bottom"),
+    ((-5, -4), "right", "top"),
+    ((0, 8), "center", "bottom"),
+    ((0, -8), "center", "top"),
+    ((14, 0), "left", "center"),
+    ((-14, 0), "right", "center"),
+    ((0, 20), "center", "bottom"),
+    ((0, -20), "center", "top"),
+)
+
+
 def draw_nodes(plan: Plan, ax: Axes) -> None:
-    """Every node as an ink dot with its id (N1…), on top of the base layer (#12)."""
+    """Every node as an ink dot with its id (N1…), on top of the base layer (#12). The id goes to
+    the first corner of its dot where it doesn't overlap a room label or another node's id."""
+    renderer = _renderer(ax.figure)
+    taken = [
+        t.get_window_extent(renderer)
+        for t in ax.texts
+        if renderer is not None and (t.get_gid() or "").startswith("label:")
+    ]
     for n in plan.nodes:
         x, y = n.xy
         ax.plot(
@@ -274,17 +297,29 @@ def draw_nodes(plan: Plan, ax: Axes) -> None:
             zorder=7,
             gid=f"node:{n.id}",
         )
-        ax.annotate(
-            n.id,
-            (x, y),
-            xytext=(5, 4),
-            textcoords="offset points",
-            fontsize=_LABEL_PT,
-            fontweight="bold",
-            color=INK,
-            zorder=7,
-            bbox={"boxstyle": "round,pad=0.12", "fc": SURFACE, "ec": "none", "alpha": 0.85},
-        )
+        for k, (offset, ha, va) in enumerate(_NODE_LABEL_SPOTS):
+            label = ax.annotate(
+                n.id,
+                (x, y),
+                xytext=offset,
+                textcoords="offset points",
+                ha=ha,
+                va=va,
+                fontsize=_LABEL_PT,
+                fontweight="bold",
+                color=INK,
+                zorder=7,
+                gid=f"node-label:{n.id}",
+                bbox={"boxstyle": "round,pad=0.12", "fc": SURFACE, "ec": "none", "alpha": 0.85},
+            )
+            if renderer is None:
+                break
+            box = label.get_window_extent(renderer)
+            last = k == len(_NODE_LABEL_SPOTS) - 1
+            if last or not any(box.overlaps(t) for t in taken):
+                taken.append(box)
+                break
+            label.remove()
 
 
 def _anchor(geom: BaseGeometry) -> Point:

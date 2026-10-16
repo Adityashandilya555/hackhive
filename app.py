@@ -7,25 +7,32 @@ what-if sidebar (#30), the arrangements gallery and the batch leaderboard.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
 
+from hackhive import checker
 from hackhive.contracts import Constraints, Plan
 from hackhive.graph import build_graph
 from hackhive.io import load_plan
 from hackhive.ui import (
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
-    checker_ready,
+    checklist_line,
     fixture_ids,
     fixture_label,
     fixture_path,
+    load_submission,
+    metrics_line,
     plan_facts,
     plan_from_bytes,
     preset_rows,
     resplan_raw,
-    review,
     room_counts,
-    solution_path,
+    solution_label,
+    solution_paths,
+    verdict_line,
+    violation_line,
 )
 from hackhive.viz import draw_graph, draw_layers, draw_nodes, to_png
 
@@ -61,6 +68,12 @@ def picture(source: str, key: str, content: bytes | None = None, graph: bool = F
     return to_png(fig)
 
 
+@st.cache_data(max_entries=64, show_spinner="Checking…")
+def checked(source: str, key: str, content: bytes | None, solution: str) -> checker.Report:
+    """`checker.report` on a solution file: the six rules, the metrics, the checklist."""
+    return checker.report(load(source, key, content), load_submission(Path(solution)), PRESET)
+
+
 # --------------------------------------------------------------------------- sidebar
 
 
@@ -88,29 +101,34 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
     return source, up.name, up.getvalue()
 
 
-def reviewer_panel(plan: Plan, c: Constraints) -> None:
-    """Slide 5's "what a reviewer confirms", rendered only from the checker mirror (C26)."""
+def reviewer_panel(source: str, key: str, content: bytes | None, plan: Plan) -> None:
+    """Slide 5's "what a reviewer confirms", rendered only from the checker mirror (C26, #11):
+    its checklist lines verbatim, its verdict and metrics, and every violation in red."""
     st.subheader("Reviewer checklist")
-    solution = solution_path(plan.plan_id.removeprefix("PLAN_"))
-    if solution is None:
+    solutions = solution_paths(plan.plan_id.removeprefix("PLAN_"))
+    if not solutions:
         st.caption("No solution yet: the solver arrives in Sprint 2 (#17).")
         return
-    if not checker_ready():
-        st.caption(
-            f"A hand-made solution exists ({solution.name}); the checker (#11) will check it."
-        )
-        return
+    path = st.selectbox(
+        "Hand-made solution (#11)",
+        solutions,
+        format_func=solution_label,
+        key="solution",
+        help="5088's valid submission and one broken variant per rule, from the checker's tests.",
+    )
     try:
-        ticks, violations = review(plan, solution, c)
-    except (OSError, ValueError) as e:
-        st.error(f"Can't read {solution.name}. {e}")
+        rep = checked(source, key, content, str(path))
+    except ValueError as e:
+        st.error(f"Can't check {path.name}. {e}")
         return
-    for line in ticks:
-        st.markdown(line)
-    if violations:
+    for line in rep.lines:
+        st.markdown(checklist_line(line))
+    st.markdown(verdict_line(rep.verdict))
+    st.caption(metrics_line(rep.metrics))
+    if rep.violations:
         st.markdown("**Violations**")
-        for line in violations:
-            st.markdown(line)
+        for v in rep.violations:
+            st.markdown(violation_line(v))
 
 
 def locked_preset(c: Constraints) -> None:
@@ -165,7 +183,7 @@ except (OSError, ValueError) as e:
     st.stop()
 
 st.caption(f"**{plan.plan_id}** · {room_counts(plan)}")
-drawing, panel = st.columns([3, 1], gap="large")
+drawing, panel = st.columns([5, 3], gap="large")
 with drawing:
     try:
         st.image(picture(source, key, content, show_graph), width="stretch")
@@ -180,4 +198,4 @@ with panel:
     st.markdown(f"**{plan_facts(plan, PRESET)}**")
     st.markdown(f"{plan.m_per_unit:.4f} m/unit · walls {plan.wall_depth_m:.2f} m")
     st.caption("Eligible area · nodes · LB = the fewest hubs any zoning can use.")
-    reviewer_panel(plan, PRESET)
+    reviewer_panel(source, key, content, plan)

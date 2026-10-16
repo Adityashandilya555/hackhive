@@ -129,15 +129,29 @@ def room_counts(plan: Plan) -> str:
 # --------------------------------------------------------------------------- reviewer panel
 
 
-def solution_path(plan_id: str) -> Path | None:
-    """The hand-made solution fixture for a test plan (#11 builds 5088's), if there is one."""
-    p = SOLUTION_DIR / f"{plan_id}-valid.json"
-    return p if p.exists() else None
+def solution_paths(plan_id: str) -> list[Path]:
+    """The hand-made solution fixtures (#11) for a test plan: `<id>-valid.json` first, then the
+    broken variants by name. Empty when the plan has none."""
+    paths = sorted(SOLUTION_DIR.glob(f"{plan_id}-*.json"))
+    return sorted(paths, key=lambda p: (p.stem != f"{plan_id}-valid", p.name))
 
 
-def checker_ready() -> bool:
-    """Whether the rule half of the checker mirror (#11) is merged yet."""
-    return hasattr(checker, "check_rules") and hasattr(checker, "checklist")
+def solution_label(path: Path) -> str:
+    """`5088-hub-0.3m-from-wall.json` → `hub 0.3m from wall`."""
+    return path.stem.split("-", 1)[1].replace("-", " ")
+
+
+def load_submission(path: Path) -> Submission:
+    """A slide-8 submission file. Raises ValueError (pydantic's ValidationError is one)."""
+    try:
+        return Submission.model_validate_json(path.read_text(encoding="utf-8"))
+    except OSError as e:
+        raise ValueError(f"can't read {path.name}: {e}") from e
+
+
+def checklist_line(line: str) -> str:
+    """One line of `checker.checklist`, verbatim; a ✗ line is also coloured red."""
+    return f":red[{line}]" if line.startswith("✗") else line
 
 
 def violation_line(v: Violation) -> str:
@@ -148,18 +162,17 @@ def violation_line(v: Violation) -> str:
     return f":{colour}[{mark} **Rule {v.rule}**{hub} · {v.severity}: {v.message}]"
 
 
-def checklist_line(item: Any) -> str:
-    """One line of `checker.checklist`, as a (text, ok) pair or ready-made text."""
-    if isinstance(item, str):
-        return item
-    text, ok = item[0], bool(item[1])
-    return f"✓ {text}" if ok else f":red[✗ {text}]"
+def verdict_line(verdict: str) -> str:
+    """`checker.verdict` with a mark and a colour: ✓ valid, ⚠ valid (strict only), ✗ invalid."""
+    if verdict == "valid":
+        return f":green[✓ **{verdict}**]"
+    if verdict == "invalid":
+        return f":red[✗ **{verdict}**]"
+    return f":orange[⚠ **{verdict}**]"
 
 
-def review(plan: Plan, solution: Path, c: Constraints) -> tuple[list[str], list[str]]:
-    """The reviewer panel for a solution file: checklist lines and violation lines, both
-    rendered only from the checker mirror (C26). Needs `checker_ready()`."""
-    sub = Submission.model_validate(json.loads(solution.read_text(encoding="utf-8")))
-    violations = checker.check_rules(plan, sub, c)
-    items = checker.checklist(violations, checker.metrics(sub.hubs, c))
-    return [checklist_line(i) for i in items], [violation_line(v) for v in violations]
+def metrics_line(m: checker.Metrics | None) -> str:
+    """`H 1 · L 24.805 m · X 0 · O 0.000 m · B 12 · J 30.805`, as the checker CLI prints it."""
+    if m is None:
+        return "metrics not computed (non-finite coordinates)"
+    return f"H {m.H} · L {m.L:.3f} m · X {m.X} · O {m.O:.3f} m · B {m.B} · J {m.J:.3f}"
