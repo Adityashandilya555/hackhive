@@ -518,13 +518,15 @@ def test_own_rooms_via_excluded_zone_routes_through_its_bathroom():
     assert _inside_bath(rooms, ring) > 1.0
 
 
-# main @ ef024cc, before D7: J per fixture (tests/test_route_rings.py demo, full precision)
+# main @ ef024cc, before D7: J per fixture (tests/test_route_rings.py demo, full precision).
+# 3086 is after the µm hub tie in rings.first_ring: main gave 82.214805 on Python 3.13 but
+# 88.614805 on 3.11 (CI), as its hub tie fell to the float sum order
 J_MAIN = {
     "5088": 46.137406,
     "576": 94.167828,
     "1293": 96.851413,
     "2814": 90.270451,
-    "3086": 82.214805,
+    "3086": 87.014805,
     "5924": 84.392827,
     "13344": 108.1007,
 }
