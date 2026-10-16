@@ -216,3 +216,27 @@ def test_the_cli_exits_1_when_no_plan_loaded(tmp_path):
     (tmp_path / "a.json").write_text("{oops", "utf-8")
     code = cli.main(["batch", "--plans", str(tmp_path), "--out", str(tmp_path / "o" / "b.csv")])
     assert code == 1
+
+
+def test_batch_does_not_depend_on_the_streamlit_helpers():
+    """#108 review: a UI label change must not change the CSV, so batch never imports `ui`."""
+    import ast
+
+    tree = ast.parse(Path(batch.__file__).read_text("utf-8"))
+    names = {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
+    mods = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    assert "ui" not in names and "hackhive.ui" not in mods
+
+
+def test_each_plan_builds_its_room_graph_once(tmp_path, monkeypatch):
+    """#108 review: the tags reuse solve()'s room graph instead of rebuilding it."""
+    from hackhive import solve
+
+    calls = []
+    real = solve.build_graph
+    monkeypatch.setattr(solve, "build_graph", lambda *a, **k: calls.append(1) or real(*a, **k))
+    d = tmp_path / "p"
+    d.mkdir()
+    (d / "plan-576.json").write_text((PLANS / "plan-576.json").read_text("utf-8"), "utf-8")
+    (row,) = batch.run(d, "test", 1, tmp_path / "batch.csv", C)
+    assert row["tags"] and len(calls) == 1
