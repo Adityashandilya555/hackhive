@@ -367,6 +367,8 @@ def best_ring(
     then J of the ring `route.route_ring` writes, stubs and junction bends included) over
     `shortlist`. Pairs are routed in lower-bound order; with `prune`, routing stops once a
     flag-free ring's J is ≤ the next bound, which changes nothing (the bound never exceeds J).
+    In practice the shortlist, not pruning, bounds the work: on the 7 fixtures J sits ≥ 2 m
+    above every bound, and pruning skips 2 of 360 routings (#95 review).
     Never worse than first_ring, whose pair is on the shortlist; a pair that can't be routed is
     skipped, and first_ring's hub comes back if none can.
     """
