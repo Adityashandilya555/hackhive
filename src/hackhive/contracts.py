@@ -155,6 +155,14 @@ class Bounds(_Strict):
     proof: Literal["exhaustive", "lb_met", "greedy", "none"] = "none"
 
 
+class ArrangementUsed(_Strict):
+    """Which ranked arrangement `solve()` submitted, and why the better-ranked ones weren't (C43)."""
+
+    rank: int | None  # 1 = `solve.enumerate()`'s first; None: the walking skeleton's first cut
+    signature: str  # the zone signature, e.g. "bedroom_0+living_0|kitchen_0"
+    skipped: list[str] = []  # each better-ranked one, best first: "#1 <signature>: <why>"
+
+
 class CostBreakdown(_Strict):
     H: int
     L: float
@@ -204,6 +212,7 @@ class Sidecar(_Strict):
     frame: Frame | None = None
     violations: list[Violation] = []
     bounds: Bounds | None = None
+    arrangement: ArrangementUsed | None = None  # None when nothing was submitted
     cost: CostBreakdown | None = None
     hubs: list[HubMetrics] = []
     settings: Constraints = Constraints()
