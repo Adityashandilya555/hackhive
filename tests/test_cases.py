@@ -50,7 +50,7 @@ def test_every_case_has_a_plan():
 def test_case_plan_solves_as_expected(row):
     facts = _facts(ui.case_plan_path(row))
     assert facts.expected() == row["expected"]
-    if row["case"] != "grid_failed":  # stays a regression example once #78 paints it (#84)
+    if row["case"] not in ui.REGRESSION_CASES:  # e.g. grid failed, once #78 paints it (#84)
         case = next(c for c in ui.CASES if c.id == row["case"])
         assert case.match(facts), f"{row['plan']} no longer shows {row['case']}"
 
@@ -63,13 +63,19 @@ def _snapshot(d: Path) -> dict[str, bytes]:
     return {p.name: p.read_bytes() for p in sorted(d.iterdir())}
 
 
-def test_script_picks_fixtures_then_the_scan_and_is_idempotent(tmp_path):
+def _small_set(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
+    """A fixtures folder with 5088, and a scan of a malformed line then 5924 (raw, returned)."""
     fixtures, out = tmp_path / "plans", tmp_path / "cases"
     fixtures.mkdir()
     shutil.copy(ui.fixture_path("5088"), fixtures)
     raw_5924 = json.loads(ui.fixture_path("5924").read_text(encoding="utf-8"))
     jsonl = tmp_path / "plans.jsonl"
     jsonl.write_text('{"id": 1}\n' + json.dumps(raw_5924) + "\n", encoding="utf-8")
+    return jsonl, out, fixtures, raw_5924
+
+
+def test_script_picks_fixtures_then_the_scan_and_is_idempotent(tmp_path):
+    jsonl, out, fixtures, raw_5924 = _small_set(tmp_path)
     make_cases = _script()
 
     missing = make_cases.build(jsonl, out=out, fixtures=fixtures, n=0)
@@ -83,3 +89,22 @@ def test_script_picks_fixtures_then_the_scan_and_is_idempotent(tmp_path):
 
     assert make_cases.build(jsonl, out=out, fixtures=fixtures, n=0) == missing
     assert _snapshot(out) == first
+
+
+def test_script_repicks_a_named_plan_that_no_longer_shows_its_case(tmp_path):
+    """A `solve()` change can move a plan out of its case (#101 made 13693 clean, no longer
+    strict-only): the next run picks another plan instead of keeping one that fails
+    `test_case_plan_solves_as_expected`."""
+    jsonl, out, fixtures, _ = _small_set(tmp_path)
+    make_cases = _script()
+    make_cases.build(jsonl, out=out, fixtures=fixtures, n=0)
+    index = out / "cases.json"
+    rows = ui.case_rows(index)
+    for row in rows:
+        if row["case"] == "one_node_ring":
+            row["plan"] = "../plans/plan-5088.json"  # 5088's one ring has 3 nodes
+    index.write_text(json.dumps(rows), encoding="utf-8")
+
+    make_cases.build(jsonl, out=out, fixtures=fixtures, n=0)
+    rows = {r["case"]: r for r in ui.case_rows(index)}
+    assert rows["one_node_ring"]["plan"] == "case-one-node-ring-5924.json"
