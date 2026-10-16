@@ -19,7 +19,7 @@ import numpy as np
 import shapely
 from shapely.geometry.base import BaseGeometry
 
-from hackhive.contracts import Constraints, Plan
+from hackhive.contracts import Constraints, Plan, RouteSegment
 from hackhive.zoning import HUB_MARGIN_M, Infeasible, wall_geometry
 
 if TYPE_CHECKING:  # grid imports this module, so these are for type hints only
@@ -206,7 +206,8 @@ def _routing(zone: Collection[str], plan: Plan, grid: LabelGrid, c: Constraints)
     return _Routing(zone_grid(grid, plan, zone, c), retrace_ok, RuleContext(plan, c))
 
 
-def _cost(hub: Hub, plan: Plan, c: Constraints, r: _Routing) -> RingCost:
+def _cost(hub: Hub, plan: Plan, c: Constraints, r: _Routing) -> tuple[RingCost, list[RouteSegment]]:
+    """The hub's ring routed alone (pass 0), and its cost."""
     from hackhive.checker import hub_rules, metrics  # checker imports grid, which imports us
     from hackhive.contracts import HubOut
     from hackhive.route import Stop, _route_ring
@@ -231,16 +232,17 @@ def _cost(hub: Hub, plan: Plan, c: Constraints, r: _Routing) -> RingCost:
     )
     # rules 1-3 are the zoning's, the same for every ring of the zone; rules 4-6 are the ring's
     flags = [v for v in hub_rules(out, r.rules) if v.rule >= 4]
-    return RingCost(
+    cost = RingCost(
         sum(v.severity == "error" for v in flags),
         sum(v.severity == "strict" for v in flags),
         metrics([out], c).J,
     )
+    return cost, segments
 
 
 def ring_cost(hub: Hub, plan: Plan, grid: LabelGrid, c: Constraints) -> RingCost:
     """The hub's ring routed alone on its zone's grid (`route.route_ring`, D7), and its cost."""
-    return _cost(hub, plan, c, _routing(hub.assigned_rooms, plan, grid, c))
+    return _cost(hub, plan, c, _routing(hub.assigned_rooms, plan, grid, c))[0]
 
 
 def _orders(nodes: Sequence[str]) -> list[tuple[str, ...]]:
@@ -363,6 +365,20 @@ def best_ring(
     *,
     prune: bool = True,
 ) -> Hub:
+    """`best_ring_routed`'s hub."""
+    return best_ring_routed(zone, plan, g, grid, c, hub_id, prune=prune)[0]
+
+
+def best_ring_routed(
+    zone: Collection[str],
+    plan: Plan,
+    g: nx.Graph,
+    grid: LabelGrid,
+    c: Constraints,
+    hub_id: str = "H1",
+    *,
+    prune: bool = True,
+) -> tuple[Hub, list[RouteSegment] | None]:
     """The zone's hub spot and ring order with the lowest routed cost (`RingCost`: rule-4-6 flags,
     then J of the ring `route.route_ring` writes, stubs and junction bends included) over
     `shortlist`. Pairs are routed in lower-bound order; with `prune`, routing stops once a
@@ -370,19 +386,21 @@ def best_ring(
     In practice the shortlist, not pruning, bounds the work: on the 7 fixtures J sits ≥ 2 m
     above every bound, and pruning skips 2 of 360 routings (#95 review).
     Never worse than first_ring, whose pair is on the shortlist; a pair that can't be routed is
-    skipped, and first_ring's hub comes back if none can.
+    skipped, and first_ring's hub comes back if none can, with None for its ring. Otherwise the
+    ring is the winner's as routed for its cost (`route.route_ring`'s pass 0), so a caller that
+    needs it doesn't route it again (#22).
     """
     first = first_ring(zone, plan, g, c, hub_id=hub_id)
     r = _routing(zone, plan, grid, c)
-    best: tuple[RingCost, Hub] | None = None
+    best: tuple[RingCost, Hub, list[RouteSegment]] | None = None
     for lb, hub in shortlist(zone, plan, g, grid, c, hub_id, first=first):
         # a later pair costs J ≥ its bound ≥ lb and ≥ 0 flags: it can't beat a flag-free best
         if prune and best is not None and best[0] <= RingCost(0, 0, lb):
             break
         try:
-            cost = _cost(hub, plan, c, r)
+            cost, segments = _cost(hub, plan, c, r)
         except ValueError:  # this pair can't be routed (a stub through a wall, a cut-off leg)
             continue
         if best is None or cost < best[0]:
-            best = (cost, hub)
-    return first if best is None else best[1]
+            best = (cost, hub, segments)
+    return (first, None) if best is None else (best[1], best[2])
