@@ -764,8 +764,9 @@ def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
     legs share around a node in a single-door room (`graph.single_door_rooms`: a dead-end
     bathroom door doesn't count, 2026-10-16), and any stretch that touches a single-door room
     (or its passage) holding the ring's hub or one of its nodes, whichever legs share it (a hub
-    there must leave and re-enter through the same door, #68 review). Overlaps between
-    different rings are cost only."""
+    there must leave and re-enter through the same door, #68 review), and the two legs of a
+    one-node ring H → N → H, whose out-and-back is the same legal choice (decision_conventions
+    §5, #81). Overlaps between different rings are cost only."""
     tol = ctx.c.tolerance_m
     legs = [clean_polyline(s.polyline, tol) for s in hub.route_segments]
     labels = [f"{s.from_}→{s.to}" for s in hub.route_segments]
@@ -775,7 +776,7 @@ def _rule4_retraces(hub: HubOut, ctx: _Context) -> list[Violation]:
     for i in range(len(legs)):
         for j in range(i, len(legs)):
             node = ctx.nodes.get(seq[j]) if j == i + 1 else None
-            if node is not None and node.room_id in ctx.single_door:
+            if node is not None and (node.room_id in ctx.single_door or len(seq) == 3):
                 continue
             for a, b in _shared_stretches(legs[i], legs[j] if j != i else None, tol):
                 stretch = shapely.LineString([a, b])
