@@ -133,3 +133,27 @@ def test_the_readme_commands_run(tmp_path):
     sub = next(p for p in tmp_path.glob("*.json") if not p.name.endswith(".sidecar.json"))
     checked = _run("check", str(plan), str(sub))
     assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+def test_part_b_is_documented():
+    """#22 landed: the ranking, `arrangement`, `bounds.proof` and `--list` are in the docs, and
+    no placeholder is left."""
+    doc, readme = _doc(), (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "PART B" not in doc + readme
+    for key in Sidecar.model_fields["arrangement"].annotation.__args__[0].model_fields:
+        assert f"`arrangement.{key}`" in doc, key
+    for proof in ("exhaustive", "lb_met", "none"):
+        assert f"`{proof}`" in doc, proof
+    assert "worse J" in doc
+    assert "python -m hackhive.solve --list" in readme
+
+
+def test_the_readme_list_command_runs():
+    listed = subprocess.run(
+        [sys.executable, "-m", "hackhive.solve", "--list", str(PLANS / "plan-5924.json")],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+    )
+    assert listed.returncode == 0, listed.stderr
+    assert "J pass 0" in listed.stdout.splitlines()[0]
