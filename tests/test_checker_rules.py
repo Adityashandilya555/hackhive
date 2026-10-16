@@ -174,10 +174,11 @@ def test_retrace_where_the_only_other_door_is_a_dead_end_bathroom_is_legal():
     assert violations == []
 
 
-def test_one_node_ring_out_and_back_is_legal():
-    """#81, decision_conventions §5 (one-node ring row): H → N → H on one line is the same legal
-    choice as a single-door room, even when N's room has two ways out (5088's living room:
-    bedroom and kitchen doors). Only this ring is submitted, so rule 1's errors are expected."""
+def test_one_node_ring_out_and_back_is_strict_until_q2a():
+    """Q2(a) is open: an out-and-back H → N → H where N's room has two ways out (5088's living
+    room: bedroom and kitchen doors) may be a branch, so it stays rule-4 strict, as ADR-005
+    allows it only when forced (#97 review). Only this ring is submitted, so rule 1's errors
+    are expected."""
     plan = load_plan(plan_path("5088-valid.json"))
     n1 = plan.nodes[0]
     hub = (n1.xy[0] + 1.0, n1.xy[1])
@@ -204,8 +205,8 @@ def test_one_node_ring_out_and_back_is_legal():
         }
     )
     found = check_rules(plan, sub)
-    assert not [v for v in found if v.rule == 4], found
-    assert {v.rule for v in found} == {1}
+    assert [(v.rule, v.severity) for v in found if v.rule == 4] == [(4, "strict")], found
+    assert {v.rule for v in found} == {1, 4}
 
 
 def test_two_door_retrace_is_strict_with_a_where():
