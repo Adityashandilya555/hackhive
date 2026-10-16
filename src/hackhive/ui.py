@@ -546,6 +546,52 @@ def case_plan_path(row: dict[str, Any], path: Path = CASES_JSON) -> Path:
     return (path.parent / row["plan"]).resolve()
 
 
+# --------------------------------------------------------------------------- "Cases" picker (#85)
+
+CASES_SOURCE = "Cases"
+# the picker's groups, in order, by the case's expected sidecar status
+CASE_GROUPS = {
+    "designs": ("ok",),
+    "warnings": ("submitted_strict_only",),
+    "no design": ("infeasible", "input_error"),
+}
+
+
+def case_group(row: dict[str, Any]) -> str:
+    status = row["expected"]["status"]
+    return next(g for g, statuses in CASE_GROUPS.items() if status in statuses)
+
+
+def case_options(rows: list[dict[str, Any]]) -> list[str]:
+    """The case ids for the picker: designs, then warnings, then no design; within a group, in
+    `cases.json`'s (catalogue) order."""
+    order = list(CASE_GROUPS)
+    return [r["case"] for r in sorted(rows, key=lambda r: order.index(case_group(r)))]
+
+
+def case_option_label(row: dict[str, Any]) -> str:
+    """`no design · A room over 100 m²`."""
+    return f"{case_group(row)} · {row['title']}"
+
+
+def _status_and_hubs(status: str, k: int | None) -> str:
+    return status + ("" if k is None else f", {k} hub{'' if k == 1 else 's'}")
+
+
+def case_check(row: dict[str, Any], side: Sidecar) -> tuple[str, str]:
+    """(`success` | `error`, text): the case's expected status and hub count against what
+    `solve()` gives now, green when both match (#85). Without a design only the status counts."""
+    want = row["expected"]
+    k_want = want.get("k_found")
+    k_got = side.bounds.k_found if side.bounds is not None and k_want is not None else None
+    ok = side.status == want["status"] and k_got == k_want
+    text = (
+        f"Expected {_status_and_hubs(want['status'], k_want)}; "
+        f"got {_status_and_hubs(side.status, k_got)}"
+    )
+    return ("success", f"✓ {text}") if ok else ("error", f"✗ {text}")
+
+
 # --------------------------------------------------------------------------- what-ifs (#30)
 
 

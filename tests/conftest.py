@@ -37,6 +37,8 @@ SLOW = {
     # the exact ring search over every zone of the fixtures
     "tests/test_rings.py::test_exact_best_ring_never_costs_more_than_first_ring",
     "tests/test_rings.py::test_exact_best_ring_is_a_closed_ring_over_the_zone_with_a_rule_6_hub",
+    # the strict-only case plan (15333) opened in the app (#85)
+    "tests/test_app_cases.py::test_each_case_opens_and_says_what_it_shows[strict_only]",
     # the batch over 3 fixtures, run twice
     "tests/test_batch.py::test_two_runs_give_the_same_csv_apart_from_ms",
 }
