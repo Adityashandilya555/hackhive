@@ -54,7 +54,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | 3.4 | A zone must contain a room that can host a hub (a point ≥ 0.51 m from walls). Otherwise that zoning is skipped, and a plan with no such zoning gets no submission. | ours | `zoning.py`, `solve._pick` |
 | 3.5 | A zoning is skipped when one of its zones has no node, because there is no ring to build. | ours | `solve._pick` |
 | 3.6 | Exact zoning handles **≤ 16 rooms** per connected group and **≤ 5,000 zonings**. Above that: no submission, and a "too large" sidecar. **No ResPlan plan gets there** (largest group: 9 rooms, out of 16,999 plans), so #49 goes to Backlog. | D8 | `zoning.py`, `solve.py` |
-| 3.7 | A door gap or open-passage strip that covers **no 10 cm cell centre** stops the grid (`covers no cell centre`), so the plan gets no design and scores 0: **11% of a 150-plan sample**. | **bug**, new P0 issue (T5) | `grid.py` |
+| 3.7 | A passage thinner than a 10 cm cell paints the cells it crosses (never past its ends). A passage wholly outside `inner` (the 2 cm strip between two balconies: most of T5's 11%) is exterior, like a balcony door. A plan whose `inner` doesn't match its rooms (an eligible room > 20% outside it: 541 of 683 augmented plans, 8 others) is an `input_error` naming the room. A passage the grid still can't paint (a door drawn twice or on a window, an opening inside a nested room) fails the plan with `grid failed` and says why; it is never dropped to fit: **1.4% of a 500-plan sample**. | fixed (#78) | `grid.py`, `io.load_plan` |
 
 ## 4. Hubs
 
