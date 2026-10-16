@@ -130,15 +130,20 @@ def clean_polyline(polyline: Sequence[Point], tol: float = TOL) -> list[Point]:
     return out
 
 
-def count_bends(polylines: Sequence[Sequence[Point]], closed: bool, tol: float = TOL) -> int:
+def count_bends(
+    polylines: Sequence[Sequence[Point]], closed: bool, tol: float = TOL, *, at_joins: bool = True
+) -> int:
     """B for one cable made of consecutive legs (slide 7; decision_conventions §6 B row).
 
     +1 at every direction change inside a leg, at every node (last direction in vs first out) and,
     if closed, at the hub. A reversal counts once; straight through counts 0. Zero-length legs are
-    skipped.
+    skipped. Without ``at_joins`` (the lenient reading, #30 D3), turns at nodes and the hub don't
+    count, only those inside a leg.
     """
     legs = [p for p in (clean_polyline(line, tol) for line in polylines) if len(p) >= 2]
     bends = sum(len(p) - 2 for p in legs)
+    if not at_joins:
+        return bends
     pairs = list(pairwise(legs))
     if closed and legs:
         pairs.append((legs[-1], legs[0]))
@@ -251,6 +256,14 @@ def _overlaps(
     return total, credit
 
 
+def _own_overlap(
+    legs: Sequence[Sequence[Point]], owners: Sequence[str], owner: str, tol: float
+) -> float:
+    """O of one ring's legs on their own: its overlap with itself (the lenient reading, D3)."""
+    mine = [leg for leg, o in zip(legs, owners, strict=True) if o == owner]
+    return _overlaps(mine, [owner] * len(mine), tol)[0]
+
+
 def overlap_length(polylines: Sequence[Sequence[Point]], tol: float = TOL) -> float:
     """O (slide 7): on each line, a stretch covered by k pieces adds (k − 1) × length.
 
@@ -311,9 +324,27 @@ def _coincide(da: list[Point], db: list[Point], tol: float) -> bool:
     )
 
 
+def _pass_through(da: list[Point], db: list[Point], tol: float) -> bool:
+    """Both cables run through the point and cross there: two ways out each, none shared, and
+    alternating around it (A, B, A, B). Not a T-touch, an end, or a shared stretch's end."""
+    if len(da) != 2 or len(db) != 2 or any(_same_dir(x, y, tol) for x in da for y in db):
+        return False
+    around = sorted(
+        [(math.atan2(d[1], d[0]), "a") for d in da] + [(math.atan2(d[1], d[0]), "b") for d in db]
+    )
+    return all(around[i][1] != around[i + 1][1] for i in range(3))
+
+
 def _crossings(
-    legs: Sequence[Sequence[Point]], owners: Sequence[str], terminals: Sequence[Point], tol: float
+    legs: Sequence[Sequence[Point]],
+    owners: Sequence[str],
+    terminals: Sequence[Point],
+    tol: float,
+    *,
+    lenient: bool = False,
 ) -> list[tuple[Point, set[str]]]:
+    """X's points, each with the rings that meet there. ``lenient`` (#30 D3): only where two
+    cables pass through each other; a T-touch or a shared stretch's end is no crossing."""
     pieces = [(li, i) for li, leg in enumerate(legs) for i in range(len(leg) - 1)]
     # every point _meet returns lies within 2·tol of both pieces, so a pair whose boxes, grown by
     # 3·tol, don't touch meets nowhere: skipping it changes nothing, in the same order (#20)
@@ -337,7 +368,10 @@ def _crossings(
                     continue
                 # cables that arrive and leave p together don't meet there: the shared vertex of
                 # consecutive pieces, or a co-routed corner of a retrace (#43 decided ambiguity)
-                if _coincide(_leaving(A, ia, p, tol), _leaving(B, ib, p, tol), tol):
+                da, db = _leaving(A, ia, p, tol), _leaving(B, ib, p, tol)
+                if _coincide(da, db, tol):
+                    continue
+                if lenient and not _pass_through(da, db, tol):
                     continue
                 for q, who in found:
                     if _dist(p, q) <= tol:
@@ -397,13 +431,26 @@ class Metrics:
     per_hub: dict[str, HubTotals]
 
 
+READINGS = ("strict", "lenient")  # D3: how the unclear counting rules are read (#30)
+
+
 def metrics(
     hubs: Sequence[HubOut],
     c: Constraints = _DEFAULT,
     *,
     hub_areas: Mapping[str, float] | None = None,
+    reading: str = "strict",
 ) -> Metrics:
-    """H, L, X, O, B, J (and the area gap if `hub_areas` is given) from the polylines only."""
+    """H, L, X, O, B, J (and the area gap if `hub_areas` is given) from the polylines only.
+
+    `reading` (D3, #30's counting-rules toggle): "strict" is our mirror (decision_conventions
+    §6). "lenient" reads the three unclear rules the other way: X counts only cables passing
+    through each other (no T-touch, no shared stretch's ends), O only a ring's overlap with
+    itself, and B only turns inside a leg (none at a node or the hub). L is the same.
+    """
+    if reading not in READINGS:
+        raise ValueError(f"reading must be one of {READINGS}, got {reading!r}")
+    lenient = reading == "lenient"
     tol, w = c.tolerance_m, c.cost_weights
     raw = [s.polyline for h in hubs for s in h.route_segments]
     _check_finite(raw)
@@ -418,12 +465,16 @@ def metrics(
         legs += ring
         owners += [h.hub_id] * len(ring)
         per_L[h.hub_id] = sum(segment_length(p) for p in ring)
-        per_B[h.hub_id] = count_bends(ring, closed=True, tol=tol)
+        per_B[h.hub_id] = count_bends(ring, closed=True, tol=tol, at_joins=not lenient)
 
     terminals = [p for leg in legs if leg for p in (leg[0], leg[-1])]
     terminals += [(h.location.x, h.location.y) for h in hubs]
-    O, per_O = _overlaps(legs, owners, tol)  # noqa: E741
-    points = _crossings(legs, owners, terminals, tol)
+    if lenient:  # each ring's overlap with itself only
+        per_O = {o: _own_overlap(legs, owners, o, tol) for o in dict.fromkeys(owners)}
+        O = sum(per_O.values())  # noqa: E741
+    else:
+        O, per_O = _overlaps(legs, owners, tol)  # noqa: E741
+    points = _crossings(legs, owners, terminals, tol, lenient=lenient)
     L, X, B = sum(per_L.values()), len(points), sum(per_B.values())
     per_hub = {
         h.hub_id: HubTotals(

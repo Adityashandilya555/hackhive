@@ -406,3 +406,25 @@ def status_banner(side: Sidecar, plan: Plan | None) -> tuple[str, str]:
     if side.status == "infeasible":
         return "error", f"✗ **infeasible**: {_infeasible_line(reason, plan)}"
     return "error", f"✗ **input_error**: {md_text(reason)}"
+
+
+# --------------------------------------------------------------------------- what-ifs (#30)
+
+
+def readings_rows(sub: Submission, c: Constraints) -> list[dict[str, Any]]:
+    """One design's metrics under both readings of D3's unclear counting rules (`checker.metrics`
+    `reading`): ours (strict) and the lenient one, as table rows. L is the same in both."""
+    rows = []
+    for reading, name in (("strict", "strict (ours)"), ("lenient", "lenient")):
+        m = checker.metrics(sub.hubs, c, reading=reading)
+        rows.append(
+            {
+                "Reading": name,
+                "L (m)": round(m.L, 3),
+                "X": m.X,
+                "O (m)": round(m.O, 3),
+                "B": m.B,
+                "J": round(m.J, 3),
+            }
+        )
+    return rows

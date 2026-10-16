@@ -38,12 +38,14 @@ def _utf8() -> None:
 
 def _solve(args: argparse.Namespace) -> int:
     from hackhive.solve import file_stem, solve_file, submit
-    from hackhive.viz import draw_layers, draw_nodes, draw_solution, to_png
+    from hackhive.viz import draw_layers, draw_nodes, draw_solution, label_what_if, to_png
+    from hackhive.what_if import WHAT_IF, what_if_changes
 
     if not args.plan.is_file():
         print(f"no such plan file: {args.plan}", file=sys.stderr)
         return 3
-    c = Constraints()
+    c = _settings(args)
+    changes = what_if_changes(c)
     result = solve_file(args.plan, c)
     written = submit(result, args.out)
     side = result.sidecar
@@ -53,20 +55,40 @@ def _solve(args: argparse.Namespace) -> int:
         else:
             fig = draw_layers(result.plan)
             draw_nodes(result.plan, fig.axes[0])
+        label_what_if(fig, changes)
         png = Path(args.out) / f"{file_stem(side.plan_id)}.png"
         png.write_bytes(to_png(fig))
         written.append(png)
     summary = f"{side.plan_id}: {side.status}"
-    if side.cost is not None and result.submittable:
+    if side.cost is not None and (result.submittable or changes):
         summary += f" · H {side.cost.H} · J {side.cost.J:.3f}"
     if side.reason:
         summary += f" ({side.reason})"
     print(summary)
+    if changes:  # #30: a what-if design is shown, never written as a submission (C29)
+        print(f"{WHAT_IF}: {'; '.join(changes)} · no submission written")
     for v in side.violations:
         print(strict_line(v) if v.severity == "strict" else f"rule {v.rule} [error] {v.message}")
     for path in written:
         print(f"wrote {path}")
+    if changes:  # nothing to submit by design: 0 when the design passes its own settings
+        return 0 if result.submission is not None and side.status != "infeasible" else 1
     return 0 if result.submittable else 1
+
+
+def _settings(args: argparse.Namespace) -> Constraints:
+    """The problem statement, with any what-if flag applied (#30). Flags given the preset's own
+    values change nothing, so the run stays a normal one."""
+    change: dict[str, object] = {}
+    if args.max_area is not None:
+        change["max_area_m2"] = args.max_area
+    if args.hub_clearance is not None:
+        change["hub_wall_clearance_m"] = args.hub_clearance
+    if args.zone_links_via_excluded:
+        change["zone_links_via_excluded"] = True
+    if args.route_through_other_rooms:
+        change["route_through_other_rooms"] = True
+    return Constraints(**change)
 
 
 def _check(args: argparse.Namespace) -> int:
@@ -100,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     """`hackhive solve <plan.json> --out <dir>` and `hackhive check <plan.json> <submission.json>`.
 
     solve: exit 0 when a submission was written (strict-only too), 1 when only the sidecar was,
-    3 when the plan file doesn't exist. check: exit 1 on any `error`, 0 when valid (strict-only
+    3 when the plan file doesn't exist. With a what-if flag (#30) no submission is ever written:
+    exit 0 when the what-if design has no `error` under its settings, 1 when there is none. check: exit 1 on any `error`, 0 when valid (strict-only
     too; each strict reading printed `STRICT (rule n, #46 Qm):`), 4 for strict-only under
     `--fail-on-strict`, 3 when a file can't be read, 2 for a usage error (argparse).
     """
@@ -110,6 +133,21 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("solve", help="design one plan: submission (if valid), sidecar, PNG")
     s.add_argument("plan", type=Path, help="the plan JSON file")
     s.add_argument("--out", type=Path, required=True, help="the output directory")
+    w = s.add_argument_group("what-if (#30): labelled WHAT-IF, never written as a submission")
+    w.add_argument("--max-area", type=float, metavar="M2", help="hub area cap (preset 100 m²)")
+    w.add_argument(
+        "--hub-clearance", type=float, metavar="M", help="hub to wall at least (preset: slide 3)"
+    )
+    w.add_argument(
+        "--zone-links-via-excluded",
+        action="store_true",
+        help="let a bathroom or stair link two zone rooms (D5)",
+    )
+    w.add_argument(
+        "--route-through-other-rooms",
+        action="store_true",
+        help="let cable cross bathrooms or other hubs' rooms (D7)",
+    )
     s.set_defaults(run=_solve)
     k = sub.add_parser("check", help="check a submission against its plan (slide 3's rules)")
     k.add_argument("plan", type=Path, help="the plan JSON file")

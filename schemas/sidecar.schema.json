@@ -72,6 +72,12 @@
           "title": "Interior Windows As Doors",
           "type": "boolean"
         },
+        "is_problem_statement": {
+          "description": "True only for the organisers' preset. Written to the JSON (#30: a WHAT-IF sidecar says\n`false`), never read from it: it's recomputed from the settings on every load.",
+          "readOnly": true,
+          "title": "Is Problem Statement",
+          "type": "boolean"
+        },
         "max_area_m2": {
           "default": 100,
           "exclusiveMinimum": 0,
@@ -119,6 +125,9 @@
           "type": "boolean"
         }
       },
+      "required": [
+        "is_problem_statement"
+      ],
       "title": "Constraints",
       "type": "object"
     },
@@ -469,6 +478,7 @@
         "grid_m": 0.1,
         "hub_wall_clearance_m": 0.5,
         "interior_windows_as_doors": false,
+        "is_problem_statement": true,
         "max_area_m2": 100.0,
         "max_nodes": 5,
         "origin_shift": [
