@@ -362,6 +362,38 @@ def route(arrangement: Arrangement, plan: Plan, c: Constraints | None = None) ->
     return route_passes(LabelGrid.from_plan(plan, cell_m=c.grid_m), plan, arrangement.hubs, c)
 
 
+def zoning_count(plan: Plan, c: Constraints | None = None) -> int:
+    """How many zonings `enumerate` would rank (at most one arrangement each): cheap, it builds
+    no ring, so the gallery can say what ranking will cost before it starts (#26). 0 when the
+    plan has no zoning."""
+    c = c or Constraints()
+    try:
+        return len(_zonings(plan, eligible_graph(build_graph(plan, c)), c))
+    except (Infeasible, TooLarge):
+        return 0
+
+
+def arrangement_submission(plan: Plan, a: Arrangement, c: Constraints | None = None) -> Submission:
+    """An arrangement as a slide-8 submission with its cached rings (pass 0, each routed alone):
+    what the gallery's tile draws and checks (#26). Never written as a submission."""
+    c = c or Constraints()
+    outs = [_hub_out(hub, segs) for hub, segs in zip(a.hubs, a.rings, strict=True)]
+    m = metrics(outs, c)
+    return Submission(
+        plan_id=plan.plan_id,
+        units="m",
+        hubs=outs,
+        reported_metrics={"hub_count": m.H, "total_length_m": m.L},
+    )
+
+
+def routed_submission(plan: Plan, a: Arrangement, c: Constraints | None = None) -> Submission:
+    """An arrangement fully routed (`route`: the rip-up passes), as the Best tab shows it when
+    the gallery opens it (#26): the same geometry `solve` would submit for it."""
+    c = c or Constraints()
+    return _submission(plan, a.hubs, route(a, plan, c).rings, c)[0]
+
+
 # --------------------------------------------------------------------------- solve
 
 
