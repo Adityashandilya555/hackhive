@@ -395,9 +395,7 @@ def _upload_raw(at: AppTest, name: str, content: bytes) -> AppTest:
 
 def test_banner_13344_is_strict_only_and_chips_show():
     # 13344 keeps a two-door retrace; 5924's went with #81's parallel runs
-    at = _run()
-    at.sidebar.selectbox(key="fixture").set_value("13344")
-    _run(at)
+    at = _pick(_run(), "13344")
     assert any("strict" in w.value and "retrace" in w.value for w in at.main.warning)
     assert any("one-node ring" in m.value for m in at.main.markdown)
 

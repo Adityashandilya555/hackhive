@@ -165,10 +165,13 @@ def _first_lattice_index(polyline, grid) -> int:
     raise AssertionError("no vertex on a cell centre")
 
 
-def test_seven_cm_stub_is_one_l_inside_the_room(routed):
+def test_seven_cm_stub_is_one_l_inside_the_room(routed, monkeypatch):
     """C12, C13: a node 4 cm left of and 3 cm below its cell centre gets an L of 7 cm, inside
     its room, and rules 4 (endpoints) and 5 pass. One of its two legs may join the grid run at
-    the corner instead (the corner lies on that run, so the cable never reaches C, trap 3)."""
+    the corner instead (the corner lies on that run, so the cable never reaches C, trap 3).
+    #15's single layout: #81's parallel runs move the way back onto a run through C, which
+    the corner then joins as well."""
+    monkeypatch.setattr(route, "_shares_an_edge", lambda legs: False)
     case = routed["5088"]
     (cell, (cx, cy)), hub = _living_cell(case), case.hubs[0]
     p = (cx - 0.04, cy - 0.03)
@@ -414,10 +417,12 @@ def _length_inside(polyline, polygon) -> float:
 def test_own_rooms_every_fixture(routed, plan_id):
     """C33: by default no ring runs inside an excluded room or another hub's room. Door
     polygons don't count (1293's door_9 into its own bedroom covers a 4 cm strip of living_0),
-    nor does the land lot, which covers every room."""
+    nor does the land lot, which covers every room. Every pass is checked, pass 0's parallel
+    runs (#81) included."""
     case = routed[plan_id]
     doors = shapely.union_all([d.polygon for d in case.plan.doors])
-    for ring, zone in zip(case.rings, case.zoning, strict=True):
+    rings = [r for snap in case.routing.snapshots for r in snap.rings]
+    for ring, zone in zip(rings, list(case.zoning) * len(case.routing.snapshots), strict=True):
         for room in case.plan.rooms:
             if room.id in zone or room.type == "land":
                 continue
@@ -545,20 +550,28 @@ def _sequential(case) -> SimpleNamespace:
     return SimpleNamespace(**{**vars(case), "rings": case.routing.snapshots[0].rings})
 
 
+def _ring_js(case) -> list[float]:
+    """Each ring's own J (checker.metrics on that ring alone), in hub order."""
+    rings = zip(case.hubs, case.rings, case.zoning, strict=True)
+    return [metrics([HubOut.model_validate(_hub_out(h, r, z))], C).J for h, r, z in rings]
+
+
 @pytest.mark.parametrize("plan_id", PLAN_IDS)
 def test_own_rooms_j_against_main(routed, plan_id, monkeypatch):
-    """C13, C17: the sequential pass's J matches main on every fixture except the recorded D7
-    cost, and rule 5 passes; with the WHAT-IF on, J is main's exactly. Main routed one layout
-    per ring, so #81's parallel-run variant is off here."""
-    assert not [v for v in check_rules(routed[plan_id].plan, submission(routed[plan_id]), C)
-                if v.rule == 5]  # fmt: skip
-    monkeypatch.setattr(route, "_both_layouts", lambda stops, retrace_ok: False)
-    case = _sequential(_route(plan_id))
-    j = metrics(submission(case).hubs, C).J
+    """C13, C17: main routed one layout per ring, so with #81's parallel runs off the sequential
+    pass's J matches main on every fixture except the recorded D7 cost, and with the WHAT-IF on
+    it is main's exactly. The shipped pass 0 (parallel runs on) passes rule 5 and never has a
+    ring whose own J is above that baseline's, WHAT-IF on or off (#97 review)."""
+    whatif = Constraints(route_through_other_rooms=True)
+    shipped = [_sequential(routed[plan_id]), _sequential(_route(plan_id, whatif))]
+    _today(monkeypatch)
+    one = [_sequential(_route(plan_id)), _sequential(_route(plan_id, whatif))]
+    j = metrics(submission(one[0]).hubs, C).J
     assert j == pytest.approx(J_MAIN[plan_id] + D7_COST.get(plan_id, 0.0), abs=TOL)
-    assert not [v for v in check_rules(case.plan, submission(case), C) if v.rule == 5]
-    loose = _sequential(_route(plan_id, Constraints(route_through_other_rooms=True)))
-    assert metrics(submission(loose).hubs, C).J == pytest.approx(J_MAIN[plan_id], abs=TOL)
+    assert metrics(submission(one[1]).hubs, C).J == pytest.approx(J_MAIN[plan_id], abs=TOL)
+    for new, old in zip(shipped, one, strict=True):
+        assert not [v for v in check_rules(new.plan, submission(new), C) if v.rule == 5]
+        assert all(a <= b + 1e-9 for a, b in zip(_ring_js(new), _ring_js(old), strict=True))
 
 
 # --------------------------------------------------------------------------- occupancy (#80)
@@ -725,7 +738,7 @@ def _ring(plan, hub_xy, ring, **kw):
 
 def _today(monkeypatch):
     """Route one layout per ring, as main did before #81."""
-    monkeypatch.setattr(route, "_both_layouts", lambda stops, retrace_ok: False)
+    monkeypatch.setattr(route, "_shares_an_edge", lambda legs: False)
 
 
 def _one_node(d: float, monkeypatch=None):
@@ -748,8 +761,9 @@ def test_single_door_one_node_ring_long_takes_parallel(monkeypatch):
 
 
 def test_single_door_one_node_ring_short_takes_retrace():
-    """C15, C17, C40: d = 0.8 m: the out-and-back wins (3d + 1 = 3.4 < 2d + 2.2 = 3.8), and the
-    checker mirror takes it as legal (no error, no rule-4 strict)."""
+    """C15, C17, C40: d = 0.8 m: the out-and-back wins (3d + 1 = 3.4 < 2d + 2.2 = 3.8). Its room
+    has no single door, so until Q2(a) is answered the checker mirror flags it rule-4 strict
+    (still no error), and best_pass's validity-first ranking counts that (#97 review)."""
     d = 0.8
     plan, hub, m = _one_node(d)
     assert m.O > 0.5
@@ -762,7 +776,21 @@ def test_single_door_one_node_ring_short_takes_retrace():
     )
     found = check_rules(plan, sub, C)
     assert not [v for v in found if v.severity == "error"], found
-    assert not [v for v in found if v.rule == 4 and v.severity == "strict"], found
+    assert [v.rule for v in found if v.severity == "strict"] == [4], found
+
+
+def test_single_door_one_node_ring_off_centre_still_runs_parallel(monkeypatch):
+    """The node 5 cm off its cell centre, as a real ResPlan node is: at d = 3 m the parallel
+    layout still has no overlap and beats the out-and-back. Its J is above 2d + 2.2, as each leg
+    reaches the node through a different corner of its cell (#15's stubs), so it bends twice
+    more (#97 review)."""
+    plan = _synthetic(living=box(0, 0, 80, 80))  # node at (4.0, 4.0), between cell centres
+    (n1,) = plan.nodes
+    hub_xy = (n1.xy[0] - 3.0, n1.xy[1])
+    _, m = _ring(plan, hub_xy, [n1.id])
+    _today(monkeypatch)
+    _, back = _ring(plan, hub_xy, [n1.id])
+    assert m.O <= TOL and back.O > 1.0 and m.J < back.J
 
 
 def _door_pieces(hub, door):
@@ -806,8 +834,7 @@ def test_single_door_narrow_door_falls_back_to_retrace():
 # overlap, so both layouts keep it. Only a validity-first search or pass ranking per ring would
 # drop it (search / Occupancy / best_pass, outside #81's change).
 TWO_DOOR_RETRACE = {
-    "3086": "H1→N1 and N1→N4 share 0.10 m at N1 (living_0, two ways out)",
-    "13344": "N2→N3 and N3→N4 share 0.16 m at N3 (bedroom_1, two ways out)",
+    "13344": "N2→N3 and N3→N4 share 0.30 m at N3 (bedroom_1, two ways out)",
 }
 
 
@@ -821,20 +848,30 @@ TWO_DOOR_RETRACE = {
     ],
 )
 def test_single_door_retraces_only_where_legal(routed, plan_id):
-    """C15: after the passes, the only same-line retraces left are legal ones (into a
-    single-door room or in a one-node ring): no rule-4 strict retrace flag."""
-    assert _retraces(routed[plan_id]) == 0
+    """C15, #81's criterion 3: after the passes, the only same-line retraces left are into a
+    single-door room or in a one-node ring. The checker flags a one-node out-and-back strict
+    until Q2(a) is answered, so those flags don't count here; every other one does."""
+    case = routed[plan_id]
+    one_node = {h.hub_id for h in case.hubs if len(h.ring) == 3}
+    found = check_rules(case.plan, submission(case), C)
+    left = [
+        v.message
+        for v in found
+        if v.rule == 4 and v.severity == "strict" and "retrace" in v.message
+        if v.hub_id not in one_node
+    ]
+    assert left == []
 
 
-# main @ fa9853c (#80 merged): J of route_passes' best pass per fixture
+# main @ 9dff6ea (#80, #82 merged): J of route_passes' best pass per fixture
 J_MAIN_BEST = {
-    "5088": 38.907734,
-    "576": 61.899546,
-    "1293": 73.579815,
-    "2814": 90.270451,
-    "3086": 84.124317,
-    "5924": 64.467449,
-    "13344": 98.332113,
+    "5088": 34.971756,
+    "576": 57.167619,
+    "1293": 62.548377,
+    "2814": 67.268031,
+    "3086": 55.390824,
+    "5924": 59.714844,
+    "13344": 94.667002,
 }
 
 
