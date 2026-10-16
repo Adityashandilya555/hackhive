@@ -15,6 +15,7 @@ from collections import Counter
 from collections.abc import Iterator
 from pathlib import Path
 
+from hackhive import graph, ui
 from hackhive.contracts import Constraints
 from hackhive.io import InputFormatError, load_plan
 from hackhive.solve import Result, solve, submit
@@ -38,6 +39,7 @@ COLUMNS = [
     "ms",
     "status",
     "reason",
+    "tags",
 ]
 # the shared sample first (#32 HUMAN step), else the full ResPlan export
 DEFAULT_SOURCES = (Path("data/sample/test-100.jsonl.gz"), Path("data/resplan/plans.jsonl"))
@@ -48,13 +50,21 @@ def _records(source: Path) -> Iterator[dict]:
     JSON files (the local test-split export), in file order."""
     if source.is_dir():
         for p in sorted(source.glob("*.json")):
-            yield json.loads(p.read_text(encoding="utf-8"))
+            yield _parse(p.read_text(encoding="utf-8"), p.name)
         return
     opener = gzip.open if source.suffix == ".gz" else open
     with opener(source, "rt", encoding="utf-8") as f:
-        for line in f:
+        for i, line in enumerate(f, start=1):
             if line.strip():
-                yield json.loads(line)
+                yield _parse(line, f"line{i}")
+
+
+def _parse(text: str, where: str) -> dict:
+    """A plan, or a marker that `_row` turns into an `input_error` row, so the batch continues."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        return {"plan_id": where, "_error": f"not JSON: {e}"}
 
 
 def plans(source: Path, split: str) -> Iterator[dict]:
@@ -67,13 +77,15 @@ def plans(source: Path, split: str) -> Iterator[dict]:
     for raw in _records(source):
         if raw.get("augmented"):
             continue
-        if ids is None or raw.get("id") in ids:
+        if ids is None or "_error" in raw or raw.get("id") in ids:  # an unreadable line has no id
             yield raw
 
 
 def _row(raw: dict, c: Constraints, out_dir: Path) -> dict:
     t0 = time.perf_counter()
     try:
+        if "_error" in raw:
+            raise ValueError(raw["_error"])
         plan = load_plan(raw, c)
     except (InputFormatError, ValueError) as e:
         row = dict.fromkeys(COLUMNS, "")
@@ -98,6 +110,7 @@ def _row(raw: dict, c: Constraints, out_dir: Path) -> dict:
         "ms": ms,
         "status": side.status,
         "reason": side.reason or "",
+        "tags": ";".join(t.label for t in ui.case_tags(plan, graph.build_graph(plan, c), result)),
     }
     for k in ("H", "L", "X", "O", "B", "J", "area_gap"):
         v = getattr(cost, k) if cost is not None else ""
