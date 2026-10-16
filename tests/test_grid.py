@@ -325,7 +325,7 @@ def test_doors_are_painted_over_openings():
     touches door_8's gap): doors are painted last."""
     plan = _graph_plan("5924")
     door = next(d for d in plan.doors if d.rooms)
-    gap = door_gap(door.polygon, plan.wall_depth_m, Constraints().grid_m)
+    gap = door_gap(door, plan, Constraints().grid_m)
     x0, y0, x1, y1 = gap.bounds  # 5924's doors are axis-aligned
     half = ((x1 - x0) / 2, 0.0) if x1 - x0 > y1 - y0 else (0.0, (y1 - y0) / 2)
     # a band over the door's far half, like 576's living–storage band at door_8
@@ -347,3 +347,174 @@ def test_3086_rooms_meet_through_build_graphs_opening():
     only = np.where(np.isin(grid.labels, [la, lb, op_label]), grid.labels, BLOCKED)
     src, dst = tuple(np.argwhere(only == la)[0]), tuple(np.argwhere(only == lb)[0])
     assert path_to(search(only, {op_label: (la, lb)}, [src], 1.0), dst)
+
+
+# --------------------------------------------------------------------------- thin and outside (#78)
+
+
+def _two_rooms(**extra) -> dict:
+    """A living room under a bedroom (1 unit = 0.1 m), meeting at y = 5 m, walled off except
+    for x in 4-6 m."""
+    return {
+        "id": "THIN",
+        "area": 100.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 100)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "bedroom": mapping(box(0, 50, 100, 100)),
+        "wall": mapping(MultiPolygon([box(0, 49, 40, 51), box(60, 49, 100, 51)])),
+        **extra,
+    }
+
+
+def test_thin_opening_paints_the_cells_it_crosses_and_passes_rule_5():
+    """A 3 cm passage on the shared edge covers no cell centre: the cells it crosses are
+    painted, never past its ends, and the route through them passes rule 5 (C13, C14)."""
+    from hackhive.checker import _free_space, _rule5_leg, clean_polyline
+
+    plan = load_plan(_two_rooms())
+    living, bedroom = (room_by_label(plan, x).id for x in ("living_0", "bedroom_0"))
+    strip = box(4.0, 4.985, 6.0, 5.015)
+    plan.openings = [Opening(id="opening_0", polygon=strip, rooms=(living, bedroom))]
+    grid = LabelGrid.from_plan(plan)
+    (label,) = grid.door_rooms
+    xs, ys = grid.centres()
+    here = grid.labels == label
+    assert here.sum() == 2 * 20  # the two rows it crosses, 2 m of them
+    assert (xs[here] > 4.0).all() and (xs[here] < 6.0).all()  # never along, into the wall
+    assert set(np.round(ys[here], 2)) == {4.95, 5.05}
+
+    src, dst = grid.cell_of((2.0, 2.0)), grid.cell_of((8.0, 8.0))
+    path = path_to(search(grid.labels, grid.door_rooms, [src], 1.0), dst)
+    assert path
+    pts = clean_polyline([grid.to_xy(cell) for cell in expand(path)])
+    c = Constraints()
+    assert _rule5_leg(pts, _free_space(plan, c), c, None, "leg") == []
+
+
+def _house_and_balconies() -> dict:
+    """A house (`inner`) with two balconies 0.3 m beyond it, one wall depth apart: #9's graph
+    finds a 2 cm open strip between them, wholly outside `inner` (366, 5676, … in ResPlan)."""
+    return {
+        "id": "BALC",
+        "area": 50.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 50)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "balcony": mapping(MultiPolygon([box(0, 53, 49, 70), box(51, 53, 100, 70)])),
+    }
+
+
+def test_a_passage_wholly_outside_inner_is_exterior():
+    plan = _graph_plan_from(_house_and_balconies())
+    (opening,) = plan.openings
+    assert opening.polygon.intersection(plan.inner).area == 0
+    grid = LabelGrid.from_plan(plan)
+    assert grid.exterior_doors == [opening.id]
+    assert not grid.door_rooms
+
+
+def test_a_passage_outside_inner_between_rooms_inside_it_is_an_error():
+    """Never drop a real link: both rooms lie inside `inner`, so a door outside it is wrong."""
+    raw = _two_rooms(door=mapping(box(40, 105, 60, 107)))
+    plan = load_plan({**raw, "inner": mapping(box(0, 0, 100, 100))})
+    plan.doors[0].rooms = tuple(r.id for r in plan.rooms[:2])
+    with pytest.raises(
+        ValueError, match=r"door_0 lies outside inner, but both its rooms \(R01, R02\)"
+    ):
+        LabelGrid.from_plan(plan)
+
+
+def test_a_door_drawn_twice_names_the_door_over_it():
+    door = box(40, 49, 60, 51)
+    plan = _graph_plan_from(_two_rooms(door=mapping(MultiPolygon([door, door.buffer(-0.01)]))))
+    with pytest.raises(ValueError, match=r"door_0 has no cells of its own \(door_1 over it\)"):
+        LabelGrid.from_plan(plan)
+
+
+def _graph_plan_from(raw: dict):
+    plan = load_plan(raw)
+    build_graph(plan)
+    return plan
+
+
+def _side_by_side(door_m: float) -> dict:
+    """A living room left of a bedroom (1 unit = 0.1 m), split by a 0.2 m wall at x = 4.9-5.1 m
+    with a door ``door_m`` wide, centred at y = 2.5 m."""
+    lo, hi = 25 - door_m * 5, 25 + door_m * 5
+    return {
+        "id": "SIDE",
+        "area": 50.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 50)),
+        "living": mapping(box(0, 0, 49, 50)),
+        "bedroom": mapping(box(51, 0, 100, 50)),
+        "wall": mapping(MultiPolygon([box(49, 0, 51, lo), box(49, hi, 51, 50)])),
+        "door": mapping(box(49, lo, 51, hi)),
+    }
+
+
+@pytest.mark.parametrize("door_m", [0.06, 0.15, 0.30])
+def test_a_door_narrower_than_the_wall_is_deep_is_stretched_across_it(door_m):
+    """Its long side runs across the wall, yet its gap never reaches along it (#92 review)."""
+    plan = _graph_plan_from(_side_by_side(door_m))
+    (door,) = plan.doors
+    # #9 names no rooms for it, so the stretch that reaches the best two rooms wins
+    gap = door_gap(door, plan, Constraints().grid_m)
+    x0, y0, x1, y1 = gap.bounds
+    assert (round(y0, 6), round(y1, 6)) == (round(2.5 - door_m / 2, 6), round(2.5 + door_m / 2, 6))
+    assert (round(x0, 6), round(x1, 6)) == (4.8, 5.2)  # across: wall depth + one cell each side
+    assert gap.intersection(unary_union(plan.walls)).difference(door.polygon).area < 1e-9
+
+
+def test_a_door_thinner_than_its_wall_keeps_its_width_along_it():
+    """1322's door_10: 27 cm wide but only 17 cm deep, in a 26 cm wall. Its width is nearer the
+    wall depth than its depth is, yet it still runs along the wall (#92 review)."""
+    raw = _two_rooms(door=mapping(box(40, 49.3, 42.2, 50.7)))  # 0.22 m along, 0.14 m across
+    raw["wall"] = mapping(MultiPolygon([box(0, 49, 40, 51), box(42.2, 49, 100, 51)]))
+    plan = _graph_plan_from(raw)
+    (door,) = plan.doors
+    x0, y0, x1, y1 = door_gap(door, plan, Constraints().grid_m).bounds
+    assert (round(x0, 6), round(x1, 6)) == (4.0, 4.22)
+    assert (round(y0, 6), round(y1, 6)) == (4.8, 5.2)
+    assert LabelGrid.from_plan(plan).door_rooms
+
+
+def test_a_door_narrower_than_a_cell_fails_the_plan_never_widened():
+    """A 6 cm door covers no cell centre: the plan fails, naming the door (#78's edge case)."""
+    plan = _graph_plan_from(_side_by_side(0.06))
+    with pytest.raises(ValueError, match=r"door_0 covers no cell centre \(narrower than a cell\)"):
+        LabelGrid.from_plan(plan)
+    grid = LabelGrid.from_plan(_graph_plan_from(_side_by_side(0.15)))  # 15 cm: two cell rows
+    xs, ys = grid.centres()
+    (label,) = grid.door_rooms
+    assert set(np.round(ys[grid.labels == label], 2)) == {2.45, 2.55}
+
+
+def test_a_passage_barely_inside_inner_is_still_exterior():
+    """Float noise (1e-12 m² inside `inner`) doesn't make an outside strip a passage."""
+    plan = load_plan(_house_and_balconies())
+    a, b = (r.id for r in plan.rooms if r.type == "balcony")
+    strip = box(4.99, 5.0 - 1e-11, 5.01, 6.5)
+    grid = LabelGrid.from_plan(
+        plan, openings=[Opening(id="opening_0", polygon=strip, rooms=(a, b))]
+    )
+    assert grid.exterior_doors == ["opening_0"]
+
+
+def test_a_thin_opening_never_takes_a_third_rooms_cells():
+    """Its stretched rectangle may cover a third room's cells (a storage room against the
+    strip): only its own two rooms' cells become the passage (#92 review)."""
+    plan = load_plan(_two_rooms(storage=mapping(box(45, 50, 55, 60))))
+    living, bedroom, storage = (
+        room_by_label(plan, x).id for x in ("living_0", "bedroom_0", "storage_0")
+    )
+    plan.openings = [
+        Opening(id="opening_0", polygon=box(4.0, 4.985, 6.0, 5.015), rooms=(living, bedroom))
+    ]
+    grid = LabelGrid.from_plan(plan)
+    xs, ys = grid.centres()
+    in_storage = shapely.contains_xy(room_by_label(plan, "storage_0").polygon, xs, ys)
+    assert (grid.labels[in_storage] == grid.room_label(storage)).all()
+    (label,) = grid.door_rooms
+    assert (grid.labels == label).sum() == 2 * 20 - 10  # the storage room's 10 cells are left

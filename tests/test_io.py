@@ -508,3 +508,38 @@ def test_nodes_facts_cli_5924(capsys):
     out = capsys.readouterr().out
     assert out.startswith("5924 · 0.0719 m/unit · ")
     assert all(piece in out for piece in ("150.0 m²", "5 nodes", "LB 2"))
+
+
+# --------------------------------------------------------------------------- inner vs rooms (#78)
+
+
+def _house(bedroom: Polygon) -> dict:
+    return {
+        "id": "OUT",
+        "area": 100.0,
+        "wall_depth": 2.0,
+        "inner": mapping(box(0, 0, 100, 100)),
+        "living": mapping(box(0, 0, 100, 50)),
+        "bedroom": mapping(bedroom),
+    }
+
+
+@pytest.mark.parametrize("top", [133.3, 144])
+def test_a_room_past_inner_is_a_warning_and_still_solves(top):
+    """A bedroom 40% (or 47%) past `inner` with its node inside it solves on `main`, so it isn't
+    rejected (#92 review): the plan carries a warning, and `solve` + the checker decide."""
+    from hackhive.solve import solve
+
+    plan = load_plan(_house(box(0, 50, 100, top)))
+    assert any(re.fullmatch(r"R02 \(bedroom_0\) lies \d+% outside inner", w) for w in plan.warnings)
+    result = solve(plan)
+    assert result.submission is not None
+    assert not [v for v in result.sidecar.violations if v.severity == "error"]
+
+
+def test_a_node_outside_inner_is_an_input_error():
+    """ResPlan's augmented plans can move a room wholly past `inner` (557925's bedroom): its
+    node can't be reached by any cable (rule 5), so the plan is rejected, naming it."""
+    with pytest.raises(ValueError, match=r"node N2 of R02 \(bedroom_0\) lies outside inner"):
+        load_plan(_house(box(0, 100, 100, 150)))
+    assert not load_plan(_house(box(0, 50, 100, 100))).warnings

@@ -508,7 +508,7 @@ def _free_space(plan: Plan, c: Constraints) -> _FreeSpace:
     Cable crosses a wall only inside `grid.door_gap` (the door stretched across the wall band),
     exactly where the router's raster lets it, so the two agree (#60 review).
     """
-    gaps = [door_gap(d.polygon, plan.wall_depth_m, c.grid_m) for d in plan.doors]
+    gaps = [door_gap(d, plan, c.grid_m) for d in plan.doors]
     never = unary_union([*plan.windows, *plan.front_doors])
     walls = unary_union(plan.walls)
     passages = (
@@ -753,7 +753,7 @@ def _dead_ends(hub: HubOut, ctx: _Context) -> list[BaseGeometry]:
         if link["kind"] == "opening":
             parts.append(link["region"])
         for d in link.get("door_ids", []):
-            parts.append(door_gap(doors[d].polygon, ctx.plan.wall_depth_m, ctx.c.grid_m))
+            parts.append(door_gap(doors[d], ctx.plan, ctx.c.grid_m))
         zones.append(unary_union(parts).buffer(tol))
     return zones
 
