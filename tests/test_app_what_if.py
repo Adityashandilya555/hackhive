@@ -4,12 +4,11 @@ banner on every view, and the counting-rules view. The CLI and solve side is tes
 import json
 from pathlib import Path
 
+from fixture_solves import solved
 from shapely.geometry import MultiPolygon, box, mapping
 from streamlit.testing.v1 import AppTest
 
 from hackhive.contracts import Constraints, Sidecar
-from hackhive.io import load_plan
-from hackhive.solve import solve
 from hackhive.ui import readings_rows
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -122,7 +121,7 @@ def test_a_raised_area_cap_designs_a_plan_with_a_room_over_100_m2():
 
 
 def test_readings_rows_give_both_readings_of_one_design():
-    sub = solve(load_plan(PLANS / "plan-5924.json"), C).submission
+    sub = solved("5924").submission
     rows = readings_rows(sub, C)
     assert [r["Reading"] for r in rows] == ["strict (ours)", "lenient"]
     strict, lenient = rows

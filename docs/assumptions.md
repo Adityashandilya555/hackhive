@@ -51,8 +51,8 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | 3.1 | Two rooms linked **only through an excluded room** (bedroom → bathroom → bedroom) are **not** linked. The setting `zone_links_via_excluded` (bathroom and stair) exists, default off; #30 makes it a WHAT-IF toggle. | D5 | `graph.eligible_graph` |
 | 3.2 | A window drawn on an interior wall (a ResPlan quirk) is an **obstacle**. "Treat as a door" will be a WHAT-IF checkbox, never submitted. | D6 (#31) | `graph.py`, #31 |
 | 3.3 | A doorless eligible room is its own zone, with its own hub. | ours | `zoning.py` |
-| 3.4 | A zone must contain a room that can host a hub (a point ≥ 0.51 m from walls). Otherwise that zoning is skipped, and a plan with no such zoning gets no submission. | ours | `zoning.py`, `solve._pick` |
-| 3.5 | A zoning is skipped when one of its zones has no node, because there is no ring to build. | ours | `solve._pick` |
+| 3.4 | A zone must contain a room that can host a hub (a point ≥ 0.51 m from walls). Otherwise that zoning is skipped, and a plan with no such zoning gets no submission. | ours | `zoning.py`, `solve.enumerate` |
+| 3.5 | A zoning is skipped when one of its zones has no node, because there is no ring to build (also when a zone's ring can't be ordered or routed). | ours | `solve.enumerate` |
 | 3.6 | Exact zoning handles **≤ 16 rooms** per connected group and **≤ 5,000 zonings**. Above that: no submission, and a "too large" sidecar. **No ResPlan plan gets there** (largest group: 9 rooms, out of 16,999 plans), so #49 goes to Backlog. | D8 | `zoning.py`, `solve.py` |
 | 3.7 | An opening thinner than a 10 cm cell paints its two rooms' cells it crosses (never past its ends). A passage (almost) wholly outside `inner` (the 2 cm strip between two balconies: most of T5's 11%) is exterior, like a balcony door, unless both its rooms lie inside `inner`. A door's across side is the stretch that reaches further into its two rooms, so a door narrower than the wall is deep is never stretched along the wall (1 of 3,142 doors in a 500-plan sample); a door narrower than a cell fails the plan, never widened. A passage the grid still can't paint (a door drawn twice or on a window, an opening inside a nested room or toward a stair behind a wall) fails the plan with `grid failed` and says why; it is never dropped to fit: **1.4% of a 500-plan sample** (was 8.8%), and no plan that had a design lost it. | fixed (#78) | `grid.py` |
 
@@ -60,11 +60,12 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
-| 4.1 | Hub count = the minimum over all valid zonings, proven by exhaustive search. The lower bound max(⌈area/100⌉, ⌈nodes/5⌉) is only reported (not always reachable). | ours | `zoning.py`, sidecar `bounds` |
+| 4.1 | Hub count = the minimum over all valid zonings, proven by exhaustive search. The lower bound max(⌈area/100⌉, ⌈nodes/5⌉) is only reported (not always reachable). `bounds.proof` is `lb_met` when the count equals it, `exhaustive` when it's the fewest hubs any zoning uses, and `none` when the gate moved past a count with fewer hubs (strict-only designs there, or zonings that couldn't be built) (#22). | ours | `zoning.py`, `solve._proof`, sidecar `bounds` |
 | 4.2 | Hub spots are 10 cm grid-cell centres **≥ 0.51 m** (1 cm margin) from both the room's whole outline and the walls. Only if a zone has none, the spot only needs ≥ 0.51 m from walls, tagged `wall_clearance_only`. | ⚠ Q4 | `rings.hub_candidates` |
 | 4.3 | The checker gives `error` below 0.5 m from walls (windows and the outside count as walls), and only `strict` below 0.5 m from a door gap or open-passage edge. | ⚠ Q4 | `checker.py` rule 6 |
 | 4.4 | A hub is never on a node point: we keep it ≥ 0.10 m away. | ours | `rings.NODE_KEEP_OFF_M` |
-| 4.5 | **First cut (Sprint 1):** the hub goes in the zone room with the most door links, at the spot closest to the zone's nodes in total. Among minimum-hub zonings, the one with the shortest Manhattan rings is chosen. | ours, exact choice is #20 | `rings.first_ring`, `solve._pick` |
+| 4.5 | **First cut (Sprint 1), now only the last fallback:** the hub goes in the zone room with the most door links, at the spot closest to the zone's nodes in total. Among minimum-hub zonings, the one with the shortest Manhattan rings. Since #22, `solve()` ranks every arrangement by routed J and uses this walking skeleton only if every ranked one has an `error`. | ours, exact choice is #20, #22 | `rings.first_ring`, `solve._pick` |
+| 4.6 | **Ranking (#22):** every zoning, each zone with its `best_ring` (#20), its rings routed alone and scored together; ranked by (H, J, area gap, zone signature), where J is the **worse of the strict and lenient counting readings** (D3). The rip-up passes (#80) run only on the arrangements `solve()` tries. Zones are built in parallel over up to 4 worker processes (13344: 34 s on one core, ~12 s on four). | slides 3, 6; D3 | `solve.enumerate`, `solve.rank_key`, `parallel.map_in_order` |
 
 ## 5. Rings and routes
 
@@ -97,7 +98,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 | # | Assumption | Status | Where |
 |---|---|---|---|
 | 7.1 | The submission has exactly slide 8's keys. Everything else (status, violations, bounds, warnings, frame) goes in `<plan_id>.sidecar.json`. | ours (Adi, 2026-10-15) | `contracts.py`, `solve.py` |
-| 7.2 | **Gate:** no `error` → submit (`ok`); only `strict` flags → **still submit**, marked `submitted_strict_only`; any `error` → no submission (`infeasible`); unreadable input → `input_error`. Strict-only is the fallback, **not guaranteed valid** (Q2). | ours (T4) | `solve.submit` |
+| 7.2 | **Gate:** no `error` → submit (`ok`); only `strict` flags → **still submit**, marked `submitted_strict_only`; any `error` → no submission (`infeasible`); unreadable input → `input_error`. Strict-only is the fallback, **not guaranteed valid** (Q2). `solve()` takes the **first clean arrangement in rank order, even at more hubs**, before the best strict-only one (Adi, 2026-10-16, #22), but looks **at most one hub count above** the first design with no `error` (#22 review), so a plan where everything is strict-only doesn't route every zoning; the sidecar's `arrangement` names the one used and why better-ranked ones weren't. | ours (T4) | `solve.solve`, `solve.submit` |
 | 7.3 | Coordinates are written as **full floats**, not rounded. `decision_conventions.md` §1 says 4 decimals, but nothing rounds yet. | ours, see T6 | `solve.py` |
 | 7.4 | `assigned_rooms` starts with the hub's room; `assigned_nodes` are sorted; `closed_sequence` is the ring order; reported lengths come from our mirror (the organisers ignore them). | ours | `solve.py` |
 | 7.5 | What-ifs (edited weights, via-excluded links, interior windows as doors) are **never** written as a submission. | ours | #30, #31 |

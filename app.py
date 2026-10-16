@@ -39,10 +39,12 @@ from hackhive.ui import (
     md_text,
     metrics_line,
     open_target,
+    optimality_badge,
     plan_facts,
     plan_from_bytes,
     plans_by_tag,
     preset_rows,
+    proven_min_hubs,
     read_batch,
     readings_rows,
     resplan_raw,
@@ -156,14 +158,19 @@ def overlay(
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
 def checked(
-    source: str, key: str, content: bytes | None, solution: str, settings: str
+    source: str,
+    key: str,
+    content: bytes | None,
+    solution: str,
+    settings: str,
+    proven_min: int | None = None,
 ) -> checker.Report:
     """`checker.report` on a solution file under the active settings: the six rules, the
     metrics, the checklist. The checker builds its own room graph from the plan, on purpose: it
-    trusts nothing of ours."""
+    trusts nothing of ours but solve()'s proven hub minimum (`proven_min`, #24 T7)."""
     plan, _ = load(source, key, content)
     c = Constraints.model_validate_json(settings)
-    return checker.report(plan, load_submission(Path(solution)), c)
+    return checker.report(plan, load_submission(Path(solution)), c, proven_min)
 
 
 # --------------------------------------------------------------------------- sidebar
@@ -222,6 +229,7 @@ def best_tab(
     key: str,
     content: bytes | None,
     plan: Plan,
+    G: nx.Graph,
     path: Path | None,
     side: Sidecar,
     c: Constraints,
@@ -232,12 +240,17 @@ def best_tab(
     judged under `c`; with `counting`, J under both readings of the counting rules (D3, #30)."""
     settings = c.model_dump_json()
     banner(side, plan)
+    if badge := optimality_badge(side, plan, G, c):  # #24: proof of the hub count, never of J
+        getattr(st, badge.kind)(badge.text)
+        if badge.explain:
+            with st.expander("Why more hubs than the lower bound?"):
+                st.markdown(badge.explain)
     if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
         st.caption("No design was submitted. The Plan tab still shows the plan.")
         return
     try:
         sub = load_submission(path)
-        rep = checked(source, key, content, str(path), settings)
+        rep = checked(source, key, content, str(path), settings, proven_min_hubs(side))
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
@@ -541,7 +554,7 @@ if tags := case_tags(plan, G, Result(plan, best_sub, side)):
     st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
 best, plan_tab, batch = st.tabs(["Best", "Plan", "Batch"])
 with best:
-    best_tab(source, key, content, plan, solution, side, settings_c, counting)
+    best_tab(source, key, content, plan, G, solution, side, settings_c, counting)
 with plan_tab:
     drawing, panel = st.columns([5, 3], gap="large")
     with drawing:
