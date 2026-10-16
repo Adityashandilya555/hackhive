@@ -2,12 +2,12 @@
 `enumerate()`, `rank_key` and the fallback down the ranked list."""
 
 import dataclasses
-import functools
 import json
 from itertools import pairwise
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 from shapely.geometry import MultiPolygon, Point, box, mapping
 
 import hackhive.solve as solve_mod
@@ -34,12 +34,11 @@ def _submission(out: Path, plan_id: str) -> Submission:
     return Submission.model_validate_json((out / f"{plan_id}.json").read_text("utf-8"))
 
 
-@functools.cache
 def _solved(plan_id: str) -> Result:
-    """One `solve_file` per fixture for this module: 13344 takes ~12 s on 4 workers (~34 s on one
-    core) since #22 ranks every 3-hub arrangement. `Result` is frozen and `submit` never changes
-    it, so sharing is safe."""
-    return solve_file(PLANS / f"plan-{plan_id}.json", C)
+    """One `solve_file` per fixture for the whole session (`fixture_solves`): 13344 takes ~12 s
+    on 4 workers (~34 s on one core) since #22 ranks every 3-hub arrangement. `Result` is frozen
+    and `submit` never changes it, so sharing is safe."""
+    return solved(plan_id)
 
 
 # --------------------------------------------------------------------------- the 7 fixtures
@@ -84,8 +83,8 @@ def test_the_writer_follows_slide_8(plan_id):
 
 
 def test_solve_is_deterministic():
-    a = _solved("13344")
-    b = solve_file(PLANS / "plan-13344.json", C)  # a second, fresh run
+    a = _solved("5924")  # 13344 took 28 s here; workers 1 vs 2 is test_enumerate_is_deterministic
+    b = solve_file(PLANS / "plan-5924.json", C)  # a second, fresh run
     assert a.submission == b.submission and a.sidecar == b.sidecar
 
 

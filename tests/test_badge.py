@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fixture_solves import solved as fixture_solved
 
 from hackhive import checker, graph
 from hackhive.contracts import Bounds, Constraints, CostBreakdown, Sidecar
@@ -30,9 +31,8 @@ def _side(k_lb: int, k_found: int, proof: str) -> Sidecar:
 def solved():
     @cache
     def run(pid: str):
-        plan = load_plan(PLANS / f"plan-{pid}.json")
-        G = graph.build_graph(plan)
-        return plan, G, solve(plan, C).sidecar
+        result = fixture_solved(pid)  # one solve per fixture for the session
+        return result.plan, graph.build_graph(result.plan), result.sidecar
 
     return run
 
