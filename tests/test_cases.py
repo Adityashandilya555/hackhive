@@ -83,13 +83,14 @@ def _snapshot(d: Path) -> dict[str, bytes]:
 
 
 def _small_set(tmp_path: Path) -> tuple[Path, Path, Path, dict]:
-    """A fixtures folder with 5088, and a scan of a malformed line then 5924 (raw, returned)."""
+    """A fixtures folder with 5088, and a scan of a plan that doesn't load, a line that isn't
+    JSON (both skipped), then 5924 (raw, returned)."""
     fixtures, out = tmp_path / "plans", tmp_path / "cases"
     fixtures.mkdir()
     shutil.copy(ui.fixture_path("5088"), fixtures)
     raw_5924 = json.loads(ui.fixture_path("5924").read_text(encoding="utf-8"))
     jsonl = tmp_path / "plans.jsonl"
-    jsonl.write_text('{"id": 1}\n' + json.dumps(raw_5924) + "\n", encoding="utf-8")
+    jsonl.write_text('{"id": 1}\nnot json\n' + json.dumps(raw_5924) + "\n", encoding="utf-8")
     return jsonl, out, fixtures, raw_5924
 
 
@@ -143,3 +144,31 @@ def test_script_without_a_plans_file_refreshes_expected(tmp_path):
 
     assert make_cases.build(None, out=out, fixtures=fixtures, n=0) == missing
     assert _snapshot(out) == fresh
+
+
+def test_script_on_two_workers_writes_the_same_library(tmp_path):
+    """#103: the scan solved on 2 worker processes picks the same plans and writes the same bytes
+    as one process; the plan that doesn't load and the line that isn't JSON are skipped."""
+    jsonl, _, fixtures, _ = _small_set(tmp_path)
+    make_cases = _script()
+    one, two = tmp_path / "one", tmp_path / "two"
+    missing = make_cases.build(jsonl, out=one, fixtures=fixtures, n=0, workers=1)
+    assert make_cases.build(jsonl, out=two, fixtures=fixtures, n=0, workers=2) == missing
+    assert _snapshot(two) == _snapshot(one)
+
+
+def test_scan_workers_solve_inline(tmp_path, monkeypatch):
+    """#103: in a pool each scanned plan calls `solve(..., workers=1)`; one process at a time
+    keeps `solve()`'s zone pool (#101)."""
+    jsonl, out, fixtures, _ = _small_set(tmp_path)
+    make_cases = _script()
+    seen = []
+
+    def inline(fn, items, workers=None):
+        seen.append(fn.keywords["solve_workers"])
+        return [fn(x) for x in items]
+
+    monkeypatch.setattr(make_cases, "map_in_order", inline)
+    make_cases.build(jsonl, out=out, fixtures=fixtures, n=0, workers=2)
+    make_cases.build(jsonl, out=tmp_path / "again", fixtures=fixtures, n=0, workers=1)
+    assert seen == [1, None]
