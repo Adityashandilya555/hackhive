@@ -14,7 +14,14 @@ import shapely
 from shapely.geometry import box
 
 from hackhive import route
-from hackhive.checker import _overlaps, check_rules, count_bends, metrics, segment_length
+from hackhive.checker import (
+    _free_space,
+    _overlaps,
+    check_rules,
+    count_bends,
+    metrics,
+    segment_length,
+)
 from hackhive.contracts import Constraints, HubOut, Submission
 from hackhive.graph import build_graph, eligible_graph
 from hackhive.grid import LabelGrid
@@ -284,6 +291,87 @@ def test_near_aligned_node_is_squared_exactly(routed):
         for p, q in pairwise(s.polyline):
             assert p[0] == q[0] or p[1] == q[1]
             assert math.dist(p, q) > TOL
+
+
+def _reversals(polyline) -> list:
+    """Vertices where a leg turns straight back on itself (it retraces its own last piece)."""
+    return [
+        b
+        for a, b, c in zip(polyline, polyline[1:], polyline[2:], strict=False)
+        if (a[0] == b[0] == c[0] and (b[1] - a[1]) * (c[1] - b[1]) < 0)
+        or (a[1] == b[1] == c[1] and (b[0] - a[0]) * (c[0] - b[0]) < 0)
+    ]
+
+
+def _near_door_576(routed):
+    """#70 review: a node 6.8 cm from a wall beside a door in 576's R04, routed from H5; its
+    nearest free cell is a diagonal neighbour, so one stub corner lies inside the wall."""
+    case = routed["576"]
+    hub = next(h for h in case.hubs if h.hub_id == "H5")
+    stops = [Stop(hub.hub_id, hub.location, hub.room_id), Stop("N9", (17.5602, 9.2996), "R04")]
+    return case, stops
+
+
+def test_stubs_stay_in_free_space(routed):
+    """C13, rule 5 (#70 review): a stub never takes a corner whose L runs through a wall."""
+    case, stops = _near_door_576(routed)
+    free = _free_space(case.plan, C).free
+    for s in route_ring(case.grid, stops, C, free=free):
+        assert shapely.LineString(s.polyline).within(free), s.polyline
+
+
+def test_a_leg_never_doubles_back_on_itself(routed):
+    """C15 (#70 review): when a stub's corner lies past the run's first cell on the run's own
+    line, the cable joins the run there instead of going on to C and coming back."""
+    case, stops = _near_door_576(routed)
+    free = _free_space(case.plan, C).free
+    for s in route_ring(case.grid, stops, C, free=free):
+        assert not _reversals(s.polyline), s.polyline
+    for ring in (r for pid in PLAN_IDS for r in routed[pid].rings):
+        for s in ring.segments:
+            assert not _reversals(s.polyline), (ring.hub_id, s.from_, s.to, s.polyline)
+
+
+def test_near_aligned_node_on_the_hubs_row_is_exactly_axis_aligned(routed):
+    """decision_conventions §1 (#70 review): a node 0.5 mm off the row of a hub's straight run
+    gets a sub-mm jog, never a 0.5 mm diagonal; both ends stay the exact points."""
+    case = routed["5088"]
+    hub = case.hubs[0]
+    node = Stop("N9", (1.98, hub.location[1] + 0.0005), "R01")
+    for s in route_ring(case.grid, [Stop(hub.hub_id, hub.location, hub.room_id), node], C):
+        assert all(p[0] == q[0] or p[1] == q[1] for p, q in pairwise(s.polyline)), s.polyline
+        assert {tuple(s.polyline[0]), tuple(s.polyline[-1])} == {hub.location, node.xy}
+
+
+def test_bend_weight_uses_the_grids_cell_size(routed, monkeypatch):
+    """#70 review: a step is one grid cell, so the bend weight converts with the grid's own cell
+    size, not `c.grid_m` (LabelGrid.from_plan doesn't read c)."""
+    case = routed["5088"]
+    seen = []
+    real = route.search
+    monkeypatch.setattr(route, "search", lambda *a: seen.append(a[3]) or real(*a))
+    route_ring(case.grid, next(_stops(case))[1], Constraints(grid_m=0.05))
+    c = Constraints().cost_weights
+    assert set(seen) == {c.bend / (c.length * case.grid.cell_m)}
+
+
+def test_corner_search_is_bounded(routed, monkeypatch):
+    """#70 review: past `MAX_CORNER_COMBOS` (the ≤ 20-node what-if) the corner choice is one
+    pass per stop, not every combination, so routing can't hang."""
+    case = routed["5088"]
+    hub, stops = next(_stops(case))
+    nodes = [s for s in stops[1:]] * 2  # 10 stops, every one allowed all 4 corner pairs
+    calls = []
+    real = route._score
+
+    def score(*a):
+        calls.append(1)
+        assert len(calls) <= route.MAX_CORNER_COMBOS, "scored every combination"
+        return real(*a)
+
+    monkeypatch.setattr(route, "_score", score)
+    segs = route_ring(case.grid, [stops[0], *nodes], C, retrace_ok={s.id for s in nodes})
+    assert len(segs) == len(nodes) + 1
 
 
 def test_errors_name_the_stop_or_leg(routed):
