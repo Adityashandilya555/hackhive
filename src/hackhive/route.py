@@ -80,6 +80,12 @@ def overlap_weight_cells(c: Constraints) -> float:
     return c.cost_weights.overlap / c.cost_weights.length
 
 
+def crossing_weight_cells(c: Constraints, cell_m: float | None = None) -> float:
+    """The J crossing weight in step units (#82): a step costs ``length · cell`` in J, a crossing
+    ``cross``. Pass the grid's own ``cell_m``, as for ``bend_weight_cells``."""
+    return c.cost_weights.cross / (c.cost_weights.length * (cell_m or c.grid_m))
+
+
 def _check_ids(labels: np.ndarray, door_rooms: Mapping[int, tuple[int, int]]) -> None:
     if not door_rooms:
         return
@@ -250,10 +256,30 @@ class Occupancy:
     it to rip its ring up; ``step_costs`` turns the counts into ``search``'s ``penalty``.
 
     Two legs on one cell edge are on the same line, so they overlap (slide 7's O); neighbouring
-    rows are a cell apart, far more than the 1 mm tolerance, so they never do."""
+    rows are a cell apart, far more than the 1 mm tolerance, so they never do.
+
+    ``marks`` keeps each cell a leg passes straight through with its axis (0 north-south,
+    1 east-west), and each cell where it ends or bends with axis −1 (#82): entering a cell
+    across another cable's axis, or where it ends or bends (a T-touch, #43's strict X), is a
+    crossing."""
 
     def __init__(self) -> None:
         self.count: Counter[Edge] = Counter()
+        self.marks: Counter[tuple[Cell, int]] = Counter()
+
+    @staticmethod
+    def cell_marks(path: Sequence[Cell]) -> list[tuple[Cell, int]]:
+        """(cell, axis) along a corner-point path: −1 at its ends and bends."""
+        cells = expand([(int(r), int(c)) for r, c in path])
+        out = []
+        for i, cell in enumerate(cells):
+            if i in (0, len(cells) - 1):
+                out.append((cell, -1))
+                continue
+            h_in = DIRS.index(_heading(cells[i - 1], cell))
+            h_out = DIRS.index(_heading(cell, cells[i + 1]))
+            out.append((cell, h_in % 2 if h_in == h_out else -1))
+        return out
 
     @staticmethod
     def edges(path: Sequence[Cell]) -> list[Edge]:
@@ -263,20 +289,40 @@ class Occupancy:
 
     def commit(self, path: Sequence[Cell]) -> None:
         self.count.update(self.edges(path))
+        self.marks.update(self.cell_marks(path))
 
     def clear(self, path: Sequence[Cell]) -> None:
-        for e in self.edges(path):
-            self.count[e] -= 1
-            if self.count[e] <= 0:
-                del self.count[e]
+        for counter, keys in ((self.count, self.edges(path)), (self.marks, self.cell_marks(path))):
+            for key in keys:
+                counter[key] -= 1
+                if counter[key] <= 0:
+                    del counter[key]
 
-    def step_costs(self, w_overlap: float, cols: int) -> dict[int, float]:
-        """``search``'s penalty: ``w_overlap`` · uses for a step along a used edge, both ways."""
+    def step_costs(
+        self,
+        w_overlap: float,
+        cols: int,
+        w_cross: float = 0.0,
+        exempt: Collection[Cell] = (),
+    ) -> dict[int, float]:
+        """``search``'s penalty: ``w_overlap`` · uses for a step along a used edge, both ways, and
+        ``w_cross`` · cables for a step into a cell that a cable crosses or touches (#82), except
+        into an ``exempt`` cell (the leg's own endpoint)."""
         out: dict[int, float] = {}
         for (a, b), k in self.count.items():
             h = DIRS.index(_heading(a, b))
             out[(a[0] * cols + a[1]) * 4 + h] = w_overlap * k
             out[(b[0] * cols + b[1]) * 4 + (h + 2) % 4] = w_overlap * k
+        if not w_cross:
+            return out
+        for ((r, c), axis), k in self.marks.items():
+            if (r, c) in exempt:
+                continue
+            for h, (dr, dc) in enumerate(DIRS):
+                pr, pc = r - dr, c - dc  # the cell the step into (r, c) leaves
+                if h % 2 != axis and pr >= 0 and 0 <= pc < cols:
+                    key = (pr * cols + pc) * 4 + h
+                    out[key] = out.get(key, 0.0) + w_cross * k
         return out
 
 
@@ -721,7 +767,8 @@ def _prepare(
     """Snap every stop to its cell and route every leg on the grid (one search per stop).
 
     With ``occupancy``, each leg pays ``overlap_weight_cells(c)`` per use of an occupied cell edge
-    and is committed once routed, so later legs, this ring's own included, see it (#80)."""
+    and ``crossing_weight_cells`` per cable it crosses or T-touches (#82), and is committed once
+    routed, so later legs, this ring's own included, see it (#80)."""
     if len(stops) < 2:
         raise ValueError(f"a ring needs at least 2 stops, got {len(stops)}")
     tol = c.tolerance_m
@@ -738,10 +785,11 @@ def _prepare(
         snapped.append(_Snapped(s, cell, centre, corners, kind))
     w_bend = bend_weight_cells(c, grid.cell_m)
     w_overlap = overlap_weight_cells(c)
+    w_cross = crossing_weight_cells(c, grid.cell_m)
     cols = grid.labels.shape[1]
     paths, routed = [], []
     for a, b in zip(snapped, [*snapped[1:], snapped[0]], strict=True):
-        pen = occupancy.step_costs(w_overlap, cols) if occupancy else None
+        pen = occupancy.step_costs(w_overlap, cols, w_cross, {b.cell}) if occupancy else None
         found = search(grid.labels, grid.door_rooms, [a.cell], w_bend, [b.cell], pen)
         cells = path_to(found, b.cell)
         if not cells:
