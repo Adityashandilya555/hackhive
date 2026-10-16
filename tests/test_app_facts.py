@@ -25,7 +25,7 @@ from hackhive.viz import LINK_DOOR, LINK_OPENING, draw_graph, draw_layers, draw_
 ROOT = Path(__file__).resolve().parents[1]
 APP = str(ROOT / "app.py")
 PLANS = ROOT / "tests" / "fixtures" / "plans"
-TIMEOUT = 60
+TIMEOUT = 180  # 13344 in the app took 87 s under pytest -n auto on 4 cores (60 s timed out)
 
 
 def _plan(pid: str):
@@ -378,6 +378,9 @@ def test_the_app_builds_the_room_graph_once_per_plan(monkeypatch):
     at.sidebar.toggle(key="show_graph").set_value(True)
     at.sidebar.radio(key="source").set_value("Upload")
     _run(at)
+    # only the upload's calls: whether the default plan's load was already cached depends on
+    # which tests ran before in this process (it fails alone, or under pytest -n)
+    calls.clear()
     at.sidebar.file_uploader(key="upload").set_value(("p.json", content, "application/json"))
     _run(at)
     assert at.main.image and calls.count("__main__") == 1, calls

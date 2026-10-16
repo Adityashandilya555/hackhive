@@ -49,7 +49,8 @@ Python **≥3.11**, managed with **uv**. `uv.lock` pins exact versions; commit i
 | Batch | **tqdm** + **pandas 2** over 50–100 ResPlan plans |
 | Lint/format | **ruff** |
 
-Checks before any PR: `uv run ruff check . && uv run ruff format --check . && uv run pytest -q`.
+Checks before any PR (the full suite, last): `uv run ruff check . && uv run ruff format --check . && uv run pytest -q -n auto --dist loadgroup`.
+While iterating, skip the tests marked `slow` (listed in `tests/conftest.py`): `uv run pytest -q -n auto --dist loadgroup -m "not slow"`. CI always runs everything.
 
 ## Issues are specs
 Every issue uses `.github/ISSUE_TEMPLATE/spec.yml`: Context · Spec · How (with `HUMAN:` steps) · References (verified `path:Lstart-Lend @ sha`) · Acceptance criteria (Given/When/Then) · Test plan · Out of scope · Depends on · Environment variables. Labels come from `.github/labels.yml` (sync: `uv run scripts/sync_labels.py`). Size `L` means ~3 days; split anything bigger.

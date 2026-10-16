@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fixture_solves import solved
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 
@@ -381,10 +382,8 @@ def test_summary_line_lists_rooms_area_nodes_length_and_bends(plan_5088):
 
 
 def test_5924_solution_has_three_zones_and_three_hubs():
-    solve = pytest.importorskip("hackhive.solve", reason="solve() arrives with #16")
-    plan = load_plan(PLANS / "plan-5924.json")
-    result = solve.solve(plan, C)
-    fig = draw_solution(plan, result.submission)
+    result = solved("5924")
+    fig = draw_solution(result.plan, result.submission)
     ax = fig.axes[0]
     assert len({to_hex(p.get_facecolor()[:3]) for p in _gids(ax, "zone:")}) == 3
     assert len(_gids(ax, "hub:")) == 3

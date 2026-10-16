@@ -20,6 +20,7 @@ hackhive = "hackhive.cli:main"
 [dependency-groups]
 dev = [
     "pytest>=8,<9",
+    "pytest-xdist>=3,<4",
     "ruff>=0.6",
 ]
 
@@ -32,6 +33,9 @@ packages = ["src/hackhive"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: over ~10 s each (tests/conftest.py lists them); skip while iterating with -m \"not slow\", never before a PR",
+]
 
 [tool.ruff]
 line-length = 100

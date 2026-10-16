@@ -86,9 +86,9 @@ def test_problem_statement_is_locked_at_the_organisers_values():
 
 def test_picking_another_fixture_draws_it():
     at = _run()
-    at.sidebar.selectbox(key="fixture").set_value("13344")
+    at.sidebar.selectbox(key="fixture").set_value("5088")  # the smallest: any other plan will do
     _run(at)
-    assert "PLAN_13344" in _main_text(at)
+    assert "PLAN_5088" in _main_text(at)
     assert len(_images(at)) == 2  # Best's design (solve, #16) and the Plan tab's drawing
 
 
