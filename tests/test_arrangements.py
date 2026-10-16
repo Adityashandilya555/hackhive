@@ -196,3 +196,17 @@ def test_open_shows_the_arrangement_validated_in_the_best_tab():
     assert not best.success  # solve()'s green banner is about another design: not shown here
     assert any("valid" in m.value for m in best.markdown)  # the checker's verdict
     assert len(best.image) == 1
+
+
+def test_a_worker_importing_the_app_never_runs_the_page(monkeypatch):
+    """#22's pool workers import app.py as `__mp_main__` (spawn on macOS and Windows, and the
+    fork server): that must define functions only, never draw the page or solve a plan (#26)."""
+    import runpy
+
+    def boom(*_a, **_k):
+        raise AssertionError("a worker re-ran the app")
+
+    monkeypatch.setattr(solve_mod, "solve", boom)
+    monkeypatch.setattr(solve_mod, "enumerate", boom)
+    names = runpy.run_path(APP, run_name="__mp_main__")
+    assert callable(names["page"]) and callable(names["arrangements_tab"])
