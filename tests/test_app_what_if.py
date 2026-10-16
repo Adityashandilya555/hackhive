@@ -86,7 +86,7 @@ def test_the_banner_shows_on_the_plan_tab_too():
     banner_at = next(
         i
         for i, e in enumerate(at.main.children.values())
-        if e.type == "alert" and "WHAT-IF" in str(getattr(e, "value", ""))
+        if e.type == "error" and "WHAT-IF" in str(getattr(e, "value", ""))
     )
     assert banner_at < tabs_at
 
@@ -110,7 +110,7 @@ def test_reset_returns_to_the_problem_statement():
 
 def test_a_raised_area_cap_designs_a_plan_with_a_room_over_100_m2():
     at = _big_upload(_run())
-    assert not at.sidebar.selectbox(key="solution").options  # the preset: no design
+    assert not [s for s in at.sidebar.selectbox if s.key == "solution"]  # the preset: no design
     at.sidebar.number_input(key="wi_max_area_m2").set_value(150)
     _run(at)
     assert _what_if_banner(at)

@@ -1,9 +1,10 @@
 """HackHive demo app: pick a plan, see it drawn, and see the organisers' rules, locked (#7);
 plan facts, node ids, the room graph and the reviewer checklist (#12); the Best tab shows
-solve()'s design (#16) with its overlay and summary (#17).
+solve()'s design (#16) with its overlay and summary (#17); the What-if expander (#30) re-solves
+under changed settings, labelled WHAT-IF on every view and never written as a submission.
 
-Run it with `uv run streamlit run app.py`. Later issues add the what-if sidebar (#30), the
-arrangements gallery and the batch leaderboard.
+Run it with `uv run streamlit run app.py`. Later issues add the arrangements gallery and the
+batch leaderboard.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import streamlit as st
 from hackhive import checker, graph
 from hackhive.contracts import Constraints, Plan, Sidecar
 from hackhive.io import load_plan
-from hackhive.solve import Result, solve, submit
+from hackhive.solve import Result, file_stem, solve, submit
 from hackhive.ui import (
     DEFAULT_FIXTURE,
     RESPLAN_JSONL,
@@ -29,10 +30,12 @@ from hackhive.ui import (
     fixture_path,
     hub_table,
     load_submission,
+    md_text,
     metrics_line,
     plan_facts,
     plan_from_bytes,
     preset_rows,
+    readings_rows,
     resplan_raw,
     room_counts,
     solution_label,
@@ -49,19 +52,31 @@ from hackhive.viz import (
     draw_layers,
     draw_nodes,
     draw_solution,
+    label_what_if,
     segment_count,
     to_png,
 )
+from hackhive.what_if import WHAT_IF, what_if_changes
 
 PRESET = Constraints.problem_statement()
 FIXTURE, RESPLAN, UPLOAD = "Test plans", "ResPlan id", "Upload"
 BEST = "best design (solve)"
+BEST_WHAT_IF = "what-if design (solve)"
 SOLVED_DIR = Path(tempfile.gettempdir()) / "hackhive-app"  # solve()'s files, a folder per input
+WHAT_IF_COPY = ".what-if.json"  # a what-if design, kept only so the app can draw it (#30)
+# the What-if expander's widgets (#30), each starting at the problem statement's value
+WHAT_IF_DEFAULTS = {
+    "wi_max_area_m2": float(PRESET.max_area_m2),
+    "wi_hub_wall_clearance_m": float(PRESET.hub_wall_clearance_m),
+    "wi_zone_links_via_excluded": PRESET.zone_links_via_excluded,
+    "wi_route_through_other_rooms": PRESET.route_through_other_rooms,
+}
 
 
 # --------------------------------------------------------------------------- cached work
 # Cached on (source, key, content), never on a Figure: cache_data pickles what it returns, and
 # PNG bytes and the Plan model both pickle cleanly. The Plan is cached so later overlays reuse it.
+# Everything a setting changes is also keyed on `settings`, the Constraints as JSON (#30).
 
 
 @st.cache_data(max_entries=64, show_spinner="Loading the plan…")
@@ -89,35 +104,56 @@ def picture(source: str, key: str, content: bytes | None = None, show: bool = Fa
 
 
 @st.cache_data(max_entries=64, show_spinner="Solving…")
-def solved(source: str, key: str, content: bytes | None) -> tuple[str | None, str]:
-    """`solve()` (#16) through the submit gate (C43), into a temp folder per input: the path of
-    the submission it wrote (None when the gate refused one) and the sidecar as JSON (#83)."""
+def solved(source: str, key: str, content: bytes | None, settings: str) -> tuple[str | None, str]:
+    """`solve()` (#16) through the submit gate (C43), into a temp folder per input and settings:
+    the path of the design to draw (None when there is none) and the sidecar as JSON (#83).
+
+    Under the problem statement that's the submission `submit` wrote. A what-if design (#30) is
+    never written as a submission: `submit` writes only its sidecar, and the app keeps a
+    `*.what-if.json` display copy in a `what-if` folder, only to draw it."""
     plan, _ = load(source, key, content)
-    result = solve(plan, PRESET)
-    digest = hashlib.sha256(f"{source}\0{key}\0".encode() + (content or b"")).hexdigest()[:16]
-    written = submit(result, SOLVED_DIR / digest)
+    result = solve(plan, Constraints.model_validate_json(settings))
+    raw = f"{source}\0{key}\0{settings}\0".encode() + (content or b"")
+    out = SOLVED_DIR / hashlib.sha256(raw).hexdigest()[:16]
+    written = submit(result, out)
     sub = next((p for p in written if not p.name.endswith(".sidecar.json")), None)
+    if result.what_if and result.submission is not None:
+        sub = out / "what-if" / f"{file_stem(result.sidecar.plan_id)}{WHAT_IF_COPY}"
+        sub.parent.mkdir(parents=True, exist_ok=True)
+        sub.write_text(result.submission.model_dump_json(indent=2), encoding="utf-8")
     return (str(sub) if sub else None), result.sidecar.model_dump_json()
 
 
 @st.cache_data(max_entries=256, show_spinner="Drawing the solution…")
 def overlay(
-    source: str, key: str, content: bytes | None, solution: str, step: int | None = None
+    source: str,
+    key: str,
+    content: bytes | None,
+    solution: str,
+    settings: str,
+    step: int | None = None,
 ) -> bytes:
     """`viz.draw_solution` of a solution file, with the checker's violations in red (#17), up to
-    `step` segments (#25). Each step's PNG is cached, so sliding back and forth is instant."""
+    `step` segments (#25), and a red WHAT-IF band naming any what-if (#30). Each step's PNG is
+    cached, so sliding back and forth is instant."""
     plan, _ = load(source, key, content)
-    rep = checked(source, key, content, solution)
+    rep = checked(source, key, content, solution, settings)
     sub = load_submission(Path(solution))
-    return to_png(draw_solution(plan, sub, rep.violations, step=step))
+    fig = draw_solution(plan, sub, rep.violations, step=step)
+    label_what_if(fig, what_if_changes(Constraints.model_validate_json(settings)))
+    return to_png(fig)
 
 
 @st.cache_data(max_entries=64, show_spinner="Checking…")
-def checked(source: str, key: str, content: bytes | None, solution: str) -> checker.Report:
-    """`checker.report` on a solution file: the six rules, the metrics, the checklist. The
-    checker builds its own room graph from the plan, on purpose: it trusts nothing of ours."""
+def checked(
+    source: str, key: str, content: bytes | None, solution: str, settings: str
+) -> checker.Report:
+    """`checker.report` on a solution file under the active settings: the six rules, the
+    metrics, the checklist. The checker builds its own room graph from the plan, on purpose: it
+    trusts nothing of ours."""
     plan, _ = load(source, key, content)
-    return checker.report(plan, load_submission(Path(solution)), PRESET)
+    c = Constraints.model_validate_json(settings)
+    return checker.report(plan, load_submission(Path(solution)), c)
 
 
 # --------------------------------------------------------------------------- sidebar
@@ -149,7 +185,9 @@ def pick_plan() -> tuple[str, str, bytes | None] | None:
 
 def _solution_name(path: Path) -> str:
     """By where the file is, not a captured path: a widget may keep an older run's format_func."""
-    return BEST if SOLVED_DIR in path.parents else solution_label(path)
+    if SOLVED_DIR not in path.parents:
+        return solution_label(path)
+    return BEST_WHAT_IF if path.name.endswith(WHAT_IF_COPY) else BEST
 
 
 def pick_solution(plan: Plan, best: Path | None) -> Path | None:
@@ -173,17 +211,26 @@ def pick_solution(plan: Plan, best: Path | None) -> Path | None:
 
 
 def best_tab(
-    source: str, key: str, content: bytes | None, plan: Plan, path: Path | None, side: Sidecar
+    source: str,
+    key: str,
+    content: bytes | None,
+    plan: Plan,
+    path: Path | None,
+    side: Sidecar,
+    c: Constraints,
+    counting: bool,
 ) -> None:
     """Slide 5's expected solution: the status banner (#83), the overlay, the per-hub summary
-    (C25) and the reviewer checklist (C26), all from the submission and the checker mirror."""
+    (C25) and the reviewer checklist (C26), all from the submission and the checker mirror,
+    judged under `c`; with `counting`, J under both readings of the counting rules (D3, #30)."""
+    settings = c.model_dump_json()
     banner(side, plan)
     if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
         st.caption("No design was submitted. The Plan tab still shows the plan.")
         return
     try:
         sub = load_submission(path)
-        rep = checked(source, key, content, str(path))
+        rep = checked(source, key, content, str(path), settings)
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
@@ -203,7 +250,9 @@ def best_tab(
             disabled=total == 0,
         )
         try:
-            png = overlay(source, key, content, str(path), None if step >= total else step)
+            png = overlay(
+                source, key, content, str(path), settings, None if step >= total else step
+            )
         except Exception as e:  # Best is the landing tab: a drawing error is never a traceback
             st.error(f"Can't draw this solution. {type(e).__name__}: {e}")
             png = None
@@ -215,6 +264,14 @@ def best_tab(
             st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
         else:
             st.dataframe(hub_table(plan, sub, rep.metrics), hide_index=True)
+        if counting:
+            st.subheader("Counting rules (D3)")
+            st.caption(
+                "The same design under both readings of slides 6-7's unclear rules: T-touches "
+                "and shared-stretch ends as crossings, overlap between rings, bends at nodes. "
+                "We submit by the strict one."
+            )
+            st.dataframe(readings_rows(sub, c), hide_index=True)
     with panel:
         reviewer_panel(rep)
 
@@ -239,7 +296,7 @@ def reviewer_panel(rep: checker.Report) -> None:
 
 
 def locked_preset(c: Constraints) -> None:
-    """The organisers' rules, read-only. What-ifs (#30) will live in their own expander."""
+    """The organisers' rules, read-only. What-ifs (#30) live in their own expander below."""
     st.subheader(":material/lock: Problem statement")
     st.caption("The organisers' rules. Locked: every result on this page is judged by them.")
     st.number_input(
@@ -267,6 +324,75 @@ def locked_preset(c: Constraints) -> None:
     )
 
 
+def _reset_what_ifs() -> None:
+    """The reset button's callback: every what-if widget back to the problem statement."""
+    for k, v in WHAT_IF_DEFAULTS.items():
+        st.session_state[k] = v
+
+
+def what_if_panel() -> tuple[Constraints, bool]:
+    """The What-if expander (#30): the settings it gives, and whether to show J under both
+    counting readings (D3). No node-cap control (D1: 5 only); the J weights aren't editable
+    (they stay `ORGANISER_WEIGHTS`, #48). Interior windows as doors arrives with #31."""
+    for k, v in WHAT_IF_DEFAULTS.items():
+        st.session_state.setdefault(k, v)
+    changed = any(st.session_state[k] != v for k, v in WHAT_IF_DEFAULTS.items())
+    with st.expander(f":material/science: {WHAT_IF.title()}", expanded=changed):
+        st.caption("Change a rule to see what it does. Labelled WHAT-IF, never submitted.")
+        st.number_input(
+            "Hub area cap (m²)",
+            min_value=10.0,
+            max_value=1000.0,
+            step=10.0,
+            format="%.0f",
+            key="wi_max_area_m2",
+            help="D4: a plan with a room over 100 m² can be solved under a higher cap.",
+        )
+        st.number_input(
+            "Hub to wall, at least (m)",
+            min_value=0.0,
+            max_value=2.0,
+            step=0.1,
+            format="%.2f",
+            key="wi_hub_wall_clearance_m",
+        )
+        st.toggle(
+            "Link zone rooms through a bathroom or stair",
+            key="wi_zone_links_via_excluded",
+            help="D5: off by default; slide 3 rule 3 links zone rooms by doors only.",
+        )
+        st.toggle(
+            "Allow cable through bathrooms or other hubs' rooms",
+            key="wi_route_through_other_rooms",
+            help="D7: off by default; a ring stays in its own hub's rooms.",
+        )
+        st.button("Reset to Problem statement", key="wi_reset", on_click=_reset_what_ifs)
+        st.divider()
+        counting = st.toggle(
+            "Show J under both counting readings",
+            key="wi_counting",
+            help="D3: a view only. The design and its submission don't change.",
+        )
+    c = Constraints(
+        max_area_m2=st.session_state["wi_max_area_m2"],
+        hub_wall_clearance_m=st.session_state["wi_hub_wall_clearance_m"],
+        zone_links_via_excluded=st.session_state["wi_zone_links_via_excluded"],
+        route_through_other_rooms=st.session_state["wi_route_through_other_rooms"],
+    )
+    return c, counting
+
+
+def what_if_banner(c: Constraints) -> None:
+    """The red WHAT-IF banner (#30), above the tabs so every view carries it; nothing for the
+    problem statement. The word WHAT-IF carries it, never the colour alone."""
+    if changes := what_if_changes(c):
+        st.error(
+            f"**{WHAT_IF}** · {md_text('; '.join(changes))}. Every result on this page is judged "
+            "under these settings and is never written as a submission (C29).",
+            icon=":material/science:",
+        )
+
+
 # --------------------------------------------------------------------------- page
 
 st.set_page_config(page_title="HackHive · hub planner", layout="wide")
@@ -277,8 +403,10 @@ with st.sidebar:
     show_graph = st.toggle("Show room graph", key="show_graph", help="On the Plan tab.")
     st.divider()
     locked_preset(PRESET)
+    settings_c, counting = what_if_panel()
 
 st.title("HackHive")
+what_if_banner(settings_c)
 if choice is None:
     st.caption("Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files.")
     st.stop()
@@ -294,11 +422,16 @@ except Exception as e:  # a plan we can parse but not handle further: say so, ne
     st.stop()
 
 try:
-    best_path, side_json = solved(source, key, content)
+    best_path, side_json = solved(source, key, content, settings_c.model_dump_json())
     side = Sidecar.model_validate_json(side_json)
 except Exception as e:  # solve() never raises for a loaded plan; the landing tab never tracebacks
     best_path = None
-    side = Sidecar(plan_id=plan.plan_id, status="infeasible", reason=f"{type(e).__name__}: {e}")
+    side = Sidecar(
+        plan_id=plan.plan_id,
+        status="infeasible",
+        reason=f"{type(e).__name__}: {e}",
+        settings=settings_c,
+    )
 with solution_slot:
     solution = pick_solution(plan, Path(best_path) if best_path else None)
 
@@ -311,7 +444,7 @@ if tags := case_tags(plan, G, Result(plan, best_sub, side)):
     st.markdown(tag_chips(tags), help="\n".join(f"{t.label}: {t.look_for}" for t in tags))
 best, plan_tab = st.tabs(["Best", "Plan"])
 with best:
-    best_tab(source, key, content, plan, solution, side)
+    best_tab(source, key, content, plan, solution, side, settings_c, counting)
 with plan_tab:
     drawing, panel = st.columns([5, 3], gap="large")
     with drawing:
@@ -325,6 +458,6 @@ with plan_tab:
                     st.markdown(f"- {w}")
     with panel:
         st.subheader("Facts")
-        st.markdown(f"**{plan_facts(plan, PRESET)}**")
+        st.markdown(f"**{plan_facts(plan, settings_c)}**")
         st.markdown(f"{plan.m_per_unit:.4f} m/unit · walls {plan.wall_depth_m:.2f} m")
         st.caption("Eligible area · nodes · LB = the fewest hubs any zoning can use.")
