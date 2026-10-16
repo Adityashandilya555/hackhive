@@ -100,9 +100,11 @@ def first_ring(
         return sum(1 for nb in inside.neighbors(room) if nb != room) if room in inside else 0
 
     room = min({cand.room_id for cand in cands}, key=lambda r: (-links(r), -area[r], r))
+    # to the µm, so equal totals tie on xy whatever the float sum order (3086's hub moved a cell
+    # between Python 3.11 and 3.12+, whose sum() is compensated; #79 CI)
     best = min(
         (cand for cand in cands if cand.room_id == room),
-        key=lambda cand: (sum(manhattan(cand.xy, n.xy) for n in nodes), cand.xy),
+        key=lambda cand: (round(sum(manhattan(cand.xy, n.xy) for n in nodes), 6), cand.xy),
     )
 
     points = {hub_id: best.xy, **{n.id: n.xy for n in nodes}}
