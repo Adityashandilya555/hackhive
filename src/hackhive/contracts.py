@@ -173,6 +173,7 @@ class Sidecar(_Strict):
 
     plan_id: str
     status: Literal["ok", "submitted_strict_only", "infeasible", "input_error"]
+    reason: str | None = None  # why there is no submission (infeasible, input_error), in words
     violations: list[Violation] = []
     bounds: Bounds | None = None
     cost: CostBreakdown | None = None
