@@ -97,6 +97,12 @@ hr{border-color:var(--hh-line)!important}
 [data-baseweb="popover"] ul{background:#3A3A3A!important;border:1px solid var(--hh-line-2);border-radius:12px}
 [data-baseweb="popover"] li:hover{background:rgba(109,129,150,.35)!important}
 .stRadio [role="radiogroup"]{gap:4px;padding:4px;border-radius:14px;background:var(--hh-well);border:1px solid var(--hh-line);flex-wrap:wrap}
+/* one row of equal segments, however many sources there are (ResPlan adds a fourth) */
+.stRadio [role="radiogroup"]{display:grid!important;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);width:100%}
+/* as wide as the inputs around them: 1.66 sizes a radio and a button to their content */
+[data-testid="stElementContainer"]:has(>.stRadio),.st-key-wi_reset,.st-key-wi_reset button{width:100%!important}
+[data-testid="stRadioOption"]{display:flex;justify-content:center;min-width:0;padding:7px 4px!important}
+[data-testid="stRadioOption"] p{font-size:13px!important;font-weight:600!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stRadio [role="radiogroup"] label{padding:6px 12px;border-radius:10px;transition:background .15s;margin:0!important}
 .stRadio [role="radiogroup"] label:hover{background:var(--hh-hover)}
 [data-testid="stRadioOption"]>div>div:first-child:not(:has([data-testid="stMarkdownContainer"])){display:none}

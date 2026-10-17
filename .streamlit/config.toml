@@ -4,7 +4,9 @@ gatherUsageStats = false
 
 [theme]
 base = "dark"
-primaryColor = "#FFFFE3"
+# slate, not cream: Streamlit fills a toggle, checkbox and multiselect tag with it and puts
+# light text on top (cream made them vanish); the cream chips are set in theme.CSS
+primaryColor = "#6D8196"
 backgroundColor = "#4A4A4A"
 secondaryBackgroundColor = "#3A3A3A"
 textColor = "#FFFFE3"
