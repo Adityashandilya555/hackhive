@@ -210,7 +210,7 @@ def test_open_shows_the_arrangement_validated_in_the_best_tab():
     best = at.main.tabs[0]
     assert any("arrangement #2" in i.value for i in best.info)
     assert not best.success  # solve()'s green banner is about another design: not shown here
-    assert any("valid" in m.value for m in best.markdown)  # the checker's verdict
+    assert any("valid" in m.value for m in at.main.markdown)  # the checker's verdict, in the rail
     assert len(best.image) == 1
 
 

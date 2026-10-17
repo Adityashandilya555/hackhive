@@ -15,10 +15,11 @@ from pathlib import Path
 
 import networkx as nx
 import streamlit as st
+from streamlit.delta_generator import DeltaGenerator
 
 from hackhive import checker, graph
 from hackhive.checker import check_rules, metrics
-from hackhive.contracts import Constraints, Plan, Sidecar
+from hackhive.contracts import Constraints, Plan, Sidecar, Submission
 from hackhive.io import load_plan
 from hackhive.solve import (
     Result,
@@ -30,6 +31,7 @@ from hackhive.solve import (
     zoning_count,
 )
 from hackhive.solve import enumerate as enumerate_arrangements
+from hackhive.theme import STYLE, kpi_cards, kpi_html
 from hackhive.ui import (
     BATCH_COLUMNS,
     BATCH_COMMAND,
@@ -351,12 +353,15 @@ def best_tab(
     c: Constraints,
     counting: bool,
     is_best: bool = True,
+    rail: DeltaGenerator | None = None,
 ) -> None:
     """Slide 5's expected solution: the status banner (#83), the overlay, the per-hub summary
     (C25) and the reviewer checklist (C26), all from the submission and the checker mirror,
     judged under `c`; with `counting`, J under both readings of the counting rules (D3, #30).
     The banner and the badge describe solve()'s design, so they show only with it (`is_best`);
-    another design (a gallery arrangement, a hand-made file) says what it is instead (#26)."""
+    another design (a gallery arrangement, a hand-made file) says what it is instead (#26).
+    With `rail`, the reviewer panel (a cream card), the per-hub summary and the download button
+    (a glass card) go there and the picture takes the tab's width; without it, today's columns."""
     settings = c.model_dump_json()
     if is_best or path is None:
         banner(side, plan)
@@ -373,6 +378,8 @@ def best_tab(
         )
     if path is None:  # the gate wrote nothing: an invalid design scores zero (C43)
         st.caption("No design was submitted. The Plan tab still shows the plan.")
+        if rail is not None:
+            rail_status(rail, side, plan)
         return
     try:
         sub = load_submission(path)
@@ -380,7 +387,12 @@ def best_tab(
     except ValueError as e:
         st.error(f"Can't check {path.name}. {e}")
         return
-    picture_col, panel = st.columns([5, 3], gap="large")
+    if rail is None:
+        picture_col, panel = st.columns([5, 3], gap="large")
+    else:
+        picture_col = st.container()
+        panel = rail.container(border=True, key="hh_cream_reviewer")
+        hubs_card = rail.container(border=True, key="hh_hubs")
     with picture_col:
         if mismatch := submission_mismatch(sub, plan):
             st.warning(mismatch)
@@ -407,20 +419,10 @@ def best_tab(
         st.caption(step_caption(sub, step))
         # solve()'s design only: its badge and violations come from solve()'s sidecar, so never
         # over a gallery arrangement or a hand-made file (#107 x #111, nexuszephyr's review)
-        if is_best:
-            what_if = "" if side.settings.is_problem_statement else ".what-if"
-            st.download_button(
-                "Download presentation image",
-                # drawn on click, off every Best-tab load (#107 review); cached after that
-                lambda: presentation(source, key, content, str(path), side.model_dump_json()),
-                file_name=f"{file_stem(side.plan_id)}{what_if}.presentation.png",
-                mime="image/png",
-            )
-        st.subheader("Per-hub summary")
-        if rep.metrics is None:
-            st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
-        else:
-            st.dataframe(hub_table(plan, sub, rep.metrics), hide_index=True)
+        if rail is None:
+            if is_best:
+                download_presentation(source, key, content, path, side)
+            per_hub_summary(plan, sub, rep)
         if counting:
             st.subheader("Counting rules (D3)")
             st.caption(
@@ -429,8 +431,40 @@ def best_tab(
                 "We submit by the strict one."
             )
             st.dataframe(readings_rows(sub, c), hide_index=True)
+    if rail is not None:
+        with hubs_card:
+            per_hub_summary(plan, sub, rep)
+            if is_best:
+                download_presentation(source, key, content, path, side)
     with panel:
         reviewer_panel(rep)
+
+
+def download_presentation(
+    source: str, key: str, content: bytes | None, path: Path, side: Sidecar
+) -> None:
+    what_if = "" if side.settings.is_problem_statement else ".what-if"
+    st.download_button(
+        "Download presentation image",
+        # drawn on click, off every Best-tab load (#107 review); cached after that
+        lambda: presentation(source, key, content, str(path), side.model_dump_json()),
+        file_name=f"{file_stem(side.plan_id)}{what_if}.presentation.png",
+        mime="image/png",
+    )
+
+
+def per_hub_summary(plan: Plan, sub: Submission, rep: checker.Report) -> None:
+    st.subheader("Per-hub summary")
+    if rep.metrics is None:
+        st.caption("Metrics not computed: a coordinate isn't finite (rule 4).")
+    else:
+        st.dataframe(hub_table(plan, sub, rep.metrics), hide_index=True)
+
+
+def rail_status(rail: DeltaGenerator, side: Sidecar, plan: Plan | None) -> None:
+    """No design to review: the rail's cream card says why, in the status banner's words."""
+    with rail.container(border=True, key="hh_cream_reviewer"):
+        st.markdown(status_banner(side, plan)[1])
 
 
 def banner(side: Sidecar, plan: Plan | None) -> None:
@@ -735,12 +769,22 @@ def arrangements_tab(
 # --------------------------------------------------------------------------- page
 
 
+def kpi_rows(top: DeltaGenerator, bottom: DeltaGenerator, cards: list[dict]) -> None:
+    """`theme.kpi_cards`: Hubs and Cost J above the tabs, the Coverage strip below. HTML, not
+    `st.metric`, so the Batch tab's cards stay the page's only metrics."""
+    hubs, cost, coverage = cards
+    for col, card in zip(top.columns(2), (hubs, cost), strict=True):
+        col.markdown(kpi_html(card), unsafe_allow_html=True)
+    bottom.markdown(kpi_html(coverage), unsafe_allow_html=True)
+
+
 def page() -> None:
     """The page. Only Streamlit's run of this script calls it (`__name__ == "__main__"`): a
     worker process of #22's pool imports this file as `__mp_main__` (macOS and Windows spawn,
     and `parallel`'s fork server does too), and must then define functions only, never re-run
     the app and its solve (#26)."""
     st.set_page_config(page_title="HackHive · hub planner", layout="wide")
+    st.markdown(STYLE, unsafe_allow_html=True)  # the Ink Wash theme (theme.py)
 
     with st.sidebar:
         choice = pick_plan()
@@ -753,7 +797,12 @@ def page() -> None:
     st.title("HackHive")
     what_if_banner(settings_c)
     header = st.container()  # the plan's caption and chips, or why there is no plan
+    kpi_top = st.container()  # the KPI cards, filled once the sidecar is known
     best, plan_tab, arr_tab, batch_t = st.tabs(["Best", "Plan", "Arrangements", "Batch"])
+    kpi_bottom = st.container()
+    # the reviewer rail: CSS puts it right of the page at ≥ 1280 px. Not st.columns: the tabs
+    # stay a direct child of the page, after the WHAT-IF banner (test_app_what_if)
+    rail = st.container(key="hh_rail").container(key="hh_rail_cards")  # the cards stick
     with batch_t:  # first, and never behind the plan: it reads a CSV, it solves nothing (#99)
         batch_tab()
     if choice is None:
@@ -761,6 +810,7 @@ def page() -> None:
             st.caption(
                 "Upload a plan JSON in the sidebar: a ResPlan plan or one of our vault files."
             )
+        kpi_rows(kpi_top, kpi_bottom, kpi_cards(None, None, settings_c))
         return
 
     source, key, content = choice
@@ -768,8 +818,11 @@ def page() -> None:
         plan, G = load(source, key, content)
     except Exception as e:  # a plan we can't read or handle: say so, never a traceback
         reason = str(e) if isinstance(e, (OSError, ValueError)) else f"{type(e).__name__}: {e}"
+        failed = Sidecar(plan_id=key, status="input_error", reason=reason)
         with header:
-            banner(Sidecar(plan_id=key, status="input_error", reason=reason), None)
+            banner(failed, None)
+        kpi_rows(kpi_top, kpi_bottom, kpi_cards(failed, None, settings_c))
+        rail_status(rail, failed, None)
         return
 
     try:
@@ -784,6 +837,7 @@ def page() -> None:
             reason=f"{type(e).__name__}: {e}",
             settings=settings_c,
         )
+    kpi_rows(kpi_top, kpi_bottom, kpi_cards(side, plan, settings_c))
     opened_path = None
     if (req := st.session_state.get("arr_open")) and req[0] == _ident(
         source, key, content, settings_c.model_dump_json()
@@ -807,7 +861,7 @@ def page() -> None:
         if source == CASES_SOURCE:
             case_callout(key, side)
         is_best = solution is None or (best_path is not None and Path(best_path) == solution)
-        best_tab(source, key, content, plan, G, solution, side, settings_c, counting, is_best)
+        best_tab(source, key, content, plan, G, solution, side, settings_c, counting, is_best, rail)
     with arr_tab:
         arrangements_tab(source, key, content, plan, settings_c)
     with plan_tab:
