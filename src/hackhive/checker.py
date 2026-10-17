@@ -345,8 +345,9 @@ def _crossings(
     *,
     lenient: bool = False,
 ) -> list[tuple[Point, set[str]]]:
-    """X's points, each with the rings that meet there. ``lenient`` (#30 D3): only where two
-    cables pass through each other; a T-touch or a shared stretch's end is no crossing."""
+    """X's points, each with the rings that meet there. Where two cables that share a line part
+    is no crossing under either reading (slide 7's overlap example costs O alone). ``lenient``
+    (#30 D3): only where two cables pass through each other, so a T-touch is none either."""
     pieces = [(li, i) for li, leg in enumerate(legs) for i in range(len(leg) - 1)]
     # every point _meet returns lies within 2·tol of both pieces, so a pair whose boxes, grown by
     # 3·tol, don't touch meets nowhere: skipping it changes nothing, in the same order (#20)
@@ -373,6 +374,10 @@ def _crossings(
                 da, db = _leaving(A, ia, p, tol), _leaving(B, ib, p, tol)
                 if _coincide(da, db, tol):
                     continue
+                # a shared way out = the end of a shared stretch: the cables only part, and
+                # sharing one side of p they can't also cross there (slide 7: overlap is O)
+                if any(_same_dir(x, y, tol) for x in da for y in db):
+                    continue
                 if lenient and not _pass_through(da, db, tol):
                     continue
                 for q, who in found:
@@ -390,9 +395,10 @@ def crossing_points(
     """X's points (slides 6-7): where cables cross or meet, once per point.
 
     A meeting at a terminal (node or hub point) is free only when both legs end there; a foreign
-    cable through a node or hub counts. Strict (decision_conventions §6 ⚠ #46 Q4): a T-touch and
-    each divergence end of a shared same-line stretch count, but not a corner two cables turn
-    together. Each polyline is one leg.
+    cable through a node or hub counts. Strict (decision_conventions §6 ⚠ #46 Q4): a T-touch
+    counts; where cables that share a line part (a divergence end) or turn a corner together is
+    no crossing, as slide 7's overlap example counts that stretch as O alone. Each polyline is
+    one leg.
     """
     legs = [clean_polyline(p, tol) for p in polylines]
     return [p for p, _ in _crossings(legs, [str(i) for i in range(len(legs))], terminals, tol)]
