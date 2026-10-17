@@ -159,9 +159,12 @@ def test_foreign_cable_through_node_counts():
     # H2's cable runs straight through H1's node N1 at (5, 5): only the node's own legs meet free
     a = ring((0, 5), [[(0, 5), (5, 5)], [(5, 5), (5, 8), (0, 8), (0, 5)]], hub_id="H1")
     b = ring((5, 0), [[(5, 0), (5, 3), (5, 10), (8, 10)], [(8, 10), (8, 0), (5, 0)]], hub_id="H2")
-    assert metrics([a, b]).X == 2  # (5, 5) and (5, 8), as with the cable shifted off the node
+    m = metrics([a, b])
+    # (5, 5) counts; from there H2 runs 3 m along N1's leg, which is overlap, and where they part
+    # at (5, 8) is no crossing (slide 7's overlap example)
+    assert (m.X, m.O) == (1, approx(3))
     shifted = ring((4, 0), [[(4, 0), (4, 10), (8, 10)], [(8, 10), (8, 0), (4, 0)]], hub_id="H2")
-    assert metrics([a, shifted]).X == 2
+    assert metrics([a, shifted]).X == 2  # off the node: two "+" crossings, (4, 5) and (4, 8)
 
 
 def test_once_per_point():

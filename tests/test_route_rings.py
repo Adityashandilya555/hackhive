@@ -528,17 +528,18 @@ def test_own_rooms_via_excluded_zone_routes_through_its_bathroom():
     assert _inside_bath(rooms, ring) > 1.0
 
 
-# main @ ef024cc, before D7: J per fixture (tests/test_route_rings.py demo, full precision).
-# 3086 is after the µm hub tie in rings.first_ring: main gave 82.214805 on Python 3.13 but
-# 88.614805 on 3.11 (CI), as its hub tie fell to the float sum order
+# main @ ef024cc's routing before D7 (one layout per ring), J per fixture at full precision,
+# scored with split points no crossing (2026-10-17). Every value fell by 5 per split point it
+# had counted (5088 -10, 576 -30, 1293 -30, 2814 -35, 5924 -25, 13344 -30); 3086 fell 19.432,
+# as its corner choice, scored by the checker, changed too. Same on Python 3.11 and 3.13
 J_MAIN = {
-    "5088": 46.137406,
-    "576": 94.167828,
-    "1293": 96.851413,
-    "2814": 90.270451,
-    "3086": 87.014805,
-    "5924": 84.392827,
-    "13344": 108.1007,
+    "5088": 36.137406,
+    "576": 64.167828,
+    "1293": 66.851413,
+    "2814": 55.270451,
+    "3086": 67.582614,
+    "5924": 59.392827,
+    "13344": 78.1007,
 }
 # 13344's H1 ran 10 cm along opening_0's band (to H2's room) inside its own living_0; the strict
 # door rule moves it off the band: +0.2 m L, +0.1 m O (#79 review, point 3)
