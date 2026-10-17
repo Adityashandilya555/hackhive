@@ -125,11 +125,21 @@ def test_t_touch_counts_strict():
     assert len(crossing_points([a, b], ends(a, b))) == 1
 
 
-def test_divergence_ends_count_strict():
+def test_divergence_ends_are_no_crossing():
+    # slide 7's overlap example: 2 m on the same line costs O = 2 m, and where the cables part
+    # they don't cross (only a "+" or a T-touch is a meeting, decision_conventions §6)
     a, b = [(0, 0), (6, 0)], [(2, 3), (2, 0), (4, 0), (4, 3)]
     assert overlap_length([a, b]) == approx(2)
-    pts = crossing_points([a, b], ends(a, b))
-    assert sorted(pts) == [approx((2, 0)), approx((4, 0))]
+    assert crossing_points([a, b], ends(a, b)) == []
+
+
+@pytest.mark.parametrize("reading", checker.READINGS)
+def test_split_below_a_node_is_no_crossing(reading):
+    # both legs run the last 4.4 cm into N1 on one line and part 4.4 cm away from it (a node a
+    # few cm off the grid row, as in a fabricated 3-hub plan): overlap, not a crossing
+    legs = [[(0, -3), (0, 0.044)], [(0, 0.044), (0, 0), (2, 0), (2, -3), (0, -3)]]
+    m = metrics([ring((0, -3), legs)], reading=reading)
+    assert (m.X, m.O) == (0, approx(0.044))
 
 
 def test_co_routed_corner_is_not_a_divergence():

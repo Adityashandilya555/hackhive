@@ -70,11 +70,12 @@ def test_a_t_touch_counts_only_strict():
 
 
 def test_a_shared_stretch_between_rings():
-    # H2 runs 2 m along H1's line: strict counts the 2 m and both divergence ends
+    # H2 runs 2 m along H1's line (slide 7's overlap example): strict counts the 2 m as O; the
+    # ends where the cables part are no crossing under either reading
     a = ring((0, 0), [[(0, 0), (6, 0)], [(6, 0), (6, -3), (0, -3), (0, 0)]], hub_id="H1")
     b = ring((2, 3), [[(2, 3), (2, 0), (4, 0), (4, 3)], [(4, 3), (2, 3)]], hub_id="H2")
     strict, lenient = both([a, b])
-    assert (strict.O, strict.X) == (approx(2), 2)
+    assert (strict.O, strict.X) == (approx(2), 0)
     assert (lenient.O, lenient.X) == (approx(0), 0)  # not one ring's own overlap; no crossing
     assert strict.L == lenient.L
 
