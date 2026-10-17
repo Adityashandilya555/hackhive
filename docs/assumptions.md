@@ -87,7 +87,7 @@ The organisers' rules are slides 1-8 (`~/Desktop/HACKHIVE-inputs/`, summarised i
 
 | # | Assumption | Status | Where |
 |---|---|---|---|
-| 6.1 | X: a **T-touch** counts 1; each point where two cables **stop sharing a line** counts 1; a corner two cables **turn together** counts 0; another ring's cable through a **node or hub point** counts 1. Planned: **robust scoring**, where each design is scored under both readings and we submit the one whose worse J is lowest, with an app toggle that shows both. | D3, robust scoring not built yet | `checker.py` (#43) |
+| 6.1 | X: a **T-touch** counts 1; a point where two cables **stop sharing a line** counts 0 (slide 7's overlap example counts that stretch as O alone; it counted 1 until 2026-10-17); a corner two cables **turn together** counts 0; another ring's cable through a **node or hub point** counts 1. Planned: **robust scoring**, where each design is scored under both readings and we submit the one whose worse J is lowest, with an app toggle that shows both. | D3, robust scoring not built yet | `checker.py` (#43) |
 | 6.2 | O counts between **any** rings, not just within one: (k − 1) × length for k legs on the same line. The other reading goes into robust scoring (6.1). | D3 | `checker.py` |
 | 6.3 | B: +1 at a node when the incoming and outgoing directions differ, and at the hub closing the ring. A reversal counts once. The other reading goes into robust scoring (6.1). | D3 | `checker.py` |
 | 6.4 | Assigned-area gap = **largest − smallest** hub area (0 for one hub). | D9 | `metrics.area_gap` |

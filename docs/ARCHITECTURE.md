@@ -323,7 +323,7 @@ Module paths are under `src/hackhive/` unless noted. Owners are GitHub logins. E
   - **X:** points where two cables meet away from a node or hub, inside one ring or between rings, once per point.
   - **O:** (k − 1) × length on the same line; parallel lines don't count.
   - **B:** at vertices, nodes and the hub; a reversal counts once.
-  - Where the slides are ambiguous (T-touch, the divergence end of a shared stretch), it counts strictly (`docs/decision_conventions.md` §6).
+  - Where the slides are ambiguous (a T-touch), it counts strictly (`docs/decision_conventions.md` §6); where cables that shared a line part is no crossing, as slide 7's overlap example shows.
   - Used by the solver, the ranking, the batch and the UI, so our J is the organisers' J.
 - **In → out:** slide-8 `hubs[]` → `Metrics(H, L, X, O, B, J, area_gap)`.
 - **Algorithm:** O(S²) segment pairs for X; a line sweep for O.
