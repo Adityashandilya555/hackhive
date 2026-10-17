@@ -1,3 +1,15 @@
 [browser]
 # No usage statistics leave our laptops (Streamlit sends them by default).
 gatherUsageStats = false
+
+[theme]
+base = "dark"
+primaryColor = "#FFFFE3"
+backgroundColor = "#4A4A4A"
+secondaryBackgroundColor = "#3A3A3A"
+textColor = "#FFFFE3"
+font = "sans serif"
+# :green[] :orange[] :red[] text (the reviewer checklist, on the cream card): the kit's ink tokens
+greenTextColor = "#262626"
+orangeTextColor = "#5A5A5A"
+redTextColor = "#B4483A"

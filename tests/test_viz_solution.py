@@ -424,13 +424,13 @@ def test_best_tab_shows_the_overlay_and_the_per_hub_summary():
     assert [t.label for t in at.tabs][:2] == ["Best", "Plan"]
     best = at.tabs[0]
     assert len(best.image) == 1
-    (table,) = best.dataframe
+    (table,) = [d for d in at.main.dataframe if "Rooms" in d.value.columns]  # the rail's card
     df = table.value
     assert list(df["Hub"]) == ["H1"]
     assert df.loc[0, "Rooms"] == "R01, R02, R03 (living, bedroom, kitchen)"
     assert df.loc[0, "Nodes"] == 3 and df.loc[0, "Bends"] == 12
     assert df.loc[0, "L (m)"] == pytest.approx(24.331, abs=1e-3)
-    assert any("Reviewer checklist" in h.value for h in best.subheader)
+    assert any("Reviewer checklist" in h.value for h in at.main.subheader)  # the rail's card
 
 
 def test_best_tab_step_slider_walks_the_rings():
@@ -454,7 +454,8 @@ def test_best_tab_follows_the_solution_picker():
     at = _app("5088")
     at.sidebar.selectbox(key="solution").set_value("two hubs valid")
     at.run()
-    assert list(at.tabs[0].dataframe[0].value["Hub"]) == ["H1", "H2"]
+    tables = [d.value for d in at.main.dataframe if "Rooms" in d.value.columns]  # the rail's card
+    assert [list(t["Hub"]) for t in tables] == [["H1", "H2"]]
 
 
 def test_best_tab_says_why_when_solve_writes_no_design():
