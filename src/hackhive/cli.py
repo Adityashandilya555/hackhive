@@ -88,6 +88,8 @@ def _settings(args: argparse.Namespace) -> Constraints:
         change["zone_links_via_excluded"] = True
     if args.route_through_other_rooms:
         change["route_through_other_rooms"] = True
+    if args.interior_windows_as_doors:
+        change["interior_windows_as_doors"] = True
     return Constraints(**change)
 
 
@@ -181,6 +183,11 @@ def main(argv: list[str] | None = None) -> int:
         "--route-through-other-rooms",
         action="store_true",
         help="let cable cross bathrooms or other hubs' rooms (D7)",
+    )
+    w.add_argument(
+        "--interior-windows-as-doors",
+        action="store_true",
+        help="read windows on interior walls as doors, ResPlan's reading (D6, #31)",
     )
     s.set_defaults(run=_solve)
     k = sub.add_parser("check", help="check a submission against its plan (slide 3's rules)")
