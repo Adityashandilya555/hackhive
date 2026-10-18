@@ -1,0 +1,9 @@
+# Test: a field recorded as part of two different farms.
+# sf:partOfFarm is functional, and the two farms are declared different,
+# so HermiT must report the ontology as inconsistent.
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix sf:  <http://example.org/smartfarm#> .
+
+sf:HillsideFarm a sf:Farm ; sf:managedBy sf:KavyaRao .
+sf:HillsideFarm owl:differentFrom sf:NandiValleyFarm .
+sf:FieldB sf:partOfFarm sf:HillsideFarm .

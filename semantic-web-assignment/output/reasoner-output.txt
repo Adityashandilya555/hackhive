@@ -1,0 +1,153 @@
+
+=== base model ===
+Asserted triples (SOSA + case + extras): 791
+Consistency: consistent (HermiT)
+
+Inferred class memberships (new after reasoning):
+  sf:LowMoistureObservation     sf:ObsA1, sf:ObsB1, sf:ObsC1
+  sf:CriticallyDryObservation   sf:ObsC1
+  sf:FieldNeedingAttention      sf:FieldA, sf:FieldC
+  sf:HighWaterDemandField       sf:FieldA, sf:FieldD
+  sf:WaterEfficientField        sf:FieldC, sf:FieldD
+  sf:MonitoredField             sf:FieldA, sf:FieldB, sf:FieldC, sf:FieldD
+  sf:UnmonitoredField           -
+
+Inferred sosa:hasFeatureOfInterest links (property chain):
+  sf:ObsA1 -> sf:FieldA
+  sf:ObsB1 -> sf:FieldB
+  sf:ObsC1 -> sf:FieldC
+  sf:ObsD1 -> sf:FieldD
+
+Inferred subclass axioms:
+  sf:CriticallyDryObservation rdfs:subClassOf sf:LowMoistureObservation
+  sf:FieldNeedingAttention rdfs:subClassOf sf:Field
+  sf:HighWaterDemandField rdfs:subClassOf sf:Field
+  sf:LowMoistureObservation rdfs:subClassOf sf:SoilMoistureObservation
+  sf:MonitoredField rdfs:subClassOf sf:Field
+  sf:UnmonitoredField rdfs:subClassOf sf:Field
+  sf:WaterEfficientField rdfs:subClassOf sf:Field
+
+Competency questions (SPARQL over asserted + inferred graph):
+
+  CQ1 Which fields need irrigation attention, and from which reading?
+    sf:FieldA | sf:PaddyRice | 28.5
+    sf:FieldC | sf:Tomato | 14.2
+
+  CQ2 Which crop is grown in each field, on which soil type?
+    sf:FieldA | sf:PaddyRice | sf:BlackClay
+    sf:FieldB | sf:Ragi | sf:RedLoam
+    sf:FieldC | sf:Tomato | sf:SandyLoam
+    sf:FieldD | sf:Sugarcane | sf:RedLoam
+    sf:FieldE | sf:Ragi | sf:SandyLoam
+
+  CQ3 Which sensor made each soil-moisture reading, and which field does it describe?
+    sf:ObsA1 | sf:SM_A | sf:FieldA
+    sf:ObsB1 | sf:SM_B | sf:FieldB
+    sf:ObsC1 | sf:SM_C | sf:FieldC
+    sf:ObsD1 | sf:SM_D | sf:FieldD
+
+  CQ4 Which fields use water-efficient (drip) irrigation?
+    sf:FieldC | sf:DR1
+    sf:FieldD | sf:DR2
+
+  CQ5 What is the latest soil-moisture reading for each field?
+    sf:FieldA | 2026-10-12T06:00:00+05:30
+    sf:FieldB | 2026-10-12T06:00:00+05:30
+    sf:FieldC | 2026-10-12T06:00:00+05:30
+    sf:FieldD | 2026-10-12T06:00:00+05:30
+
+  CQ6 Which irrigation events were applied, with which system and how much water?
+    sf:IE1 | sf:FieldC | sf:DR1 | 1800.0
+
+  CQ7 Who manages the farm each field belongs to?
+    sf:FieldA | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldB | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldC | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldD | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldE | sf:NandiValleyFarm | sf:KavyaRao
+
+  CQ8 Which fields have no soil-moisture sensor on record (closed-world SPARQL check)?
+    sf:FieldE
+
+Wrote output/smartfarm-merged.owl and output/smartfarm-inferred.ttl
+
+=== inconsistent_two_farms.ttl ===
+Asserted triples (SOSA + case + extras): 795
+Consistency: INCONSISTENT (HermiT found a contradiction)
+--> inconsistent_two_farms.ttl: inconsistent (as expected)
+
+=== inconsistent_two_system_types.ttl ===
+Asserted triples (SOSA + case + extras): 792
+Consistency: INCONSISTENT (HermiT found a contradiction)
+--> inconsistent_two_system_types.ttl: inconsistent (as expected)
+
+=== owa_closure.ttl ===
+Asserted triples (SOSA + case + extras): 796
+Consistency: consistent (HermiT)
+
+Inferred class memberships (new after reasoning):
+  sf:LowMoistureObservation     sf:ObsA1, sf:ObsB1, sf:ObsC1
+  sf:CriticallyDryObservation   sf:ObsC1
+  sf:FieldNeedingAttention      sf:FieldA, sf:FieldC
+  sf:HighWaterDemandField       sf:FieldA, sf:FieldD
+  sf:WaterEfficientField        sf:FieldC, sf:FieldD
+  sf:MonitoredField             sf:FieldA, sf:FieldB, sf:FieldC, sf:FieldD
+  sf:UnmonitoredField           sf:FieldE
+
+Inferred sosa:hasFeatureOfInterest links (property chain):
+  sf:ObsA1 -> sf:FieldA
+  sf:ObsB1 -> sf:FieldB
+  sf:ObsC1 -> sf:FieldC
+  sf:ObsD1 -> sf:FieldD
+
+Inferred subclass axioms:
+  sf:CriticallyDryObservation rdfs:subClassOf sf:LowMoistureObservation
+  sf:FieldNeedingAttention rdfs:subClassOf sf:Field
+  sf:HighWaterDemandField rdfs:subClassOf sf:Field
+  sf:LowMoistureObservation rdfs:subClassOf sf:SoilMoistureObservation
+  sf:MonitoredField rdfs:subClassOf sf:Field
+  sf:UnmonitoredField rdfs:subClassOf sf:Field
+  sf:WaterEfficientField rdfs:subClassOf sf:Field
+
+Competency questions (SPARQL over asserted + inferred graph):
+
+  CQ1 Which fields need irrigation attention, and from which reading?
+    sf:FieldA | sf:PaddyRice | 28.5
+    sf:FieldC | sf:Tomato | 14.2
+
+  CQ2 Which crop is grown in each field, on which soil type?
+    sf:FieldA | sf:PaddyRice | sf:BlackClay
+    sf:FieldB | sf:Ragi | sf:RedLoam
+    sf:FieldC | sf:Tomato | sf:SandyLoam
+    sf:FieldD | sf:Sugarcane | sf:RedLoam
+    sf:FieldE | sf:Ragi | sf:SandyLoam
+
+  CQ3 Which sensor made each soil-moisture reading, and which field does it describe?
+    sf:ObsA1 | sf:SM_A | sf:FieldA
+    sf:ObsB1 | sf:SM_B | sf:FieldB
+    sf:ObsC1 | sf:SM_C | sf:FieldC
+    sf:ObsD1 | sf:SM_D | sf:FieldD
+
+  CQ4 Which fields use water-efficient (drip) irrigation?
+    sf:FieldC | sf:DR1
+    sf:FieldD | sf:DR2
+
+  CQ5 What is the latest soil-moisture reading for each field?
+    sf:FieldA | 2026-10-12T06:00:00+05:30
+    sf:FieldB | 2026-10-12T06:00:00+05:30
+    sf:FieldC | 2026-10-12T06:00:00+05:30
+    sf:FieldD | 2026-10-12T06:00:00+05:30
+
+  CQ6 Which irrigation events were applied, with which system and how much water?
+    sf:IE1 | sf:FieldC | sf:DR1 | 1800.0
+
+  CQ7 Who manages the farm each field belongs to?
+    sf:FieldA | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldB | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldC | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldD | sf:NandiValleyFarm | sf:KavyaRao
+    sf:FieldE | sf:NandiValleyFarm | sf:KavyaRao
+
+  CQ8 Which fields have no soil-moisture sensor on record (closed-world SPARQL check)?
+    sf:FieldE
+--> owa_closure.ttl: consistent (as expected)

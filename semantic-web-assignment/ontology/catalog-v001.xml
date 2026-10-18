@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Lets Protégé resolve owl:imports of SOSA from the local copy (no internet needed). -->
+<catalog prefer="public" xmlns="urn:oasis:names:tc:entity:xmlns:xml:catalog">
+    <uri id="sosa-local" name="http://www.w3.org/ns/sosa/" uri="sosa.ttl"/>
+    <uri id="sosa-local-nohash" name="http://www.w3.org/ns/sosa" uri="sosa.ttl"/>
+</catalog>

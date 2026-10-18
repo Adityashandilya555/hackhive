@@ -1,0 +1,1214 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rdf:RDF
+   xmlns:dcterms="http://purl.org/dc/terms/"
+   xmlns:foaf="http://xmlns.com/foaf/0.1/"
+   xmlns:owl="http://www.w3.org/2002/07/owl#"
+   xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+   xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+   xmlns:schema1="http://schema.org/"
+   xmlns:sf="http://example.org/smartfarm#"
+   xmlns:skos="http://www.w3.org/2004/02/skos/core#"
+   xmlns:sosa="http://www.w3.org/ns/sosa/"
+   xmlns:vann="http://purl.org/vocab/vann/"
+   xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Ragi">
+    <rdf:type rdf:resource="http://example.org/smartfarm#DroughtTolerantCrop"/>
+    <rdfs:label xml:lang="en">Ragi (finger millet)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb5">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://www.w3.org/ns/sosa/observedProperty"/>
+    <owl:hasValue rdf:resource="http://example.org/smartfarm#SoilMoisture"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Sample">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Sample</rdfs:label>
+    <skos:definition xml:lang="en">Feature which is intended to be representative of a FeatureOfInterest on which Observations may be made.</skos:definition>
+    <rdfs:comment xml:lang="en">Feature which is intended to be representative of a FeatureOfInterest on which Observations may be made.</rdfs:comment>
+    <rdfs:comment xml:lang="en">Physical samples are sometimes known as 'specimens'.</rdfs:comment>
+    <rdfs:comment xml:lang="en">A Sample is the result from an act of Sampling.</rdfs:comment>
+    <rdfs:comment xml:lang="en">Samples are artifacts of an observational strategy, and have no significant function outside of their role in the observation process. The characteristics of the samples themselves are of little interest, except perhaps to the manager of a sampling campaign.
+
+A Sample is intended to sample some FatureOfInterest, so there is an expectation of at least one isSampleOf property. However, in some cases the identity, and even the exact type, of the sampled feature may not be known when observations are made using the sampling features.</rdfs:comment>
+    <skos:example xml:lang="en">A 'station' is essentially an identifiable locality where a sensor system or Procedure may be deployed and an observation made. In the context of the observation model, it connotes the 'world in the vicinity of the station', so the observed properties relate to the physical medium at the station, and not to any physical artifact such as a mooring, buoy, benchmark, monument, well, etc.</skos:example>
+    <skos:example xml:lang="en">A statistical sample is often designed to be characteristic of an entire population, so that observations can be made regarding the sample that provide a good estimate of the properties of the population.</skos:example>
+    <skos:note xml:lang="en">A transient sample, such as a ships-track or flight-line, might be identified and described, but is unlikely to be revisited exactly.</skos:note>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldA">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">Field A</rdfs:label>
+    <sf:partOfFarm rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:grows rdf:resource="http://example.org/smartfarm#PaddyRice"/>
+    <sf:hasSoilType rdf:resource="http://example.org/smartfarm#BlackClay"/>
+    <sf:hasIrrigationSystem rdf:resource="http://example.org/smartfarm#FL1"/>
+    <sf:areaHectares rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">1.8</sf:areaHectares>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#airTemperatureC">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:subPropertyOf rdf:resource="http://www.w3.org/ns/sosa/hasSimpleResult"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#WeatherObservation"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="en">air temperature (°C)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#hasField">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <owl:inverseOf rdf:resource="http://example.org/smartfarm#partOfFarm"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Farm"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">has field</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isFeatureOfInterestOf">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is feature of interest of</rdfs:label>
+    <skos:definition xml:lang="en">A relation between a FeatureOfInterest and an Observation about it, an Actuation acting on it, or an act of Sampling that sampled it.</skos:definition>
+    <rdfs:comment xml:lang="en">A relation between a FeatureOfInterest and an Observation about it, an Actuation acting on it, or an act of Sampling that sampled it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/hasFeatureOfInterest"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isResultOf">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is result of</rdfs:label>
+    <skos:definition xml:lang="en">Relation linking a Result to the Observation or Actuation or act of Sampling that created or caused it.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation linking a Result to the Observation or Actuation or act of Sampling that created or caused it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Result"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/hasResult"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeBySensor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made by sensor</rdfs:label>
+    <skos:definition xml:lang="en">Relation between an Observation and the Sensor which made the Observation.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between an Observation and the Sensor which made the Observation.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeObservation"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/hasSimpleResult">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:label xml:lang="en">has simple result</rdfs:label>
+    <skos:definition xml:lang="en">The simple value of an Observation or Actuation or act of Sampling.</skos:definition>
+    <rdfs:comment xml:lang="en">The simple value of an Observation or Actuation or act of Sampling.</rdfs:comment>
+    <skos:example xml:lang="en">For instance, the values 23 or true.</skos:example>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb40">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb50"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb72">
+    <rdf:first rdf:resource="http://example.org/smartfarm#BlackClay"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb73"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Actuator">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Actuator</rdfs:label>
+    <skos:definition xml:lang="en">A device that is used by, or implements, an (Actuation) Procedure that changes the state of the world.</skos:definition>
+    <rdfs:comment xml:lang="en">A device that is used by, or implements, an (Actuation) Procedure that changes the state of the world.</rdfs:comment>
+    <skos:example xml:lang="en">A window actuator for automatic window control, i.e., opening or closing the window.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isActedOnBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is acted on by</rdfs:label>
+    <skos:definition xml:lang="en">Relation between an ActuatableProperty of a FeatureOfInterest and an Actuation changing its state.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between an ActuatableProperty of a FeatureOfInterest and an Actuation changing its state.</rdfs:comment>
+    <skos:example xml:lang="en">In the activity (Actuation) of automatically closing a window if the temperature in a room drops below 20 degrees Celsius, the property on which the Actuator acts upon is the state of the window as it changes from being open to being closed. </skos:example>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/ActuatableProperty"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/actsOnProperty"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb25">
+    <rdf:first rdf:resource="http://example.org/smartfarm#DroughtTolerantCrop"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeByActuator">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made by actuator</rdfs:label>
+    <skos:definition xml:lang="en">Relation linking an Actuation to the Actuator that made that Actuation.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation linking an Actuation to the Actuator that made that Actuation.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuator"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeActuation"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsW2">
+    <rdf:type rdf:resource="http://example.org/smartfarm#WeatherObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#WS1"/>
+    <sosa:observedProperty rdf:resource="http://example.org/smartfarm#Rainfall"/>
+    <sosa:hasFeatureOfInterest rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:rainfallMm rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.0</sf:rainfallMm>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T14:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/ObservableProperty">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Observable Property</rdfs:label>
+    <skos:definition xml:lang="en">An observable quality (property, characteristic) of a FeatureOfInterest.</skos:definition>
+    <rdfs:comment xml:lang="en">An observable quality (property, characteristic) of a FeatureOfInterest.</rdfs:comment>
+    <skos:example xml:lang="en">The height of a tree, the depth of a water body, or the temperature of a surface are examples of observable properties, while the value of a classic car is not (directly) observable but asserted.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#HighWaterDemandField">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb52"/>
+    <rdfs:label xml:lang="en">High water-demand field</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/2004/02/skos/core#definition">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#WeatherStation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <rdfs:label xml:lang="en">Weather station</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldD">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">Field D</rdfs:label>
+    <sf:partOfFarm rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:grows rdf:resource="http://example.org/smartfarm#Sugarcane"/>
+    <sf:hasSoilType rdf:resource="http://example.org/smartfarm#RedLoam"/>
+    <sf:hasIrrigationSystem rdf:resource="http://example.org/smartfarm#DR2"/>
+    <sf:areaHectares rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">3.1</sf:areaHectares>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#LowMoistureObservation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb26"/>
+    <rdfs:label xml:lang="en">Low-moisture observation</rdfs:label>
+    <rdfs:comment xml:lang="en">Volumetric soil moisture below 30 %: too dry for water-intensive crops.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsD1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#SM_D"/>
+    <sf:soilMoisturePercent rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">41.0</sf:soilMoisturePercent>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T06:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SP1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SprinklerIrrigation"/>
+    <rdfs:label xml:lang="en">Sprinkler line SP1</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb50">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb51"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Ontology"/>
+    <rdf:type rdf:resource="http://purl.org/vocommons/voaf#Vocabulary"/>
+    <dcterms:title xml:lang="en">Sensor, Observation, Sample, and Actuator (SOSA) Ontology</dcterms:title>
+    <dcterms:description xml:lang="en">This ontology is based on the SSN Ontology by the W3C Semantic Sensor Networks Incubator Group (SSN-XG), together with considerations from the W3C/OGC Spatial Data on the Web Working Group.</dcterms:description>
+    <dcterms:creator rdf:nodeID="n9c088bed9d514335bd33da5c78f350cdb1"/>
+    <dcterms:rights>Copyright 2017 W3C/OGC.</dcterms:rights>
+    <dcterms:license rdf:resource="http://www.w3.org/Consortium/Legal/2015/copyright-software-and-document"/>
+    <dcterms:license rdf:resource="http://www.opengeospatial.org/ogc/Software"/>
+    <dcterms:created rdf:datatype="http://www.w3.org/2001/XMLSchema#date">2017-04-17</dcterms:created>
+    <vann:preferredNamespacePrefix>sosa</vann:preferredNamespacePrefix>
+    <vann:preferredNamespaceUri>http://www.w3.org/ns/sosa/</vann:preferredNamespaceUri>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/hosts">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">hosts</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a Platform and a Sensor, Actuator, Sampler, or Platform, hosted or mounted on it.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a Platform and a Sensor, Actuator, Sampler, or Platform, hosted or mounted on it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Platform"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuator"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampler"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Platform"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isHostedBy"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SM_C">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+    <sf:serialNumber>SMS-1003</sf:serialNumber>
+    <sf:installedIn rdf:resource="http://example.org/smartfarm#FieldC"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/vocab/vann/preferredNamespacePrefix">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/actsOnProperty">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">acts on property</rdfs:label>
+    <skos:definition xml:lang="en">Relation between an Actuation and the property of a FeatureOfInterest it is acting upon.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between an Actuation and the property of a FeatureOfInterest it is acting upon.</rdfs:comment>
+    <skos:example xml:lang="en">In the activity (Actuation) of automatically closing a window if the temperature in a room drops below 20 degrees Celsius, the property on which the Actuator acts upon is the state of the window as it changes from being open to being closed. </skos:example>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/ActuatableProperty"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isActedOnBy"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsC1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#SM_C"/>
+    <sf:soilMoisturePercent rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">14.2</sf:soilMoisturePercent>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T06:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Tomato">
+    <rdf:type rdf:resource="http://example.org/smartfarm#ModerateWaterCrop"/>
+    <rdfs:label xml:lang="en">Tomato</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb26">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb31"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#DripIrrigation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+    <rdfs:label xml:lang="en">Drip irrigation</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Sampler">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Sampler</rdfs:label>
+    <skos:definition xml:lang="en">A device that is used by, or implements, a Sampling Procedure to create or transform one or more samples.</skos:definition>
+    <rdfs:comment xml:lang="en">A device that is used by, or implements, a Sampling Procedure to create or transform one or more samples.</rdfs:comment>
+    <skos:example xml:lang="en">A ball mill, diamond drill, hammer, hypodermic syringe and needle, image Sensor or a soil auger can all act as sampling devices (i.e., be Samplers). However, sometimes the distinction between the Sampler and the Sensor is not evident, as they are packaged as a unit. A Sampler need not be a physical device.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Result">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Result</rdfs:label>
+    <skos:definition xml:lang="en">The Result of an Observation, Actuation, or act of Sampling. To store an observation's simple result value one can use the hasSimpleResult property.</skos:definition>
+    <rdfs:comment xml:lang="en">The Result of an Observation, Actuation, or act of Sampling. To store an observation's simple result value one can use the hasSimpleResult property.</rdfs:comment>
+    <skos:example xml:lang="en">The value 20 as the height of a certain tree together with the unit, e.g., Meter.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/observedProperty">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">observed property</rdfs:label>
+    <skos:definition xml:lang="en">Relation linking an Observation to the property that was observed. The ObservableProperty should be a property of the FeatureOfInterest (linked by hasFeatureOfInterest) of this Observation.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation linking an Observation to the property that was observed. The ObservableProperty should be a property of the FeatureOfInterest (linked by hasFeatureOfInterest) of this Observation.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsB1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#SM_B"/>
+    <sf:soilMoisturePercent rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">26.0</sf:soilMoisturePercent>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T06:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#managedBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Farm"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#FarmManager"/>
+    <rdfs:label xml:lang="en">managed by</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb55">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb53"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SM_A">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+    <sf:serialNumber>SMS-1001</sf:serialNumber>
+    <sf:installedIn rdf:resource="http://example.org/smartfarm#FieldA"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SandyLoam">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilType"/>
+    <rdfs:label xml:lang="en">Sandy loam</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Crop">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Crop</rdfs:label>
+    <rdfs:comment xml:lang="en">A kind of crop grown on a field (e.g. paddy rice), not an individual plant.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#IE1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#IrrigationEvent"/>
+    <rdfs:label xml:lang="en">Irrigation of Field C after critical reading</rdfs:label>
+    <sf:irrigates rdf:resource="http://example.org/smartfarm#FieldC"/>
+    <sosa:madeByActuator rdf:resource="http://example.org/smartfarm#DR1"/>
+    <sf:waterVolumeLitres rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">1800.0</sf:waterVolumeLitres>
+    <sf:startTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T07:15:00+05:30</sf:startTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#RedLoam">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilType"/>
+    <rdfs:label xml:lang="en">Red loam</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/vocommons/voaf#Vocabulary">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/ActuatableProperty">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Actuatable Property</rdfs:label>
+    <skos:definition xml:lang="en">An actuatable quality (property, characteristic) of a FeatureOfInterest.</skos:definition>
+    <rdfs:comment xml:lang="en">An actuatable quality (property, characteristic) of a FeatureOfInterest.</rdfs:comment>
+    <skos:example xml:lang="en">A window actuator acts by changing the state between a frame and a window. The ability of the window to be opened and closed is its ActuatableProperty.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SoilMoistureObservation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb5"/>
+    <rdfs:label xml:lang="en">Soil-moisture observation</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb45">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://www.w3.org/ns/sosa/isFeatureOfInterestOf"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#LowMoistureObservation"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldNeedingAttention">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb40"/>
+    <rdfs:label xml:lang="en">Field needing attention</rdfs:label>
+    <rdfs:comment xml:lang="en">A field with a critically dry reading, or a water-intensive crop with a low-moisture reading.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb63">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb61"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/observes">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">observes</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a Sensor and an ObservableProperty that it is capable of sensing.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a Sensor and an ObservableProperty that it is capable of sensing.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isObservedBy"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb67">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb68"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#rainfallMm">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:subPropertyOf rdf:resource="http://www.w3.org/ns/sosa/hasSimpleResult"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#WeatherObservation"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="en">rainfall (mm)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/hasFeatureOfInterest">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">has feature of interest</rdfs:label>
+    <skos:definition xml:lang="en">A relation between an Observation and the entity whose quality was observed, or between an Actuation and the entity whose property was modified, or between an act of Sampling and the entity that was sampled.</skos:definition>
+    <rdfs:comment xml:lang="en">A relation between an Observation and the entity whose quality was observed, or between an Actuation and the entity whose property was modified, or between an act of Sampling and the entity that was sampled.</rdfs:comment>
+    <skos:example xml:lang="en">For example, in an Observation of the weight of a person, the FeatureOfInterest is the person and the property is its weight.</skos:example>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isFeatureOfInterestOf"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+    <owl:propertyChainAxiom rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb69"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Actuation">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Actuation</rdfs:label>
+    <skos:definition xml:lang="en">An Actuation carries out an (Actuation) Procedure to change the state of the world using an Actuator.</skos:definition>
+    <rdfs:comment xml:lang="en">An Actuation carries out an (Actuation) Procedure to change the state of the world using an Actuator.</rdfs:comment>
+    <skos:example xml:lang="en">The activity of automatically closing a window if the temperature in a room drops below 20 degree Celsius. The activity is the Actuation and the device that closes the window is the Actuator. The Procedure is the rule, plan, or specification that defines the conditions that triggers the Actuation, here a drop in temperature. </skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb12">
+    <rdf:first rdf:resource="http://example.org/smartfarm#SoilType"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb13"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldB">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">Field B</rdfs:label>
+    <sf:partOfFarm rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:grows rdf:resource="http://example.org/smartfarm#Ragi"/>
+    <sf:hasSoilType rdf:resource="http://example.org/smartfarm#RedLoam"/>
+    <sf:hasIrrigationSystem rdf:resource="http://example.org/smartfarm#SP1"/>
+    <sf:areaHectares rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">2.4</sf:areaHectares>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SoilType">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Soil type</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeBySampler">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made by sampler</rdfs:label>
+    <skos:definition xml:lang="en">Relation linking an act of Sampling to the Sampler (sampling device or entity) that made it.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation linking an act of Sampling to the Sampler (sampling device or entity) that made it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampler"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeSampling"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldC">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">Field C</rdfs:label>
+    <sf:partOfFarm rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:grows rdf:resource="http://example.org/smartfarm#Tomato"/>
+    <sf:hasSoilType rdf:resource="http://example.org/smartfarm#SandyLoam"/>
+    <sf:hasIrrigationSystem rdf:resource="http://example.org/smartfarm#DR1"/>
+    <sf:areaHectares rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">0.9</sf:areaHectares>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isHostedBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is hosted by</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a Sensor, Actuator, Sampler, or Platform, and the Platform that it is mounted on or hosted by.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a Sensor, Actuator, Sampler, or Platform, and the Platform that it is mounted on or hosted by.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuator"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampler"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Platform"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Platform"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/hosts"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeObservation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made observation</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a Sensor and an Observation made by the Sensor.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a Sensor and an Observation made by the Sensor.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeBySensor"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb71">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDifferent"/>
+    <owl:distinctMembers rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb72"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Sampling">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Sampling</rdfs:label>
+    <skos:definition xml:lang="en">An act of Sampling carries out a sampling Procedure to create or transform one or more samples.</skos:definition>
+    <rdfs:comment xml:lang="en">An act of Sampling carries out a sampling Procedure to create or transform one or more samples.</rdfs:comment>
+    <skos:example xml:lang="en">Crushing a rock sample in a ball mill.</skos:example>
+    <skos:example xml:lang="en">Digging a pit through a soil sequence.</skos:example>
+    <skos:example xml:lang="en">Dividing a field site into quadrants.</skos:example>
+    <skos:example xml:lang="en">Drawing blood from a patient.</skos:example>
+    <skos:example xml:lang="en">Drilling an observation well.</skos:example>
+    <skos:example xml:lang="en">Establishing a station for environmental monitoring.</skos:example>
+    <skos:example xml:lang="en">Registering an image of the landscape.</skos:example>
+    <skos:example xml:lang="en">Sieving a powder to separate the subset finer than 100-mesh.</skos:example>
+    <skos:example xml:lang="en">Selecting a subset of a population.</skos:example>
+    <skos:example xml:lang="en">Splitting a piece of drill-core to create two new samples.</skos:example>
+    <skos:example xml:lang="en">Taking a diamond-drill core from a rock outcrop.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/usedProcedure">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">used procedure</rdfs:label>
+    <skos:definition xml:lang="en">A relation to link to a re-usable Procedure used in making an Observation, an Actuation, or a Sample, typically through a Sensor, Actuator or Sampler.</skos:definition>
+    <rdfs:comment xml:lang="en">A relation to link to a re-usable Procedure used in making an Observation, an Actuation, or a Sample, typically through a Sensor, Actuator or Sampler.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Procedure"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb61">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#hasSensor"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb52">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb54"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/hasResult">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">has result</rdfs:label>
+    <skos:definition xml:lang="en">Relation linking an Observation or Actuation or act of Sampling and a Result or Sample.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation linking an Observation or Actuation or act of Sampling and a Result or Sample.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Result"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isResultOf"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb69">
+    <rdf:first rdf:resource="http://www.w3.org/ns/sosa/madeBySensor"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb70"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb74">
+    <rdf:first rdf:resource="http://example.org/smartfarm#SandyLoam"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Sugarcane">
+    <rdf:type rdf:resource="http://example.org/smartfarm#WaterIntensiveCrop"/>
+    <rdfs:label xml:lang="en">Sugarcane</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb66">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#hasSensor"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#installedIn">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">installed in</rdfs:label>
+    <rdfs:comment xml:lang="en">Functional: a sensor is installed in one field at a time (current deployment only).</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#irrigates">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#IrrigationEvent"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">irrigates</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/description">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Sensor">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Sensor</rdfs:label>
+    <skos:definition xml:lang="en">Device, agent (including humans), or software (simulation) involved in, or implementing, a Procedure. Sensors respond to a stimulus, e.g., a change in the environment, or input data composed from the results of prior Observations, and generate a Result. Sensors can be hosted by Platforms.</skos:definition>
+    <rdfs:comment xml:lang="en">Device, agent (including humans), or software (simulation) involved in, or implementing, a Procedure. Sensors respond to a stimulus, e.g., a change in the environment, or input data composed from the results of prior Observations, and generate a Result. Sensors can be hosted by Platforms.</rdfs:comment>
+    <skos:example xml:lang="en">Accelerometers, gyroscopes, barometers, magnetometers, and so forth are Sensors that are typically mounted on a modern smart phone (which acts as Platform). Other examples of sensors include the human eyes.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#CriticallyDryObservation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb33"/>
+    <rdfs:label xml:lang="en">Critically dry observation</rdfs:label>
+    <rdfs:comment xml:lang="en">Volumetric soil moisture below 18 %: too dry for any crop in scope.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#IrrigationEvent">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb6"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb7"/>
+    <rdfs:label xml:lang="en">Irrigation event</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb34">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#soilMoisturePercent"/>
+    <owl:someValuesFrom rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb35"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Rainfall">
+    <rdf:type rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <rdfs:label xml:lang="en">Rainfall</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb37">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb36"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/FeatureOfInterest">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Feature Of Interest</rdfs:label>
+    <skos:definition xml:lang="en">The thing whose property is being estimated or calculated in the course of an Observation to arrive at a Result or whose property is being manipulated by an Actuator, or which is being sampled or transformed in an act of Sampling.</skos:definition>
+    <rdfs:comment xml:lang="en">The thing whose property is being estimated or calculated in the course of an Observation to arrive at a Result or whose property is being manipulated by an Actuator, or which is being sampled or transformed in an act of Sampling.</rdfs:comment>
+    <skos:example xml:lang="en">When measuring the height of a tree, the height is the observed ObservableProperty, 20m may be the Result of the Observation, and the tree is the FeatureOfInterest. A window is a FeatureOfInterest for an automatic window control Actuator.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#serialNumber">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+    <rdfs:label xml:lang="en">serial number</rdfs:label>
+    <rdfs:comment xml:lang="en">Functional: a device carries one serial number.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb73">
+    <rdf:first rdf:resource="http://example.org/smartfarm#RedLoam"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb74"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb70">
+    <rdf:first rdf:resource="http://example.org/smartfarm#installedIn"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Field">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb2"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb3"/>
+    <rdfs:label xml:lang="en">Field</rdfs:label>
+    <rdfs:comment xml:lang="en">A managed plot of land inside one farm. It is the feature of interest of soil-moisture observations.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeSampling">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made sampling</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a Sampler (sampling device or entity) and the Sampling act it performed.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a Sampler (sampling device or entity) and the Sampling act it performed.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampler"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeBySampler"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb2">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#partOfFarm"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#Farm"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#hasIrrigationSystem">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+    <rdfs:label xml:lang="en">has irrigation system</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb27">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#soilMoisturePercent"/>
+    <owl:someValuesFrom rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb28"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FieldE">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:label xml:lang="en">Field E (newly leased)</rdfs:label>
+    <sf:partOfFarm rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:grows rdf:resource="http://example.org/smartfarm#Ragi"/>
+    <sf:hasSoilType rdf:resource="http://example.org/smartfarm#SandyLoam"/>
+    <sf:areaHectares rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">1.2</sf:areaHectares>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isObservedBy">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is observed by</rdfs:label>
+    <skos:definition xml:lang="en">Relation between an ObservableProperty and the Sensor able to observe it.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between an ObservableProperty and the Sensor able to observe it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/observes"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb13">
+    <rdf:first rdf:resource="http://example.org/smartfarm#FarmManager"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb14"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsW1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#WeatherObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#WS1"/>
+    <sosa:observedProperty rdf:resource="http://example.org/smartfarm#AirTemperature"/>
+    <sosa:hasFeatureOfInterest rdf:resource="http://example.org/smartfarm#NandiValleyFarm"/>
+    <sf:airTemperatureC rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">31.4</sf:airTemperatureC>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T14:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/hasSample">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">has sample</rdfs:label>
+    <skos:definition xml:lang="en">Relation between a FeatureOfInterest and the Sample used to represent it.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between a FeatureOfInterest and the Sample used to represent it.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/isSampleOf"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#startTime">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#IrrigationEvent"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#dateTime"/>
+    <rdfs:label xml:lang="en">start time</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb23">
+    <rdf:first rdf:resource="http://example.org/smartfarm#WaterIntensiveCrop"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb24"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb14">
+    <rdf:first rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb15"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb64">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb67"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#PaddyRice">
+    <rdf:type rdf:resource="http://example.org/smartfarm#WaterIntensiveCrop"/>
+    <rdfs:label xml:lang="en">Paddy rice</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb46">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb44"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb47"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb39">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb34"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb4">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://www.w3.org/ns/sosa/observes"/>
+    <owl:hasValue rdf:resource="http://example.org/smartfarm#SoilMoisture"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Observation">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Observation</rdfs:label>
+    <skos:definition xml:lang="en">Act of carrying out an (Observation) Procedure to estimate or calculate a value of a property of a FeatureOfInterest. Links to a Sensor to describe what made the Observation and how; links to an ObservableProperty to describe what the result is an estimate of, and to a FeatureOfInterest to detail what that property was associated with.</skos:definition>
+    <rdfs:comment xml:lang="en">Act of carrying out an (Observation) Procedure to estimate or calculate a value of a property of a FeatureOfInterest. Links to a Sensor to describe what made the Observation and how; links to an ObservableProperty to describe what the result is an estimate of, and to a FeatureOfInterest to detail what that property was associated with.</rdfs:comment>
+    <skos:example xml:lang="en">The activity of estimating the intensity of an Earthquake using the Mercalli intensity scale is an Observation as is measuring the moment magnitude, i.e., the energy released by said earthquake.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SM_B">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+    <sf:serialNumber>SMS-1002</sf:serialNumber>
+    <sf:installedIn rdf:resource="http://example.org/smartfarm#FieldB"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb21">
+    <rdf:first rdf:resource="http://example.org/smartfarm#FloodIrrigation"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/madeActuation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">made actuation</rdfs:label>
+    <skos:definition xml:lang="en">Relation between an Actuator and the Actuation it has made.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation between an Actuator and the Actuation it has made.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuator"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/madeByActuator"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SM_D">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureSensor"/>
+    <sf:serialNumber>SMS-1004</sf:serialNumber>
+    <sf:installedIn rdf:resource="http://example.org/smartfarm#FieldD"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ModerateWaterCrop">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#Crop"/>
+    <rdfs:label xml:lang="en">Moderate-water crop</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb33">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb38"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#IrrigationSystem">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Actuator"/>
+    <rdfs:label xml:lang="en">Irrigation system</rdfs:label>
+    <rdfs:comment xml:lang="en">Equipment that applies water to a field. Modelled as a SOSA actuator.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/phenomenonTime">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">phenomenon time</rdfs:label>
+    <skos:definition xml:lang="en">The time that the Result of an Observation, Actuation or Sampling applies to the FeatureOfInterest. Not necessarily the same as the resultTime. May be an Interval or an Instant, or some other compound TemporalEntity.</skos:definition>
+    <rdfs:comment xml:lang="en">The time that the Result of an Observation, Actuation or Sampling applies to the FeatureOfInterest. Not necessarily the same as the resultTime. May be an Interval or an Instant, or some other compound TemporalEntity.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/2006/time#TemporalEntity"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb9">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Farm"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb10"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb15">
+    <rdf:first rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb16"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb35">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Datatype"/>
+    <owl:onDatatype rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <owl:withRestrictions rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb37"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb56">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb58"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb11">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Crop"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb12"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb54">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb55"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#hasSoilType">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#SoilType"/>
+    <rdfs:label xml:lang="en">has soil type</rdfs:label>
+    <rdfs:comment xml:lang="en">Functional: one dominant soil type is recorded per field.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FloodIrrigation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+    <rdfs:label xml:lang="en">Flood irrigation</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/2004/02/skos/core#example">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb7">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://www.w3.org/ns/sosa/madeByActuator"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/isSampleOf">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:label xml:lang="en">is sample of</rdfs:label>
+    <skos:definition xml:lang="en">Relation from a Sample to the FeatureOfInterest that it is intended to be representative of.</skos:definition>
+    <rdfs:comment xml:lang="en">Relation from a Sample to the FeatureOfInterest that it is intended to be representative of.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sample"/>
+    <schema1:rangeIncludes rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <owl:inverseOf rdf:resource="http://www.w3.org/ns/sosa/hasSample"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb59">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb57"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9c088bed9d514335bd33da5c78f350cdb1">
+    <rdf:type rdf:resource="http://xmlns.com/foaf/0.1/Agent"/>
+    <foaf:name xml:lang="en">W3C/OGC Spatial Data on the Web Working Group</foaf:name>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb32">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb27"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb41">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:unionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb48"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#MonitoredField">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb60"/>
+    <rdfs:label xml:lang="en">Monitored field</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#soilMoisturePercent">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:subPropertyOf rdf:resource="http://www.w3.org/ns/sosa/hasSimpleResult"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="en">soil moisture (%)</rdfs:label>
+    <rdfs:comment xml:lang="en">Volumetric water content in percent. Functional: one value per observation.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FarmManager">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Farm manager</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb16">
+    <rdf:first rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb17"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#DR2">
+    <rdf:type rdf:resource="http://example.org/smartfarm#DripIrrigation"/>
+    <rdfs:label xml:lang="en">Drip line DR2</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb49">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb43"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#DroughtTolerantCrop">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#Crop"/>
+    <rdfs:label xml:lang="en">Drought-tolerant crop</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Ontology"/>
+    <rdfs:label xml:lang="en">Smart Farming and Irrigation Decisions</rdfs:label>
+    <rdfs:comment xml:lang="en">Case 1A: classify fields that need irrigation attention from soil-moisture observations, crops and irrigation equipment.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://xmlns.com/foaf/0.1/name">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#ObsA1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <sosa:madeBySensor rdf:resource="http://example.org/smartfarm#SM_A"/>
+    <sf:soilMoisturePercent rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">28.5</sf:soilMoisturePercent>
+    <sosa:resultTime rdf:datatype="http://www.w3.org/2001/XMLSchema#dateTime">2026-10-12T06:00:00+05:30</sosa:resultTime>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb17">
+    <rdf:first rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#AirTemperature">
+    <rdf:type rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <rdfs:label xml:lang="en">Air temperature</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb29">
+    <xsd:maxExclusive rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">30.0</xsd:maxExclusive>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb58">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb59"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SoilMoistureSensor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Sensor"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb4"/>
+    <rdfs:label xml:lang="en">Soil-moisture sensor</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/resultTime">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:label xml:lang="en">result time</rdfs:label>
+    <skos:definition xml:lang="en">The result time is the instant of time when the Observation, Actuation or Sampling activity was completed.</skos:definition>
+    <rdfs:comment xml:lang="en">The result time is the instant of time when the Observation, Actuation or Sampling activity was completed.</rdfs:comment>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Actuation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <schema1:domainIncludes rdf:resource="http://www.w3.org/ns/sosa/Sampling"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#dateTime"/>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#hasSensor">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <owl:inverseOf rdf:resource="http://example.org/smartfarm#installedIn"/>
+    <rdfs:label xml:lang="en">has sensor</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/created">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#KavyaRao">
+    <rdf:type rdf:resource="http://example.org/smartfarm#FarmManager"/>
+    <rdfs:label xml:lang="en">Kavya Rao (fictional)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb42">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://www.w3.org/ns/sosa/isFeatureOfInterestOf"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#CriticallyDryObservation"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Procedure">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Procedure</rdfs:label>
+    <skos:definition xml:lang="en">A workflow, protocol, plan, algorithm, or computational method specifying how to make an Observation, create a Sample, or make a change to the state of the world (via an Actuator). A Procedure is re-usable, and might be involved in many Observations, Samplings, or Actuations. It explains the steps to be carried out to arrive at reproducible results.</skos:definition>
+    <rdfs:comment xml:lang="en">A workflow, protocol, plan, algorithm, or computational method specifying how to make an Observation, create a Sample, or make a change to the state of the world (via an Actuator). A Procedure is re-usable, and might be involved in many Observations, Samplings, or Actuations. It explains the steps to be carried out to arrive at reproducible results.</rdfs:comment>
+    <skos:example xml:lang="en">The measured wind speed differs depending on the height of the sensor above the surface, e.g., due to friction. Consequently, procedures for measuring wind speed define a standard height for anemometers above ground, typically 10m for meteorological measures and 2m in Agrometeorology. This definition of height, sensor placement, and so forth are defined by the Procedure.</skos:example>
+    <skos:note xml:lang="en">Many observations may be created via the same Procedure, the same way as many tables are assembled using the same instructions (as information objects, not their concrete realization).</skos:note>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#DR1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#DripIrrigation"/>
+    <rdfs:label xml:lang="en">Drip line DR1</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb57">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#hasIrrigationSystem"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#DripIrrigation"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#FL1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#FloodIrrigation"/>
+    <rdfs:label xml:lang="en">Flood channel FL1</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb62">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb63"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#partOfFarm">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#Farm"/>
+    <rdfs:label xml:lang="en">part of farm</rdfs:label>
+    <rdfs:comment xml:lang="en">Functional: in this scope a field belongs to exactly one farm.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/ns/sosa/Platform">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Class"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:label xml:lang="en">Platform</rdfs:label>
+    <skos:definition xml:lang="en">A Platform is an entity that hosts other entities, particularly Sensors, Actuators, Samplers, and other Platforms.</skos:definition>
+    <rdfs:comment xml:lang="en">A Platform is an entity that hosts other entities, particularly Sensors, Actuators, Samplers, and other Platforms.</rdfs:comment>
+    <skos:example xml:lang="en">A post, buoy, vehicle, ship, aircraft, satellite, cell-phone, human or animal may act as platforms for (technical or biological) sensors or actuators.</skos:example>
+    <rdfs:isDefinedBy rdf:resource="http://www.w3.org/ns/sosa/"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#waterVolumeLitres">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#IrrigationEvent"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="en">water volume (L)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://xmlns.com/foaf/0.1/Agent">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SoilMoisture">
+    <rdf:type rdf:resource="http://www.w3.org/ns/sosa/ObservableProperty"/>
+    <rdfs:label xml:lang="en">Soil moisture</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#UnmonitoredField">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb64"/>
+    <rdfs:label xml:lang="en">Unmonitored field</rdfs:label>
+    <rdfs:comment xml:lang="en">Used to show the open-world assumption: a field with no recorded sensor is NOT inferred to be unmonitored unless that is stated.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb20">
+    <rdf:first rdf:resource="http://example.org/smartfarm#SprinklerIrrigation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb21"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#WaterEfficientField">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:equivalentClass rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb56"/>
+    <rdfs:label xml:lang="en">Water-efficient field</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#WeatherObservation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/Observation"/>
+    <rdfs:label xml:lang="en">Weather observation</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/title">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb28">
+    <rdf:type rdf:resource="http://www.w3.org/2000/01/rdf-schema#Datatype"/>
+    <owl:onDatatype rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <owl:withRestrictions rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb30"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#BlackClay">
+    <rdf:type rdf:resource="http://example.org/smartfarm#SoilType"/>
+    <rdfs:label xml:lang="en">Black clay</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#Farm">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/sosa/FeatureOfInterest"/>
+    <rdfs:subClassOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb1"/>
+    <rdfs:label xml:lang="en">Farm</rdfs:label>
+    <rdfs:comment xml:lang="en">An agricultural holding made of one or more fields. It is a feature of interest for weather observations.</rdfs:comment>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/creator">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#WaterIntensiveCrop">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#Crop"/>
+    <rdfs:label xml:lang="en">Water-intensive crop</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb68">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb65"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb3">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#hasSoilType"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#SoilType"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#grows">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#ObjectProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:range rdf:resource="http://example.org/smartfarm#Crop"/>
+    <rdfs:label xml:lang="en">grows</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/2004/02/skos/core#note">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#areaHectares">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#DatatypeProperty"/>
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#FunctionalProperty"/>
+    <rdfs:domain rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#decimal"/>
+    <rdfs:label xml:lang="en">area (ha)</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb24">
+    <rdf:first rdf:resource="http://example.org/smartfarm#ModerateWaterCrop"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb25"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://schema.org/rangeIncludes">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb19">
+    <rdf:first rdf:resource="http://example.org/smartfarm#DripIrrigation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb20"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb65">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:complementOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb66"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#WS1">
+    <rdf:type rdf:resource="http://example.org/smartfarm#WeatherStation"/>
+    <sf:serialNumber>WX-77</sf:serialNumber>
+    <sosa:observes rdf:resource="http://example.org/smartfarm#AirTemperature"/>
+    <sosa:observes rdf:resource="http://example.org/smartfarm#Rainfall"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb6">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#irrigates"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#Field"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/rights">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb1">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#managedBy"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#FarmManager"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/dc/terms/license">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb30">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb29"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb44">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#grows"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#WaterIntensiveCrop"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb22">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+    <owl:members rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb23"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb38">
+    <rdf:first rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb39"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb53">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Restriction"/>
+    <owl:onProperty rdf:resource="http://example.org/smartfarm#grows"/>
+    <owl:someValuesFrom rdf:resource="http://example.org/smartfarm#WaterIntensiveCrop"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb10">
+    <rdf:first rdf:resource="http://example.org/smartfarm#Field"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb11"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#SprinklerIrrigation">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <rdfs:subClassOf rdf:resource="http://example.org/smartfarm#IrrigationSystem"/>
+    <rdfs:label xml:lang="en">Sprinkler irrigation</rdfs:label>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb43">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb46"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://purl.org/vocab/vann/preferredNamespaceUri">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb18">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+    <owl:members rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb19"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb47">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb45"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://example.org/smartfarm#NandiValleyFarm">
+    <rdf:type rdf:resource="http://example.org/smartfarm#Farm"/>
+    <rdfs:label xml:lang="en">Nandi Valley Farm</rdfs:label>
+    <sf:managedBy rdf:resource="http://example.org/smartfarm#KavyaRao"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb8">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AllDisjointClasses"/>
+    <owl:members rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb9"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://schema.org/domainIncludes">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#AnnotationProperty"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://www.w3.org/2006/time#TemporalEntity">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb60">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Class"/>
+    <owl:intersectionOf rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb62"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb48">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb42"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb49"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb51">
+    <rdf:first rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb41"/>
+    <rdf:rest rdf:resource="http://www.w3.org/1999/02/22-rdf-syntax-ns#nil"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb31">
+    <rdf:first rdf:resource="http://example.org/smartfarm#SoilMoistureObservation"/>
+    <rdf:rest rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb32"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="n9066ed71e89a49a2a9396821cf3b29dcb36">
+    <xsd:maxExclusive rdf:datatype="http://www.w3.org/2001/XMLSchema#decimal">18.0</xsd:maxExclusive>
+  </rdf:Description>
+</rdf:RDF>

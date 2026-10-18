@@ -1,0 +1,12 @@
+# Open-world test: in the base model Field E has no recorded sensor, yet the
+# reasoner does NOT classify it as sf:UnmonitoredField (absence of a fact is
+# not a negative fact). Stating explicitly that Field E has no soil-moisture
+# sensor closes the world for that field, and it is then inferred unmonitored.
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sf:  <http://example.org/smartfarm#> .
+
+sf:FieldE a [ a owl:Restriction ;
+              owl:onProperty sf:hasSensor ;
+              owl:maxQualifiedCardinality "0"^^xsd:nonNegativeInteger ;
+              owl:onClass sf:SoilMoistureSensor ] .
