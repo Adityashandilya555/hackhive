@@ -1,0 +1,471 @@
+# ---------------------------------------------------------------------------
+# Smart Farming and Irrigation Decisions ontology (Case 1A, CSE4007)
+#
+# Reuses the W3C/OGC SOSA ontology (ontology/sosa.ttl) for sensors,
+# observations and actuations, and adds only the farm-specific layer:
+# farms, fields, crops, soil types, irrigation systems and the defined
+# classes the reasoner uses to flag fields that need attention.
+#
+# All farms, people, devices and readings below are fictional.
+# ---------------------------------------------------------------------------
+
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix sosa: <http://www.w3.org/ns/sosa/> .
+@prefix sf:   <http://example.org/smartfarm#> .
+
+<http://example.org/smartfarm>
+    a owl:Ontology ;
+    owl:imports <http://www.w3.org/ns/sosa/> ;
+    rdfs:label "Smart Farming and Irrigation Decisions"@en ;
+    rdfs:comment "Case 1A: classify fields that need irrigation attention from soil-moisture observations, crops and irrigation equipment."@en .
+
+# ===========================================================================
+# Classes
+# ===========================================================================
+
+sf:Farm a owl:Class ;
+    rdfs:subClassOf sosa:FeatureOfInterest ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sf:managedBy ;
+                      owl:someValuesFrom sf:FarmManager ] ;
+    rdfs:label "Farm"@en ;
+    rdfs:comment "An agricultural holding made of one or more fields. It is a feature of interest for weather observations."@en .
+
+sf:Field a owl:Class ;
+    rdfs:subClassOf sosa:FeatureOfInterest ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sf:partOfFarm ;
+                      owl:someValuesFrom sf:Farm ] ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sf:hasSoilType ;
+                      owl:someValuesFrom sf:SoilType ] ;
+    rdfs:label "Field"@en ;
+    rdfs:comment "A managed plot of land inside one farm. It is the feature of interest of soil-moisture observations."@en .
+
+sf:Crop a owl:Class ;
+    rdfs:label "Crop"@en ;
+    rdfs:comment "A kind of crop grown on a field (e.g. paddy rice), not an individual plant."@en .
+
+sf:WaterIntensiveCrop a owl:Class ;
+    rdfs:subClassOf sf:Crop ;
+    rdfs:label "Water-intensive crop"@en .
+
+sf:ModerateWaterCrop a owl:Class ;
+    rdfs:subClassOf sf:Crop ;
+    rdfs:label "Moderate-water crop"@en .
+
+sf:DroughtTolerantCrop a owl:Class ;
+    rdfs:subClassOf sf:Crop ;
+    rdfs:label "Drought-tolerant crop"@en .
+
+sf:SoilType a owl:Class ;
+    rdfs:label "Soil type"@en .
+
+sf:IrrigationSystem a owl:Class ;
+    rdfs:subClassOf sosa:Actuator ;
+    rdfs:label "Irrigation system"@en ;
+    rdfs:comment "Equipment that applies water to a field. Modelled as a SOSA actuator."@en .
+
+sf:DripIrrigation a owl:Class ;
+    rdfs:subClassOf sf:IrrigationSystem ;
+    rdfs:label "Drip irrigation"@en .
+
+sf:SprinklerIrrigation a owl:Class ;
+    rdfs:subClassOf sf:IrrigationSystem ;
+    rdfs:label "Sprinkler irrigation"@en .
+
+sf:FloodIrrigation a owl:Class ;
+    rdfs:subClassOf sf:IrrigationSystem ;
+    rdfs:label "Flood irrigation"@en .
+
+sf:SoilMoistureSensor a owl:Class ;
+    rdfs:subClassOf sosa:Sensor ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sosa:observes ;
+                      owl:hasValue sf:SoilMoisture ] ;
+    rdfs:label "Soil-moisture sensor"@en .
+
+sf:WeatherStation a owl:Class ;
+    rdfs:subClassOf sosa:Sensor ;
+    rdfs:label "Weather station"@en .
+
+sf:SoilMoistureObservation a owl:Class ;
+    rdfs:subClassOf sosa:Observation ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sosa:observedProperty ;
+                      owl:hasValue sf:SoilMoisture ] ;
+    rdfs:label "Soil-moisture observation"@en .
+
+sf:WeatherObservation a owl:Class ;
+    rdfs:subClassOf sosa:Observation ;
+    rdfs:label "Weather observation"@en .
+
+sf:IrrigationEvent a owl:Class ;
+    rdfs:subClassOf sosa:Actuation ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sf:irrigates ;
+                      owl:someValuesFrom sf:Field ] ;
+    rdfs:subClassOf [ a owl:Restriction ;
+                      owl:onProperty sosa:madeByActuator ;
+                      owl:someValuesFrom sf:IrrigationSystem ] ;
+    rdfs:label "Irrigation event"@en .
+
+sf:FarmManager a owl:Class ;
+    rdfs:label "Farm manager"@en .
+
+# --- Disjointness ----------------------------------------------------------
+
+[] a owl:AllDisjointClasses ;
+   owl:members ( sf:Farm sf:Field sf:Crop sf:SoilType sf:FarmManager
+                 sosa:Sensor sosa:Observation sosa:Actuation sf:IrrigationSystem ) .
+
+[] a owl:AllDisjointClasses ;
+   owl:members ( sf:DripIrrigation sf:SprinklerIrrigation sf:FloodIrrigation ) .
+
+[] a owl:AllDisjointClasses ;
+   owl:members ( sf:WaterIntensiveCrop sf:ModerateWaterCrop sf:DroughtTolerantCrop ) .
+
+# ===========================================================================
+# Defined classes (necessary AND sufficient conditions); the reasoner
+# places individuals and classes under these.
+# ===========================================================================
+
+sf:LowMoistureObservation a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:SoilMoistureObservation
+            [ a owl:Restriction ;
+              owl:onProperty sf:soilMoisturePercent ;
+              owl:someValuesFrom [ a rdfs:Datatype ;
+                                   owl:onDatatype xsd:decimal ;
+                                   owl:withRestrictions ( [ xsd:maxExclusive 30.0 ] ) ] ]
+        )
+    ] ;
+    rdfs:label "Low-moisture observation"@en ;
+    rdfs:comment "Volumetric soil moisture below 30 %: too dry for water-intensive crops."@en .
+
+sf:CriticallyDryObservation a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:SoilMoistureObservation
+            [ a owl:Restriction ;
+              owl:onProperty sf:soilMoisturePercent ;
+              owl:someValuesFrom [ a rdfs:Datatype ;
+                                   owl:onDatatype xsd:decimal ;
+                                   owl:withRestrictions ( [ xsd:maxExclusive 18.0 ] ) ] ]
+        )
+    ] ;
+    rdfs:label "Critically dry observation"@en ;
+    rdfs:comment "Volumetric soil moisture below 18 %: too dry for any crop in scope."@en .
+
+sf:FieldNeedingAttention a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:Field
+            [ a owl:Class ;
+              owl:unionOf (
+                  [ a owl:Restriction ;
+                    owl:onProperty sosa:isFeatureOfInterestOf ;
+                    owl:someValuesFrom sf:CriticallyDryObservation ]
+                  [ a owl:Class ;
+                    owl:intersectionOf (
+                        [ a owl:Restriction ;
+                          owl:onProperty sf:grows ;
+                          owl:someValuesFrom sf:WaterIntensiveCrop ]
+                        [ a owl:Restriction ;
+                          owl:onProperty sosa:isFeatureOfInterestOf ;
+                          owl:someValuesFrom sf:LowMoistureObservation ]
+                    ) ]
+              ) ]
+        )
+    ] ;
+    rdfs:label "Field needing attention"@en ;
+    rdfs:comment "A field with a critically dry reading, or a water-intensive crop with a low-moisture reading."@en .
+
+sf:HighWaterDemandField a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:Field
+            [ a owl:Restriction ;
+              owl:onProperty sf:grows ;
+              owl:someValuesFrom sf:WaterIntensiveCrop ]
+        )
+    ] ;
+    rdfs:label "High water-demand field"@en .
+
+sf:WaterEfficientField a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:Field
+            [ a owl:Restriction ;
+              owl:onProperty sf:hasIrrigationSystem ;
+              owl:someValuesFrom sf:DripIrrigation ]
+        )
+    ] ;
+    rdfs:label "Water-efficient field"@en .
+
+sf:MonitoredField a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:Field
+            [ a owl:Restriction ;
+              owl:onProperty sf:hasSensor ;
+              owl:someValuesFrom sf:SoilMoistureSensor ]
+        )
+    ] ;
+    rdfs:label "Monitored field"@en .
+
+sf:UnmonitoredField a owl:Class ;
+    owl:equivalentClass [
+        a owl:Class ;
+        owl:intersectionOf (
+            sf:Field
+            [ a owl:Class ;
+              owl:complementOf [ a owl:Restriction ;
+                                 owl:onProperty sf:hasSensor ;
+                                 owl:someValuesFrom sf:SoilMoistureSensor ] ]
+        )
+    ] ;
+    rdfs:label "Unmonitored field"@en ;
+    rdfs:comment "Used to show the open-world assumption: a field with no recorded sensor is NOT inferred to be unmonitored unless that is stated."@en .
+
+# ===========================================================================
+# Object properties
+# ===========================================================================
+
+sf:partOfFarm a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain sf:Field ;
+    rdfs:range sf:Farm ;
+    rdfs:label "part of farm"@en ;
+    rdfs:comment "Functional: in this scope a field belongs to exactly one farm."@en .
+
+sf:hasField a owl:ObjectProperty ;
+    owl:inverseOf sf:partOfFarm ;
+    rdfs:domain sf:Farm ;
+    rdfs:range sf:Field ;
+    rdfs:label "has field"@en .
+
+sf:managedBy a owl:ObjectProperty ;
+    rdfs:domain sf:Farm ;
+    rdfs:range sf:FarmManager ;
+    rdfs:label "managed by"@en .
+
+sf:grows a owl:ObjectProperty ;
+    rdfs:domain sf:Field ;
+    rdfs:range sf:Crop ;
+    rdfs:label "grows"@en .
+
+sf:hasSoilType a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain sf:Field ;
+    rdfs:range sf:SoilType ;
+    rdfs:label "has soil type"@en ;
+    rdfs:comment "Functional: one dominant soil type is recorded per field."@en .
+
+sf:hasIrrigationSystem a owl:ObjectProperty ;
+    rdfs:domain sf:Field ;
+    rdfs:range sf:IrrigationSystem ;
+    rdfs:label "has irrigation system"@en .
+
+sf:installedIn a owl:ObjectProperty , owl:FunctionalProperty ;
+    rdfs:domain sosa:Sensor ;
+    rdfs:range sf:Field ;
+    rdfs:label "installed in"@en ;
+    rdfs:comment "Functional: a sensor is installed in one field at a time (current deployment only)."@en .
+
+sf:hasSensor a owl:ObjectProperty ;
+    owl:inverseOf sf:installedIn ;
+    rdfs:label "has sensor"@en .
+
+sf:irrigates a owl:ObjectProperty ;
+    rdfs:domain sf:IrrigationEvent ;
+    rdfs:range sf:Field ;
+    rdfs:label "irrigates"@en .
+
+# Property chain: an observation made by a sensor installed in field F has
+# F as its feature of interest. Readings therefore only need to name the
+# sensor; the field is inferred.
+sosa:hasFeatureOfInterest
+    owl:propertyChainAxiom ( sosa:madeBySensor sf:installedIn ) .
+
+# ===========================================================================
+# Datatype properties
+# ===========================================================================
+
+sf:soilMoisturePercent a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:subPropertyOf sosa:hasSimpleResult ;
+    rdfs:domain sf:SoilMoistureObservation ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "soil moisture (%)"@en ;
+    rdfs:comment "Volumetric water content in percent. Functional: one value per observation."@en .
+
+sf:airTemperatureC a owl:DatatypeProperty ;
+    rdfs:subPropertyOf sosa:hasSimpleResult ;
+    rdfs:domain sf:WeatherObservation ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "air temperature (°C)"@en .
+
+sf:rainfallMm a owl:DatatypeProperty ;
+    rdfs:subPropertyOf sosa:hasSimpleResult ;
+    rdfs:domain sf:WeatherObservation ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "rainfall (mm)"@en .
+
+sf:areaHectares a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:domain sf:Field ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "area (ha)"@en .
+
+sf:waterVolumeLitres a owl:DatatypeProperty ;
+    rdfs:domain sf:IrrigationEvent ;
+    rdfs:range xsd:decimal ;
+    rdfs:label "water volume (L)"@en .
+
+sf:serialNumber a owl:DatatypeProperty , owl:FunctionalProperty ;
+    rdfs:range xsd:string ;
+    rdfs:label "serial number"@en ;
+    rdfs:comment "Functional: a device carries one serial number."@en .
+
+sf:startTime a owl:DatatypeProperty ;
+    rdfs:domain sf:IrrigationEvent ;
+    rdfs:range xsd:dateTime ;
+    rdfs:label "start time"@en .
+
+# ===========================================================================
+# Individuals (fictional)
+# ===========================================================================
+
+# --- Observable properties (SOSA) ------------------------------------------
+sf:SoilMoisture   a sosa:ObservableProperty ; rdfs:label "Soil moisture"@en .
+sf:AirTemperature a sosa:ObservableProperty ; rdfs:label "Air temperature"@en .
+sf:Rainfall       a sosa:ObservableProperty ; rdfs:label "Rainfall"@en .
+
+# --- Farm and manager ------------------------------------------------------
+sf:KavyaRao a sf:FarmManager ; rdfs:label "Kavya Rao (fictional)"@en .
+
+sf:NandiValleyFarm a sf:Farm ;
+    rdfs:label "Nandi Valley Farm"@en ;
+    sf:managedBy sf:KavyaRao .
+
+# --- Crops -----------------------------------------------------------------
+sf:PaddyRice  a sf:WaterIntensiveCrop  ; rdfs:label "Paddy rice"@en .
+sf:Sugarcane  a sf:WaterIntensiveCrop  ; rdfs:label "Sugarcane"@en .
+sf:Tomato     a sf:ModerateWaterCrop   ; rdfs:label "Tomato"@en .
+sf:Ragi       a sf:DroughtTolerantCrop ; rdfs:label "Ragi (finger millet)"@en .
+
+# --- Soil types ------------------------------------------------------------
+sf:BlackClay  a sf:SoilType ; rdfs:label "Black clay"@en .
+sf:RedLoam    a sf:SoilType ; rdfs:label "Red loam"@en .
+sf:SandyLoam  a sf:SoilType ; rdfs:label "Sandy loam"@en .
+
+[] a owl:AllDifferent ; owl:distinctMembers ( sf:BlackClay sf:RedLoam sf:SandyLoam ) .
+
+# --- Irrigation systems ----------------------------------------------------
+sf:FL1 a sf:FloodIrrigation     ; rdfs:label "Flood channel FL1"@en .
+sf:SP1 a sf:SprinklerIrrigation ; rdfs:label "Sprinkler line SP1"@en .
+sf:DR1 a sf:DripIrrigation      ; rdfs:label "Drip line DR1"@en .
+sf:DR2 a sf:DripIrrigation      ; rdfs:label "Drip line DR2"@en .
+
+# --- Fields ----------------------------------------------------------------
+sf:FieldA a sf:Field ;
+    rdfs:label "Field A"@en ;
+    sf:partOfFarm sf:NandiValleyFarm ;
+    sf:grows sf:PaddyRice ;
+    sf:hasSoilType sf:BlackClay ;
+    sf:hasIrrigationSystem sf:FL1 ;
+    sf:areaHectares 1.8 .
+
+sf:FieldB a sf:Field ;
+    rdfs:label "Field B"@en ;
+    sf:partOfFarm sf:NandiValleyFarm ;
+    sf:grows sf:Ragi ;
+    sf:hasSoilType sf:RedLoam ;
+    sf:hasIrrigationSystem sf:SP1 ;
+    sf:areaHectares 2.4 .
+
+sf:FieldC a sf:Field ;
+    rdfs:label "Field C"@en ;
+    sf:partOfFarm sf:NandiValleyFarm ;
+    sf:grows sf:Tomato ;
+    sf:hasSoilType sf:SandyLoam ;
+    sf:hasIrrigationSystem sf:DR1 ;
+    sf:areaHectares 0.9 .
+
+sf:FieldD a sf:Field ;
+    rdfs:label "Field D"@en ;
+    sf:partOfFarm sf:NandiValleyFarm ;
+    sf:grows sf:Sugarcane ;
+    sf:hasSoilType sf:RedLoam ;
+    sf:hasIrrigationSystem sf:DR2 ;
+    sf:areaHectares 3.1 .
+
+# Newly leased field: no sensor recorded yet (open-world test case).
+sf:FieldE a sf:Field ;
+    rdfs:label "Field E (newly leased)"@en ;
+    sf:partOfFarm sf:NandiValleyFarm ;
+    sf:grows sf:Ragi ;
+    sf:hasSoilType sf:SandyLoam ;
+    sf:areaHectares 1.2 .
+
+# --- Sensors ---------------------------------------------------------------
+sf:SM_A a sf:SoilMoistureSensor ; sf:serialNumber "SMS-1001" ; sf:installedIn sf:FieldA .
+sf:SM_B a sf:SoilMoistureSensor ; sf:serialNumber "SMS-1002" ; sf:installedIn sf:FieldB .
+sf:SM_C a sf:SoilMoistureSensor ; sf:serialNumber "SMS-1003" ; sf:installedIn sf:FieldC .
+sf:SM_D a sf:SoilMoistureSensor ; sf:serialNumber "SMS-1004" ; sf:installedIn sf:FieldD .
+
+sf:WS1 a sf:WeatherStation ;
+    sf:serialNumber "WX-77" ;
+    sosa:observes sf:AirTemperature , sf:Rainfall .
+
+# --- Observations ----------------------------------------------------------
+# Soil-moisture readings name only the sensor; the field (feature of
+# interest) is inferred through the property chain above.
+sf:ObsA1 a sf:SoilMoistureObservation ;
+    sosa:madeBySensor sf:SM_A ;
+    sf:soilMoisturePercent 28.5 ;
+    sosa:resultTime "2026-10-12T06:00:00+05:30"^^xsd:dateTime .
+
+sf:ObsB1 a sf:SoilMoistureObservation ;
+    sosa:madeBySensor sf:SM_B ;
+    sf:soilMoisturePercent 26.0 ;
+    sosa:resultTime "2026-10-12T06:00:00+05:30"^^xsd:dateTime .
+
+sf:ObsC1 a sf:SoilMoistureObservation ;
+    sosa:madeBySensor sf:SM_C ;
+    sf:soilMoisturePercent 14.2 ;
+    sosa:resultTime "2026-10-12T06:00:00+05:30"^^xsd:dateTime .
+
+sf:ObsD1 a sf:SoilMoistureObservation ;
+    sosa:madeBySensor sf:SM_D ;
+    sf:soilMoisturePercent 41.0 ;
+    sosa:resultTime "2026-10-12T06:00:00+05:30"^^xsd:dateTime .
+
+sf:ObsW1 a sf:WeatherObservation ;
+    sosa:madeBySensor sf:WS1 ;
+    sosa:observedProperty sf:AirTemperature ;
+    sosa:hasFeatureOfInterest sf:NandiValleyFarm ;
+    sf:airTemperatureC 31.4 ;
+    sosa:resultTime "2026-10-12T14:00:00+05:30"^^xsd:dateTime .
+
+sf:ObsW2 a sf:WeatherObservation ;
+    sosa:madeBySensor sf:WS1 ;
+    sosa:observedProperty sf:Rainfall ;
+    sosa:hasFeatureOfInterest sf:NandiValleyFarm ;
+    sf:rainfallMm 0.0 ;
+    sosa:resultTime "2026-10-12T14:00:00+05:30"^^xsd:dateTime .
+
+# --- Irrigation events -----------------------------------------------------
+sf:IE1 a sf:IrrigationEvent ;
+    rdfs:label "Irrigation of Field C after critical reading"@en ;
+    sf:irrigates sf:FieldC ;
+    sosa:madeByActuator sf:DR1 ;
+    sf:waterVolumeLitres 1800.0 ;
+    sf:startTime "2026-10-12T07:15:00+05:30"^^xsd:dateTime .

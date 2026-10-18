@@ -1,0 +1,6 @@
+# Test: an irrigation line typed as both drip and sprinkler.
+# The three irrigation-system subclasses are pairwise disjoint,
+# so HermiT must report the ontology as inconsistent.
+@prefix sf: <http://example.org/smartfarm#> .
+
+sf:DR1 a sf:SprinklerIrrigation .
