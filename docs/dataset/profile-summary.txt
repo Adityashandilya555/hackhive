@@ -1,0 +1,52 @@
+plans 17000 errors 0 []
+split of profiled ids Counter({'train': 13053, 'val': 1632, 'test': 1632, 'augmented': 683})
+invalid geoms (plans with >=1) 862 total 886
+m_per_unit p5 0.04 · p50 0.05 · p95 0.08 · p100 0.17
+extent max(w,h) m p5 9.94 · p50 13.96 · p95 21.65 · p100 42.67
+grid cells @10cm (w*h) p5 7217.03 · p50 13831.72 · p95 30542.20 · p100 122393.83
+wall m p5 0.18 · p50 0.23 · p95 0.30 · p100 0.66
+door width med m p5 0.86 · p50 1.00 · p95 1.21 · p100 2.67
+door width min m p1 0.41 · p5 0.63 · p50 0.91
+nodes per polygon (C2) {2: 12, 3: 1751, 4: 7342, 5: 5825, 6: 1609, 7: 368, 8: 82, 9: 10, 10: 1}
+nodes living-unioned {2: 12, 3: 1778, 4: 7407, 5: 5819, 6: 1565, 7: 342, 8: 70, 9: 6, 10: 1}
+plans where C2 changes node count 261
+living parts {0: 1, 1: 16738, 2: 256, 3: 4, 4: 1}
+smallest living part (multi) m2 p5 0.02 · p25 3.20 · p50 4.61 · p100 90.12 parts<2m2: 38 <5m2: 142
+min room m2 p0 0.01 · p1 0.83 · p5 2.76 · p50 9.52
+rooms < 2 m2 (plans) 509
+elig m2 p5 50.15 · p50 95.41 · p95 184.46 · p100 612.49
+max room m2 p5 22.39 · p50 40.97 · p95 79.45 · p100 464.61 plans room>100: 428
+lb5 {1: 9383, 2: 7003, 3: 503, 4: 81, 5: 25, 6: 3, 7: 2} lb20 {1: 9452, 2: 6934, 3: 503, 4: 81, 5: 25, 6: 3, 7: 2} plans lb5!=lb20 69
+binds5 Counter({'area': 16931, 'nodes': 69})
+nodegen fail rooms (0.5m) 423 plans 370 | 0.25m rooms 198
+doors {1: 2, 2: 32, 3: 741, 4: 2243, 5: 3788, 6: 3341, 7: 2603, 8: 1810, 9: 1039, 10: 586, 11: 333, 12: 204, 13: 125, 14: 83, 15: 47, 16: 11, 17: 9, 18: 2, 19: 1}
+windows p5 3.00 · p50 7.00 · p95 12.00 · p100 23.00
+front doors {0: 5, 1: 16995}
+e_via_door: plans>0 17000, total 108880
+e_via_opening: plans>0 13511, total 15663
+e_via_window: plans>0 0, total 0
+e_fallback: plans>0 983, total 1069
+e_direct: plans>0 16963, total 17182
+single-door eligible rooms per plan {0: 511, 1: 6075, 2: 8153, 3: 2094, 4: 160, 5: 7} total 29338
+zero-door eligible rooms per plan {0: 16685, 1: 310, 2: 5} total 320
+eligible components (direct, C34) {1: 16563, 2: 426, 3: 10, 4: 1}
+components if excluded rooms may link {1: 16585, 2: 405, 3: 9, 4: 1}
+plans where C34 splits more than via-excluded 23
+lb5_contig > lb5: 370
+max comp nodes {1: 1, 2: 21, 3: 1872, 4: 7377, 5: 5747, 6: 1568, 7: 336, 8: 69, 9: 8, 10: 1}
+benchmark-eligible (no room>100) 16572
+cap5 min hubs {-1: 428, 1: 9217, 2: 3813, 3: 2190, 4: 826, 5: 356, 6: 134, 7: 34, 8: 1, 9: 1}
+cap5 min_hubs == lb (contig-free lb) 12871 of 16572 | == lb5_contig 13120
+cap5 gap min_hubs - lb {0: 12871, 1: 2368, 2: 884, 3: 373, 4: 73, 5: 2, 6: 1}
+cap5 #zonings at min p50 1.00 · p90 4.00 · p99 7.00 · p100 16.00
+cap5 #zonings all p50 8.00 · p90 16.00 · p99 30.00 · p100 115.00 truncated 0
+cap5 #feasible zones p50 11.00 · p90 20.00 · p99 34.00 · p100 80.00
+cap5 infeasible (no zoning though rooms<=100) 0
+cap20 min hubs {-1: 428, 1: 9276, 2: 3761, 3: 2184, 4: 825, 5: 356, 6: 134, 7: 34, 8: 1, 9: 1}
+cap20 min_hubs == lb (contig-free lb) 12870 of 16572  
+cap20 gap min_hubs - lb {0: 12870, 1: 2368, 2: 885, 3: 373, 4: 73, 5: 2, 6: 1}
+cap20 #zonings at min p50 1.00 · p90 4.00 · p99 7.00 · p100 16.00
+cap20 #zonings all p50 8.00 · p90 16.00 · p99 30.00 · p100 116.00 truncated 0
+cap20 #feasible zones p50 11.00 · p90 20.00 · p99 34.00 · p100 92.00
+cap20 infeasible (no zoning though rooms<=100) 0
+ms_graph p50 5.00 · p95 12.00 · p100 63.00 ms_enum p50 0.00 · p95 1.00 · p99 5.00 · p100 16.00

@@ -8,8 +8,12 @@ __pycache__/
 dist/
 build/
 
-# Local data and outputs (never commit the full dataset)
-data/
+# Local data and outputs. Only ResPlan's one-file-per-plan export is committed
+# (data/resplan/plans/); plans.jsonl and the pickle stay local.
+data/*
+!data/resplan/
+data/resplan/*
+!data/resplan/plans/
 *.pkl
 out/
 
